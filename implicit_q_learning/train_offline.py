@@ -1,3 +1,4 @@
+import isaacgym
 import os
 from typing import Tuple
 
@@ -20,6 +21,7 @@ flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
 flags.DEFINE_string("save_dir", "./checkpoints/", "Tensorboard logging dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
 flags.DEFINE_integer("seed", 42, "Random seed.")
+flags.DEFINE_integer("device_id", 0, "device_id")
 flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 5000000, "Eval interval.")
@@ -66,20 +68,29 @@ def normalize(dataset):
 
 
 def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: bool,
-                         encoder_type: str) -> Tuple[gym.Env, D4RLDataset]:
+                         encoder_type: str):
+    #  -> Tuple[gym.Env, D4RLDataset]:
+    record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
         import furniture_bench
-
         env_id, furniture_name = env_name.split("/")
         env = gym.make(env_id,
-                       furniture=furniture_name,
-                       data_path=data_path,
-                       use_encoder=use_encoder,
-                       encoder_type=encoder_type)
+            furniture=furniture_name,
+            data_path=data_path,
+            use_encoder=use_encoder,
+            encoder_type=encoder_type,
+            compute_device_id=FLAGS.device_id,
+            graphics_device_id=FLAGS.device_id,
+            headless=True,
+            record=True,
+            record_dir=record_dir,
+            max_env_steps=600 if "Sim" in env_id else 3000
+        )
     else:
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
+    env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
     env.action_space.seed(seed)
@@ -97,6 +108,9 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
         dataset.rewards -= 1.0
         # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
         # but I found no difference between (x - 0.5) * 4 and x - 1.0
+    elif "arpv2" in data_path:
+        print("normalize dataset for arpv2 rewards.")
+        normalize(dataset)
     elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
         normalize(dataset)
 
@@ -115,7 +129,7 @@ def main(_):
     if FLAGS.wandb:
         wandb.init(project=FLAGS.wandb_project,
                    entity=FLAGS.wandb_entity,
-                   name=FLAGS.env_name + '-' + str(FLAGS.seed) + '-' + str(FLAGS.data_path),
+                   name=FLAGS.env_name + '-' + str(FLAGS.seed) + '-' + str(FLAGS.data_path) + '-' + str(FLAGS.run_name),
                    config=kwargs,
                    sync_tensorboard=True)
 
@@ -142,7 +156,11 @@ def main(_):
                     summary_writer.add_histogram(f"training/{k}", np.array(v), i)
             summary_writer.flush()
 
+        if i % FLAGS.ckpt_interval == 0:
+            agent.save(ckpt_dir, i)
+
         if i % FLAGS.eval_interval == 0:
+            env.env.episode_cnts = np.zeros(env.env.num_envs, dtype=np.int32)
             eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
             for k, v in eval_stats.items():
@@ -151,13 +169,10 @@ def main(_):
 
             eval_returns.append((i, eval_stats["return"]))
             np.savetxt(
-                os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"),
+                os.path.join(ckpt_dir, f"{FLAGS.seed}.txt"),
                 eval_returns,
                 fmt=["%d", "%.1f"],
             )
-
-        if i % FLAGS.ckpt_interval == 0:
-            agent.save(ckpt_dir, i)
 
     if not i % FLAGS.ckpt_interval == 0:
         # Save last step if it is not saved.

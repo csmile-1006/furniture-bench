@@ -79,7 +79,8 @@ args = parser.parse_args()
 
 
 def main():
-    files = list(Path(args.in_data_path).rglob("*.pkl"))
+    # files = list(Path(args.in_data_path).rglob("*.pkl"))
+    files = list(Path(args.in_data_path).glob("*/*.pkl"))
     if len(files) == 0:
         raise Exception("Data path is empty")
 

@@ -10,7 +10,8 @@ from furniture_bench.perception.image_utils import resize, resize_crop
 from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 
 
-class FurnitureSimImageFeature(FurnitureSimEnv):
+# class FurnitureSimImageFeature(FurnitureSimEnv):
+class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
     def __init__(self, **kwargs):
         super().__init__(
             concat_robot_state=True,

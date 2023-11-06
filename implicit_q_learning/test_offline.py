@@ -72,12 +72,14 @@ def make_env(
             high_random_idx=high_random_idx,
             randomness=randomness,
             encoder_type=encoder_type,
-            headless=headless
+            headless=headless,
+            max_env_steps=600
         )
     else:
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
+    env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
     env.action_space.seed(seed)

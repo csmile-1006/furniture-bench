@@ -1,13 +1,20 @@
 import pickle
 from pathlib import Path
 
-import furniture_bench
-
 import numpy as np
 import torch
 import gym
 from absl import app, flags
+from ml_collections import ConfigDict
 
+# List of robot state we are going to use during training and testing.
+ROBOT_STATES = [
+    "ee_pos",
+    "ee_quat",
+    "ee_pos_vel",
+    "ee_ori_vel",
+    "gripper_width",
+]
 
 FLAGS = flags.FLAGS
 
@@ -19,7 +26,13 @@ flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
 flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
 flags.DEFINE_integer("num_demos", None, "Number of demos to convert")
 flags.DEFINE_integer('batch_size', 512, 'Batch size for encoding images')
+flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
+flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
 
+
+import sys
+sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
+from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn
 
 def main(_):
     if FLAGS.num_threads > 0:
@@ -27,9 +40,13 @@ def main(_):
         torch.set_num_threads(FLAGS.num_threads)
 
     env_type = 'Image'
-    env_id = f"Furniture-{env_type}-Dummy-v0"
     furniture = FLAGS.furniture
     demo_dir = FLAGS.demo_dir
+
+    # load reward model.
+    ckpt_path = Path(FLAGS.ckpt_path).expanduser()
+    reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
+    reward_fn = load_reward_fn(rm_type=FLAGS.rm_type, reward_model=reward_model)
 
     dir_path = Path(demo_dir)
 
@@ -56,8 +73,9 @@ def main(_):
         encoder.to('cuda')
         device = torch.device("cuda")
 
-    files = list(dir_path.glob('2023*.pkl'))
+    files = list(dir_path.glob('2023-*.pkl'))
     len_files = len(files)
+    print(f"len_files: {len_files}")
 
     if len_files == 0:
         raise ValueError(f"No pkl files found in {dir_path}")
@@ -80,15 +98,33 @@ def main(_):
                 img1 = torch.from_numpy(np.stack(img1))
                 img2 = torch.from_numpy(np.stack(img2))
 
-                feature_dim = 2048 if FLAGS.use_r3m else 1024 
-                img1_feature = np.zeros((l, feature_dim), dtype=np.float32)
-                img2_feature = np.zeros((l, feature_dim), dtype=np.float32)
+                if FLAGS.use_r3m:
+                    img1_feature = np.zeros((l, 2048), dtype=np.float32)
+                    img2_feature = np.zeros((l, 2048), dtype=np.float32)
+                elif FLAGS.use_vip:
+                    img1_feature = np.zeros((l, 1024), dtype=np.float32)
+                    img2_feature = np.zeros((l, 1024), dtype=np.float32)
 
                 with torch.no_grad():
                     # Use batch size.
                     for i in range(0, l, FLAGS.batch_size):
                         img1_feature[i:i+FLAGS.batch_size] = encoder(img1[i:i+FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224)).cpu().detach().numpy()
                         img2_feature[i:i+FLAGS.batch_size] = encoder(img2[i:i+FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224)).cpu().detach().numpy()
+
+            images = {key: val for key, val in [("color_image2", img2), ("color_image1", img1)]}
+            for key, val in images.items():
+                val = np.asarray(val)
+                val = np.transpose(val, (0, 2, 3, 1))
+                images[key] = val
+
+            actions, skills = x["actions"], np.cumsum(x["skills"])
+            args = ConfigDict()
+            args.task_name = FLAGS.furniture
+            args.image_keys = "color_image2|color_image1"
+            args.window_size = 4
+            args.skip_frame = 16
+
+            rewards = reward_fn(images=images, actions=actions, skills=skills, args=args)
 
             for i in range(l - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip:
@@ -116,7 +152,8 @@ def main(_):
                 })
 
                 action_.append(x["actions"][i])
-                reward_.append(x["rewards"][i])
+                # reward_.append(x["rewards"][i])
+                reward_.append(rewards[i])
                 done_.append(1 if i == l - 2 else 0)
 
     dataset = {

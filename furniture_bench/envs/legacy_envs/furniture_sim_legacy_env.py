@@ -63,6 +63,8 @@ class FurnitureSimEnvLegacy(gym.Env):
         high_random_idx: int = 0,
         save_camera_input: bool = False,
         record: bool = False,
+        max_env_steps: int = 3000,
+        record_dir: str = "./",
         **kwargs,
     ):
         """
@@ -107,6 +109,12 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.grasp_margin = 0.02 - 0.001  # To prevent repeating open an close actions.
 
         self.save_camera_input = save_camera_input
+        self.img_size = sim_config["camera"][
+            "resized_img_size" if resize_img else "color_img_size"
+        ]
+        self.furniture.max_env_steps = max_env_steps
+        for furn in self.furnitures:
+            furn.max_env_steps = max_env_steps
 
         # Simulator setup.
         self.isaac_gym = gymapi.acquire_gym()
@@ -137,18 +145,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.osc_times = []
 
         self.record = record
-        if self.record:
-            record_dir = Path("sim_record") / datetime.now().strftime("%Y%m%d-%H%M%S")
-            record_dir.mkdir(parents=True, exist_ok=True)
-            img_size = sim_config["camera"]["color_img_size"]
-            if self.resize_img:
-                img_size = sim_config["camera"]["resized_img_size"]
-            self.video_writer = cv2.VideoWriter(
-                str(record_dir / "video.mp4"),
-                cv2.VideoWriter_fourcc(*"MP4V"),
-                30,
-                (img_size[0] * 2, img_size[1]),  # Wrist and front cameras.
-            )
+        self.record_dir = record_dir
 
     def _create_ground_plane(self):
         # add ground plane
@@ -198,6 +195,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         env_upper = gymapi.Vec3(spacing, spacing, spacing)
         self.envs = []
         self.env_steps = torch.zeros(self.num_envs, dtype=torch.int, device=self.device)
+        self.episode_cnts = np.zeros(self.num_envs, dtype=np.int32)
 
         self.handles = {}
         self.ee_idxs = []
@@ -952,10 +950,12 @@ class FurnitureSimEnvLegacy(gym.Env):
                 if not self.np_step_out:
                     img = img.cpu().numpy().copy()
                 if self.channel_first:
-                    img = img.transpose(0, 2, 3, 1)
+                    if not self.np_step_out:
+                        img = img.transpose(0, 2, 3, 1)
+                    else:
+                        img = img.transpose(1, 2, 0)
                 record_images[i] = img.squeeze()
-
-            stacked_img = np.hstack(record_images)
+            stacked_img = np.vstack(record_images)
             self.video_writer.write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
 
         return dict(
@@ -993,7 +993,20 @@ class FurnitureSimEnvLegacy(gym.Env):
         self._reset_franka(env_idx)
         self._reset_parts(env_idx)
         self.env_steps[env_idx] = 0
+        self.episode_cnts[env_idx] += 1
         self.move_neutral = False
+        if self.record:
+            if hasattr(self, "video_writer"):
+                self.video_writer.release()
+            record_dir = Path(self.record_dir) / f"ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            record_dir.mkdir(parents=True, exist_ok=True)
+            self.video_writer = cv2.VideoWriter(
+                str(record_dir / "video.mp4"),
+                cv2.VideoWriter_fourcc('m', 'p', '4', 'v'),
+                30,
+                # (self.img_size[1] * 2, self.img_size[0]),  # Wrist and front cameras.
+                (self.img_size[0], self.img_size[1] * 2),  # Wrist and front cameras.
+            )
 
     def _reset_franka(self, env_idx):
         # self.robot_model.inverse_kinematics(torch.tensor([0, 0, 0]), torch.tensor([0, 0, 0, 1]))
@@ -1044,7 +1057,7 @@ class FurnitureSimEnvLegacy(gym.Env):
             )
             if self.randomness == Randomness.LOW and random_noise_fixed:
                 part_pose.p = part_pose.p + gymapi.Vec3(
-                    random.uniform(-0.015, 0.015), random.uniform(-0.015, 0.015), 0
+                    np.random.uniform(-0.015, 0.015), np.random.uniform(-0.015, 0.015), 0
                 )  # 1.5 cm
 
             reset_ori = self.april_coord_to_sim_coord(ori)

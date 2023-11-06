@@ -3,6 +3,7 @@ from typing import Dict
 import flax.linen as nn
 import gym
 import numpy as np
+from tqdm import tqdm, trange
 
 
 def evaluate(
@@ -10,14 +11,16 @@ def evaluate(
 ) -> Dict[str, float]:
     stats = {"return": [], "length": []}
 
-    for _ in range(num_episodes):
+    for ep in trange(num_episodes, desc='evaluation'):
+        pbar = tqdm(total=env.furniture.max_env_steps, leave=False, desc=f"episode {ep + 1}")
         observation, done = env.reset(), False
         while not done:
             action = agent.sample_actions(observation, temperature=temperature)
             observation, _, done, info = env.step(action)
+            pbar.update(1)
 
-        # for k in stats.keys():
-        #     stats[k].append(info["episode"][k])
+        for k in stats.keys():
+            stats[k].append(info["episode"][k])
 
     for k, v in stats.items():
         stats[k] = np.mean(v)
