@@ -36,6 +36,7 @@ class DataCollector:
         pkl_only: bool = False,
         save_failure: bool = False,
         num_demos: int = 100,
+        env_option: str = "legacy"
     ):
         """
         Args:
@@ -54,8 +55,13 @@ class DataCollector:
             num_demos (int): The maximum number of demonstrations to collect in this run. Internal loop will be terminated when this number is reached.
         """
         if is_sim:
+            if env_option == "legacy":
+                env_id = "FurnitureSimLegacy-v0"
+            elif env_option == "sim":
+                env_id = "FurnitureSimFull-v0"
+
             self.env = gym.make(
-                "FurnitureSimFull-v0",
+                env_id,
                 furniture=furniture,
                 max_env_steps=600 if scripted else 3000,
                 headless=headless,
