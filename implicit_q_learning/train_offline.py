@@ -102,7 +102,7 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
-        dataset = FurnitureDataset(data_path, use_encoder=False)
+        dataset = FurnitureDataset(data_path, use_encoder=False, use_arp=FLAGS.use_arp)
     else:
         dataset = D4RLDataset(env)
 
