@@ -205,11 +205,15 @@ class D4RLDataset(Dataset):
 
 class FurnitureDataset(Dataset):
 
-    def __init__(self,
-                 data_path: str,
-                 clip_to_eps: bool = True,
-                 eps: float = 1e-5,
-                 use_encoder: bool = False):
+    def __init__(
+        self,
+        data_path: str,
+        clip_to_eps: bool = True,
+        eps: float = 1e-5,
+        use_encoder: bool = False,
+        use_arp: bool = False,
+        lambda_mr: float = 1e-2
+    ):
         with open(data_path, "rb") as f:
             dataset = pickle.load(f)
 
@@ -240,10 +244,14 @@ class FurnitureDataset(Dataset):
                 dones_float[i] = 0
 
         dones_float[-1] = 1
+        if use_arp:
+            rewards = lambda_mr * dataset["multimodal_rewards"] + dataset["rewards"]
+        else:
+            rewards = dataset["rewards"]
 
         super().__init__(dataset["observations"],
                          actions=dataset["actions"],
-                         rewards=dataset["rewards"],
+                         rewards=rewards,
                          masks=1.0 - dataset["terminals"],
                          dones_float=dones_float,
                          next_observations=dataset["next_observations"],

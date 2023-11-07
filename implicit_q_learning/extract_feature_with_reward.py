@@ -54,6 +54,7 @@ def main(_):
     next_obs_ = []
     action_ = []
     reward_ = []
+    multimodal_reward_ = []
     done_ = []
 
     if FLAGS.use_r3m:
@@ -152,8 +153,8 @@ def main(_):
                 })
 
                 action_.append(x["actions"][i])
-                # reward_.append(x["rewards"][i])
-                reward_.append(rewards[i])
+                reward_.append(x["rewards"][i])
+                multimodal_reward_.append(rewards[i])
                 done_.append(1 if i == l - 2 else 0)
 
     dataset = {
@@ -161,6 +162,7 @@ def main(_):
         "actions": np.array(action_),
         "next_observations": next_obs_,
         "rewards": np.array(reward_),
+        "multimodal_rewards": np.asarray(multimodal_reward_),
         "terminals": np.array(done_),
     }
 
