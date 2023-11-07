@@ -37,6 +37,7 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
+flags.DEFINE_boolean("use_arp", False, "Use ARP-V2 for data.")
 flags.DEFINE_string("encoder_type", '', 'vip or r3m')
 flags.DEFINE_boolean('wandb', False, 'Use wandb')
 flags.DEFINE_string('wandb_project', '', 'wandb project')
@@ -109,7 +110,7 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
         dataset.rewards -= 1.0
         # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
         # but I found no difference between (x - 0.5) * 4 and x - 1.0
-    elif "arpv2" in data_path:
+    elif FLAGS.use_arp:
         print("normalize dataset for arpv2 rewards.")
         normalize(dataset)
     elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
