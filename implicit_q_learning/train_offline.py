@@ -110,9 +110,9 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
         dataset.rewards -= 1.0
         # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
         # but I found no difference between (x - 0.5) * 4 and x - 1.0
-    elif FLAGS.use_arp:
-        print("normalize dataset for arpv2 rewards.")
-        normalize(dataset)
+    # elif FLAGS.use_arp:
+    #     print("normalize dataset for arpv2 rewards.")
+    #     normalize(dataset)
     elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
         normalize(dataset)
 
