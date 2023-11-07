@@ -21,12 +21,14 @@ class FrameStackWrapper(gym.ActionWrapper):
         return obs
 
     def reset(self):
-        obs = self.env.reset()
         self._i = 0
         for frame in range(self._skip_frame):
-            for _ in range(self._num_frames):
-                for key in obs:
-                    self._frames[frame][key].append(obs[key])
+            for key in self.observation_space.keys():
+                obs_shape = self.observation_space[key].shape
+                self._frames[frame][key].extend(np.zeros(obs_shape))
+        obs = self.env.reset()
+        for key in obs:
+            self._frames[0][key].append(obs[key])
         return self._transform_observation(obs)
 
     def step(self, action):

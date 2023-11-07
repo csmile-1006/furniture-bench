@@ -209,10 +209,10 @@ class Block(nn.Module):
 
 class Transformer(nn.Module):
     emb_dim: int = 1024
-    depth: int = 1
-    att_drop: float = 0
-    drop: float = 0
-    num_heads: int = 4
+    depth: int = 2
+    att_drop: float = 0.0
+    drop: float = 0.0
+    num_heads: int = 8
     mlp_ratio: int = 4
     alibi_bias: bool = False
 

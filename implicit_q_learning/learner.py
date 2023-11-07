@@ -10,7 +10,7 @@ import optax
 import policy
 import value_net
 from actor import update as awr_update_actor
-from common import Batch, InfoDict, Model, PRNGKey
+from common import Batch, InfoDict, Model, PRNGKey, Transformer
 from critic import update_q, update_v
 
 
@@ -66,7 +66,7 @@ class Learner(object):
         value_lr: float = 3e-4,
         critic_lr: float = 3e-4,
         hidden_dims: Sequence[int] = (256, 256),
-        emb_dim: int = 256,
+        emb_dim: int = 64,
         discount: float = 0.99,
         tau: float = 0.005,
         expectile: float = 0.8,
@@ -94,6 +94,8 @@ class Learner(object):
         if len(observations['robot_state'].shape) == 2:
             observations['robot_state'] = observations['robot_state'][np.newaxis]
 
+        encoder = Transformer(emb_dim=emb_dim) if use_encoder else None
+
         action_dim = actions.shape[-1]
         actor_def = policy.NormalTanhPolicy(
             hidden_dims,
@@ -104,7 +106,8 @@ class Learner(object):
             dropout_rate=dropout_rate,
             state_dependent_std=False,
             tanh_squash_distribution=False,
-            use_encoder=use_encoder
+            use_encoder=use_encoder,
+            encoder=encoder
         )
 
         if opt_decay_schedule == "cosine":
@@ -117,14 +120,14 @@ class Learner(object):
 
         actor = Model.create(actor_def, inputs=[actor_key, observations], tx=optimiser)
 
-        critic_def = value_net.DoubleCritic(hidden_dims, emb_dim, use_encoder=use_encoder)
+        critic_def = value_net.DoubleCritic(hidden_dims, emb_dim, use_encoder=use_encoder, encoder=encoder)
         critic = Model.create(
             critic_def,
             inputs=[critic_key, observations, actions],
             tx=optax.adam(learning_rate=critic_lr),
         )
 
-        value_def = value_net.ValueCritic(hidden_dims, emb_dim, use_encoder=use_encoder)
+        value_def = value_net.ValueCritic(hidden_dims, emb_dim, use_encoder=use_encoder, encoder=encoder)
         value = Model.create(
             value_def,
             inputs=[value_key, observations],
