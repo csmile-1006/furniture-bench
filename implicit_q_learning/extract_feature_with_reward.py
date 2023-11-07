@@ -7,14 +7,6 @@ import gym
 from absl import app, flags
 from ml_collections import ConfigDict
 
-# List of robot state we are going to use during training and testing.
-ROBOT_STATES = [
-    "ee_pos",
-    "ee_quat",
-    "ee_pos_vel",
-    "ee_ori_vel",
-    "gripper_width",
-]
 
 FLAGS = flags.FLAGS
 
@@ -87,9 +79,9 @@ def main(_):
         with open(file_path, "rb") as f:
             x = pickle.load(f)
 
-            # if len(x['observations']) == len(x['actions']):
-            #     # Dummy
-            #     x['observations'].append(x['observations'][-1])
+            if len(x['observations']) == len(x['actions']):
+                # Dummy
+                x['observations'].append(x['observations'][-1])
             l = len(x["observations"])
 
             if FLAGS.use_r3m or FLAGS.use_vip:

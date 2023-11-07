@@ -24,8 +24,8 @@ class FrameStackWrapper(gym.ActionWrapper):
         obs = self.env.reset()
         self._i = 0
         for frame in range(self._skip_frame):
-            for key in obs:
-                for _ in range(self._num_frames):
+            for _ in range(self._num_frames):
+                for key in obs:
                     self._frames[frame][key].append(obs[key])
         return self._transform_observation(obs)
 
@@ -68,8 +68,8 @@ if __name__ == "__main__":
         record_dir="",
         max_env_steps=600 if "Sim" in env_id else 3000
     )
-    num_frames = 4
-    env = FrameStackWrapper(env, num_frames)
+    num_frames, skip_frame = 4, 16
+    env = FrameStackWrapper(env, num_frames, skip_frame)
     init = env.reset()
     timestep = 0
     for _ in range(630):
