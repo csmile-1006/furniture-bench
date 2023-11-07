@@ -57,6 +57,11 @@ def main():
         action="store_true",
         help="Manually label the reward",
     )
+    parser.add_argument(
+        "--env_option",
+        default="legacy",
+        choices=["legacy", "sim"]
+    )
     parser.add_argument("--randomness", default="low", choices=["low", "med", "high"])
     parser.add_argument("--gpu-id", default=0, type=int)
     parser.add_argument("--num-demos", default=100, type=int)
@@ -86,6 +91,7 @@ def main():
         pkl_only=args.pkl_only,
         save_failure=args.save_failure,
         num_demos=args.num_demos,
+        env_option=args.env_option
     )
     data_collector.collect()
 
