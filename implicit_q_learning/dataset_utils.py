@@ -212,6 +212,7 @@ class FurnitureDataset(Dataset):
         eps: float = 1e-5,
         use_encoder: bool = False,
         use_arp: bool = False,
+        use_step: bool = False,
         lambda_mr: float = 1e-2
     ):
         with open(data_path, "rb") as f:
@@ -246,6 +247,8 @@ class FurnitureDataset(Dataset):
         dones_float[-1] = 1
         if use_arp:
             rewards = lambda_mr * dataset["multimodal_rewards"] + dataset["rewards"]
+        elif use_step:
+            rewards = dataset["step_rewards"]
         else:
             rewards = dataset["rewards"]
 
