@@ -46,6 +46,7 @@ def main(_):
     next_obs_ = []
     action_ = []
     reward_ = []
+    step_reward_ = []
     multimodal_reward_ = []
     done_ = []
 
@@ -118,6 +119,7 @@ def main(_):
             args.return_images = True
 
             rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(images=images, actions=actions, skills=skills, args=args)
+            cumsum_skills = np.cumsum(x["skills"])
 
             for i in range(l - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip:
@@ -143,6 +145,10 @@ def main(_):
 
                 action_.append(x["actions"][i])
                 reward_.append(x["rewards"][i])
+                if i == l - 2:
+                    step_reward_.append(cumsum_skills[i] + 1)
+                else:
+                    step_reward_.append(cumsum_skills[i])
                 multimodal_reward_.append(rewards[i])
                 done_.append(1 if i == l - 2 else 0)
 
@@ -152,6 +158,7 @@ def main(_):
         "next_observations": next_obs_,
         "rewards": np.array(reward_),
         "multimodal_rewards": np.array(multimodal_reward_),
+        "step_rewards": np.array(step_reward_),
         "terminals": np.array(done_),
     }
 

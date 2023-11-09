@@ -21,7 +21,6 @@ flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
 flags.DEFINE_string("save_dir", "./checkpoints/", "Tensorboard logging dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
 flags.DEFINE_integer("seed", 42, "Random seed.")
-flags.DEFINE_integer("device_id", 0, "device_id")
 flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 5000000, "Eval interval.")
@@ -42,6 +41,7 @@ flags.DEFINE_string("encoder_type", '', 'vip or r3m')
 flags.DEFINE_boolean('wandb', False, 'Use wandb')
 flags.DEFINE_string('wandb_project', '', 'wandb project')
 flags.DEFINE_string('wandb_entity', '', 'wandb entity')
+flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 
 
 def normalize(dataset):
@@ -80,8 +80,6 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
             data_path=data_path,
             use_encoder=use_encoder,
             encoder_type=encoder_type,
-            compute_device_id=FLAGS.device_id,
-            graphics_device_id=FLAGS.device_id,
             headless=True,
             record=True,
             record_dir=record_dir,
@@ -120,6 +118,9 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
 
 
 def main(_):
+    import jax
+    jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
+
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     tb_dir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
