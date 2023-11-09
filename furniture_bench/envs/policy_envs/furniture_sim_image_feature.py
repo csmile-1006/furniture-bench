@@ -21,20 +21,21 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
             **kwargs,
         )
 
+        device_id = kwargs["compute_device_id"]
+        self._device = torch.device(f"cuda:{device_id}")
         assert self.num_envs == 1, "FurnitureSimImageFeature supports only 1 env."
 
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
-
-            self.layer = load_r3m("resnet50").to("cuda:0")
+            self.layer = load_r3m("resnet50").module
             self.embedding_dim = 2048
         elif kwargs["encoder_type"] == "vip":
             from vip import load_vip
-
-            self.layer = load_vip().to("cuda:0")
+            self.layer = load_vip().module
             self.embedding_dim = 1024
         self.layer.requires_grad_(False)
         self.layer.eval()
+        self.layer = self.layer.to(self._device)
 
     @property
     def observation_space(self):
@@ -65,11 +66,9 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
         image2 = np.moveaxis(crop_image2, -1, 0)
 
         with torch.no_grad():
-            image1 = torch.tensor(image1).cuda()
-            image2 = torch.tensor(image2).cuda()
-            print(f"self.layer: {self.layer.module.device}")
-            print(f"image1: {image1.device}")
-            print(f"image2: {image2.device}")
+            image1 = torch.tensor(image1).to(self._device)
+            image2 = torch.tensor(image2).to(self._device)
+
             image1 = self.layer(image1.unsqueeze(0)).squeeze()
             image2 = self.layer(image2.unsqueeze(0)).squeeze()
             image1 = image1.detach().cpu().numpy()
