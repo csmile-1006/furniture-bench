@@ -26,12 +26,12 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
 
-            self.layer = load_r3m("resnet50")
+            self.layer = load_r3m("resnet50").to("cuda:0")
             self.embedding_dim = 2048
         elif kwargs["encoder_type"] == "vip":
             from vip import load_vip
 
-            self.layer = load_vip()
+            self.layer = load_vip().to("cuda:0")
             self.embedding_dim = 1024
         self.layer.requires_grad_(False)
         self.layer.eval()
@@ -67,6 +67,9 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
         with torch.no_grad():
             image1 = torch.tensor(image1).cuda()
             image2 = torch.tensor(image2).cuda()
+            print(f"self.layer: {self.layer.module.device}")
+            print(f"image1: {image1.device}")
+            print(f"image2: {image2.device}")
             image1 = self.layer(image1.unsqueeze(0)).squeeze()
             image2 = self.layer(image2.unsqueeze(0)).squeeze()
             image1 = image1.detach().cpu().numpy()
