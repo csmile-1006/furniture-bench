@@ -41,8 +41,8 @@ class NormalTanhPolicy(nn.Module):
         for k, v in observations.items():
             if self.use_encoder and (k == 'image1' or k == 'image2'):
                 features.append(Encoder()(v))
-            # else:
-            #     features.append(v)
+            elif not "robot" in k:
+                features.append(v)
         # obs = jnp.concatenate([image_feature1, image_feature2, observations['robot_state']], axis=-1)
         obs = jnp.concatenate(features, axis=-1)
         outputs = MLP(self.hidden_dims, activate_final=True,

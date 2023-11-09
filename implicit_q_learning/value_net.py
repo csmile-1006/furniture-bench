@@ -16,8 +16,8 @@ class ValueCritic(nn.Module):
         for k, v in observations.items():
             if self.use_encoder and (k == 'image1' or k == 'image2'):
                 features.append(Encoder()(v))
-            # else:
-            #     features.append(v)
+            elif not "robot" in k:
+                features.append(v)
         obs = jnp.concatenate(features, axis=-1)
 
         critic = MLP((*self.hidden_dims, 1))(obs)
@@ -36,8 +36,8 @@ class Critic(nn.Module):
         for k, v in observations.items():
             if self.use_encoder and (k == 'image1' or k == 'image2'):
                 features.append(Encoder()(v))
-            # else:
-            #     features.append(v)
+            elif not "robot" in k:
+                features.append(v)
         if len(actions.shape) == 3:
             # Reduce the redundant dimension
             actions = jnp.squeeze(actions, 1)
