@@ -147,8 +147,7 @@ def main(_):
                     env.observation_space.sample(),
                     env.action_space.sample()[np.newaxis],
                     max_steps=FLAGS.max_steps,
-                    **kwargs,
-                    use_encoder=FLAGS.use_encoder)
+                    **kwargs,)
 
     eval_returns = []
     for i in tqdm.tqdm(range(1, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm):
