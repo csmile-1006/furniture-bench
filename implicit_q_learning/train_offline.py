@@ -84,6 +84,8 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
             headless=True,
             record=True,
             record_dir=record_dir,
+            compute_device_id=FLAGS.device_id,
+            graphics_device_id=FLAGS.device_id,
             max_env_steps=600 if "Sim" in env_id else 3000
         )
     else:
