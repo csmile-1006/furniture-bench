@@ -129,16 +129,17 @@ def main(_):
                                         FLAGS.use_encoder, FLAGS.encoder_type, FLAGS.use_arp, FLAGS.use_step)
 
     kwargs = dict(FLAGS.config)
-    kwargs["use_arp"] = FLAGS.use_arp
-    kwargs["use_step"] = FLAGS.use_step
-    kwargs["encoder_type"] = FLAGS.encoder_type
-    kwargs["use_encoder"] = FLAGS.use_encoder
+    log_kwargs = kwargs.copy()
+    log_kwargs["use_arp"] = FLAGS.use_arp
+    log_kwargs["use_step"] = FLAGS.use_step
+    log_kwargs["encoder_type"] = FLAGS.encoder_type
+    log_kwargs["use_encoder"] = FLAGS.use_encoder
 
     if FLAGS.wandb:
         wandb.init(project=FLAGS.wandb_project,
                    entity=FLAGS.wandb_entity,
                    name=FLAGS.env_name + '-' + str(FLAGS.seed) + '-' + str(FLAGS.data_path) + '-' + str(FLAGS.run_name),
-                   config=kwargs,
+                   config=log_kwargs,
                    sync_tensorboard=True)
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
@@ -147,7 +148,8 @@ def main(_):
                     env.observation_space.sample(),
                     env.action_space.sample()[np.newaxis],
                     max_steps=FLAGS.max_steps,
-                    **kwargs,)
+                    **kwargs,
+                    use_encoder=FLAGS.use_encoder)
 
     eval_returns = []
     for i in tqdm.tqdm(range(1, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm):
