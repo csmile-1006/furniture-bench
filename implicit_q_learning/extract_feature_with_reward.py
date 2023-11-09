@@ -125,6 +125,7 @@ def main(_):
             args.image_keys = "color_image2|color_image1"
             args.window_size = 4
             args.skip_frame = 16
+            args.return_images = False
 
             rewards = reward_fn(images=images, actions=actions, skills=skills, args=args)
             cumsum_skills = np.cumsum(x["skills"])
