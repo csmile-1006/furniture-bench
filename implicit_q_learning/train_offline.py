@@ -128,6 +128,11 @@ def main(_):
                                         FLAGS.use_encoder, FLAGS.encoder_type)
 
     kwargs = dict(FLAGS.config)
+    kwargs["use_arp"] = FLAGS.use_arp
+    kwargs["use_step"] = FLAGS.use_step
+    kwargs["encoder_type"] = FLAGS.encoder_type
+    kwargs["use_encoder"] = FLAGS.use_encoder
+
     if FLAGS.wandb:
         wandb.init(project=FLAGS.wandb_project,
                    entity=FLAGS.wandb_entity,
