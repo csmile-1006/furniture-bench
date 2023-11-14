@@ -16,7 +16,7 @@ class ValueCritic(nn.Module):
         for k, v in observations.items():
             if self.use_encoder and (k == 'image1' or k == 'image2'):
                 features.append(Encoder()(v))
-            elif not "robot" in k:
+            else:
                 features.append(v)
         obs = jnp.concatenate(features, axis=-1)
 
@@ -36,7 +36,7 @@ class Critic(nn.Module):
         for k, v in observations.items():
             if self.use_encoder and (k == 'image1' or k == 'image2'):
                 features.append(Encoder()(v))
-            elif not "robot" in k:
+            else:
                 features.append(v)
         if len(actions.shape) == 3:
             # Reduce the redundant dimension

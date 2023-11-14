@@ -41,7 +41,7 @@ class NormalTanhPolicy(nn.Module):
         for k, v in observations.items():
             if self.use_encoder and (k == 'image1' or k == 'image2'):
                 features.append(Encoder()(v))
-            elif not "robot" in k:
+            else:
                 features.append(v)
         # obs = jnp.concatenate([image_feature1, image_feature2, observations['robot_state']], axis=-1)
         obs = jnp.concatenate(features, axis=-1)
