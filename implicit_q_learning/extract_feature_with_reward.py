@@ -7,14 +7,6 @@ import gym
 from absl import app, flags
 from ml_collections import ConfigDict
 
-# List of robot state we are going to use during training and testing.
-ROBOT_STATES = [
-    "ee_pos",
-    "ee_quat",
-    "ee_pos_vel",
-    "ee_ori_vel",
-    "gripper_width",
-]
 
 FLAGS = flags.FLAGS
 
@@ -77,7 +69,6 @@ def main(_):
 
     files = list(dir_path.glob('2023-*.pkl'))
     len_files = len(files)
-    print(f"len_files: {len_files}")
 
     if len_files == 0:
         raise ValueError(f"No pkl files found in {dir_path}")
@@ -125,34 +116,31 @@ def main(_):
             args.image_keys = "color_image2|color_image1"
             args.window_size = 4
             args.skip_frame = 16
-            args.return_images = False
+            args.return_images = True
 
-            rewards = reward_fn(images=images, actions=actions, skills=skills, args=args)
+            rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(images=images, actions=actions, skills=skills, args=args)
             cumsum_skills = np.cumsum(x["skills"])
 
             for i in range(l - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip:
-                    image1 = img1_feature[i]
-                    next_image1 = img1_feature[i + 1]
-                    image2 = img2_feature[i]
-                    next_image2 = img2_feature[i + 1]
+                    image1 = img1_feature[stacked_timesteps[i]]
+                    next_image1 = img1_feature[stacked_timesteps[min(i + 1, l - 2)]]
+                    image2 = img2_feature[stacked_timesteps[i]]
+                    next_image2 = img2_feature[stacked_timesteps[min(i + 1, l - 2)]]
                 else:
-                    image1 = np.moveaxis(x['observations'][i]['color_image1'], 0, -1)
-                    next_image1 = np.moveaxis(x['observations'][i + 1]['color_image1'], 0, -1)
-                    image2 = np.moveaxis(x['observations'][i]['color_image2'], 0, -1)
-                    next_image2 = np.moveaxis(x['observations'][i + 1]['color_image2'], 0, -1)
+                    raise ValueError("You have to choose either use_r3m or use_vip.")
 
                 obs_.append({
                     # 'image_feature': feature1,
                     'image1': image1,
                     'image2': image2,
-                    'robot_state': x["observations"][i]['robot_state']
+                    'robot_state': np.stack([x["observations"][idx]['robot_state'] for idx in stacked_timesteps[i]])
                 })
                 next_obs_.append({
                     # 'image_feature': next_feature1,
                     'image1': next_image1,
                     'image2': next_image2,
-                    'robot_state': x["observations"][i + 1]['robot_state']
+                    'robot_state': np.stack([x["observations"][idx]['robot_state'] for idx in stacked_timesteps[min(i + 1, l - 2)]])
                 })
 
                 action_.append(x["actions"][i])

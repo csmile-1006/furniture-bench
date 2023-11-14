@@ -10,7 +10,7 @@ from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
-from common import MLP, Encoder, ResNet18
+from common import MLP, ResNet18, Transformer, concat_multiple_image_emb, get_1d_sincos_pos_embed
 from common import Params
 from common import PRNGKey
 from common import default_init
@@ -21,6 +21,7 @@ LOG_STD_MAX = 2.0
 
 class NormalTanhPolicy(nn.Module):
     hidden_dims: Sequence[int]
+    emb_dim: int
     action_dim: int
     state_dependent_std: bool = True
     dropout_rate: Optional[float] = None
@@ -29,6 +30,7 @@ class NormalTanhPolicy(nn.Module):
     log_std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
     use_encoder: bool = False
+    encoder: nn.Module = None
 
     @nn.compact
     def __call__(
@@ -37,14 +39,31 @@ class NormalTanhPolicy(nn.Module):
         temperature: float = 1.0,
         training: bool = False,
     ) -> tfd.Distribution:
-        features = []
+        image_features = {}
         for k, v in observations.items():
+            if v.ndim == 2:
+                v = v[jnp.newaxis]
             if self.use_encoder and (k == 'image1' or k == 'image2'):
-                features.append(Encoder()(v))
+                image_features[k] = v
             else:
-                features.append(v)
+                state_embed = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(v)
+        if self.use_encoder:
+            image_features = jnp.array(list(image_features.values()))
+            num_image, batch_size, num_timestep, _ = image_features.shape
+            image_features = concat_multiple_image_emb(image_features)
+            # Image features: (batch_size, num_timestep, num_images * embd_dim)
+            image_features = nn.tanh(MLP([self.emb_dim, self.emb_dim, self.emb_dim])(image_features))
+            image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
+            token_embed = jnp.concatenate(
+                [image_embed, state_embed], axis=-1
+            )
+            token_embed = jnp.reshape(
+                token_embed,
+                [batch_size, 2 * num_timestep, self.emb_dim],
+            )
+            obs = self.encoder(token_embed, deterministic=training)[:, -1]
         # obs = jnp.concatenate([image_feature1, image_feature2, observations['robot_state']], axis=-1)
-        obs = jnp.concatenate(features, axis=-1)
+        # obs = jnp.concatenate(features, axis=-1)
         outputs = MLP(self.hidden_dims, activate_final=True,
                       dropout_rate=self.dropout_rate)(obs, training=training)
 

@@ -7,7 +7,8 @@ long_description = (Path(__file__).parent / "README.md").read_text()
 core_requirements = [
     "opencv-python",
     "pynput",
-    "gym==0.21.0",
+    # "gym==0.21.0",
+    "gym",
     "joblib",
     "numba",
     "pyrealsense2",

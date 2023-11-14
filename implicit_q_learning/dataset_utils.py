@@ -252,6 +252,10 @@ class FurnitureDataset(Dataset):
         else:
             rewards = dataset["rewards"]
 
+        if use_arp:
+            rewards = lambda_mr * dataset["multimodal_rewards"] + dataset["rewards"]
+        else:
+            rewards = dataset["rewards"] 
         super().__init__(dataset["observations"],
                          actions=dataset["actions"],
                          rewards=rewards,
@@ -260,6 +264,52 @@ class FurnitureDataset(Dataset):
                          next_observations=dataset["next_observations"],
                          size=len(dataset["observations"]),
                          use_encoder=use_encoder)
+
+
+class FurnitureSequenceDataset(FurnitureDataset):
+    def __init__(
+        self,
+        data_path: str,
+        clip_to_eps: bool = True,
+        eps: float = 1e-5,
+    ):
+        super().__init__(
+            data_path=data_path,
+            clip_to_eps=clip_to_eps,
+            eps=eps,
+            use_encoder=False
+        )
+
+    def sample(self, batch_size: int) -> Batch:
+        indx = np.random.randint(self.size, size=batch_size)
+
+        # obs_img1 = jnp.zeros([batch_size, self._window_size, 224, 224, 3], dtype=jnp.float32)
+        # obs_img2 = jnp.zeros([batch_size, self._window_size, 224, 224, 3], dtype=jnp.float32)
+        # next_obs_img1 = jnp.zeros([batch_size, self._window_size, 224, 224, 3], dtype=jnp.float32)
+        # next_obs_img2 = jnp.zeros([batch_size, self._window_size, 224, 224, 3], dtype=jnp.float32)
+
+        return Batch(
+            observations={
+                'image1':
+                jnp.array([self.observations[i]['image1'] for i in indx], dtype=jnp.float32),
+                'image2':
+                jnp.array([self.observations[i]['image2'] for i in indx], dtype=jnp.float32),
+                'robot_state':
+                jnp.array([self.observations[i]['robot_state'] for i in indx], dtype=jnp.float32)
+            },
+            actions=self.actions[indx],
+            rewards=self.rewards[indx],
+            masks=self.masks[indx],
+            next_observations={
+                'image1':
+                jnp.array([self.next_observations[i]['image1'] for i in indx], dtype=jnp.float32),
+                'image2':
+                jnp.array([self.next_observations[i]['image2'] for i in indx], dtype=jnp.float32),
+                'robot_state':
+                jnp.array([self.next_observations[i]['robot_state'] for i in indx],
+                          dtype=jnp.float32)
+            },
+        )
 
 
 class ReplayBuffer(Dataset):

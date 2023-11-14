@@ -92,6 +92,7 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
+    env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
