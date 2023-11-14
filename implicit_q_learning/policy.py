@@ -54,12 +54,13 @@ class NormalTanhPolicy(nn.Module):
             # Image features: (batch_size, num_timestep, num_images * embd_dim)
             image_features = nn.tanh(MLP([self.emb_dim, self.emb_dim, self.emb_dim])(image_features))
             image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
-            token_embed = jnp.concatenate(
-                [image_embed, state_embed], axis=-1
-            )
+            # token_embed = jnp.concatenate(
+            #     [image_embed, state_embed], axis=-1
+            # )
+            token_embed = image_embed
             token_embed = jnp.reshape(
                 token_embed,
-                [batch_size, 2 * num_timestep, self.emb_dim],
+                [batch_size, 1 * num_timestep, self.emb_dim],
             )
             obs = self.encoder(token_embed, deterministic=training)[:, -1]
         # obs = jnp.concatenate([image_feature1, image_feature2, observations['robot_state']], axis=-1)

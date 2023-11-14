@@ -129,7 +129,7 @@ def main(_):
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     env, dataset = make_env_and_dataset(FLAGS.env_name, FLAGS.seed, FLAGS.data_path,
-                                        FLAGS.use_encoder, FLAGS.encoder_type, FLAGS.use_arp, FLAGS.use_step)
+                                        False, FLAGS.encoder_type, FLAGS.use_arp, FLAGS.use_step)
 
     kwargs = dict(FLAGS.config)
     log_kwargs = kwargs.copy()
