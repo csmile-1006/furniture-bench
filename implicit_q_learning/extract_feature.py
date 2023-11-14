@@ -37,6 +37,7 @@ def main(_):
     next_obs_ = []
     action_ = []
     reward_ = []
+    step_reward_ = []
     done_ = []
 
     if FLAGS.use_r3m:
@@ -90,6 +91,7 @@ def main(_):
                         img1_feature[i:i+FLAGS.batch_size] = encoder(img1[i:i+FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224)).cpu().detach().numpy()
                         img2_feature[i:i+FLAGS.batch_size] = encoder(img2[i:i+FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224)).cpu().detach().numpy()
 
+            cumsum_skills = np.cumsum(x["skills"])
             for i in range(l - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip:
                     image1 = img1_feature[i]
@@ -117,6 +119,10 @@ def main(_):
 
                 action_.append(x["actions"][i])
                 reward_.append(x["rewards"][i])
+                if i == l - 2:
+                    step_reward_.append(cumsum_skills[i] + 1)
+                else:
+                    step_reward_.append(cumsum_skills[i])
                 done_.append(1 if i == l - 2 else 0)
 
     dataset = {
@@ -124,6 +130,7 @@ def main(_):
         "actions": np.array(action_),
         "next_observations": next_obs_,
         "rewards": np.array(reward_),
+        "step_rewards": np.array(step_reward_),
         "terminals": np.array(done_),
     }
 

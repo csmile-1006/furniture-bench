@@ -153,7 +153,7 @@ class DataCollector:
                     if self.save_failure:
                         print("Saving failure trajectory.")
                         collect_enum = CollectEnum.FAIL
-                        obs = self.save_and_reset(collect_enum, {})
+                        obs = self.save_and_reset(collect_enum, {}, "failure")
                     else:
                         print("Failed to assemble the furniture, reset without saving.")
                         obs = self.reset()
@@ -163,7 +163,7 @@ class DataCollector:
                     if done:
                         collect_enum = CollectEnum.SUCCESS
 
-                    obs = self.save_and_reset(collect_enum, {})
+                    obs = self.save_and_reset(collect_enum, {}, "success")
                     self.num_success += 1
                 self.traj_counter += 1
                 print(f"Success: {self.num_success}, Fail: {self.num_fail}")
@@ -192,7 +192,7 @@ class DataCollector:
                 # Pop the last reward and action so that obs has length plus 1 then those of actions and rewards.
                 self.rews.pop()
                 self.acts.pop()
-                obs = self.save_and_reset(CollectEnum.FAIL, info)
+                obs = self.save_and_reset(CollectEnum.FAIL, info, "error")
                 continue
 
             # Logging a step.
@@ -234,9 +234,9 @@ class DataCollector:
             f"Collected {self.traj_counter} / {self.num_demos} successful trajectories!"
         )
 
-    def save_and_reset(self, collect_enum: CollectEnum, info):
+    def save_and_reset(self, collect_enum: CollectEnum, info, tp: str):
         """Saves the collected data and reset the environment."""
-        self.save(collect_enum, info)
+        self.save(collect_enum, info, tp)
         print(f"Saved {self.traj_counter} trajectories in this run.")
         return self.reset()
 
@@ -264,11 +264,11 @@ class DataCollector:
         self.last_reward_idx = -1
         self.skill_set = []
 
-    def save(self, collect_enum: CollectEnum, info):
+    def save(self, collect_enum: CollectEnum, info, tp: str):
         print(f"Length of trajectory: {len(self.obs)}")
 
         data_name = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
-        demo_path = self.data_path / data_name
+        demo_path = self.data_path / f"{data_name}_{tp}"
         demo_path.mkdir(parents=True, exist_ok=True)
 
         # Color data paths.
