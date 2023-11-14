@@ -47,7 +47,7 @@ class FrameStackWrapper(gym.ActionWrapper):
         for key, val in self.env.observation_space.items():
             # print(f"low: {val.low[0, ...]}, high: {val.high[0, ...]}")
             obs_space[key] = spaces.Box(val.low.reshape(-1)[0], val.high.reshape(-1)[0], (self._num_frames, *val.shape))
-        return obs_space
+        return spaces.Dict(obs_space)
 
         # embedding_dim = self.env.embedding_dim
         # robot_state_dim = 14
