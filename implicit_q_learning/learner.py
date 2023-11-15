@@ -66,7 +66,7 @@ class Learner(object):
         value_lr: float = 3e-4,
         critic_lr: float = 3e-4,
         hidden_dims: Sequence[int] = (256, 256),
-        emb_dim: int = 64,
+        emb_dim: int = 1024,
         discount: float = 0.99,
         tau: float = 0.005,
         expectile: float = 0.8,
@@ -94,7 +94,13 @@ class Learner(object):
         if len(observations['robot_state'].shape) == 2:
             observations['robot_state'] = observations['robot_state'][np.newaxis]
 
-        encoder = Transformer(emb_dim=emb_dim) if use_encoder else None
+        encoder = Transformer(
+            emb_dim=emb_dim,
+            depth=1,
+            num_heads=4,
+            att_drop=0.0 if dropout_rate is None else dropout_rate,
+            drop=0.0 if dropout_rate is None else dropout_rate,
+        ) if use_encoder else None
 
         action_dim = actions.shape[-1]
         actor_def = policy.NormalTanhPolicy(
