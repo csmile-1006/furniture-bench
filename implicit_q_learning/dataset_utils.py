@@ -252,10 +252,6 @@ class FurnitureDataset(Dataset):
         else:
             rewards = dataset["rewards"]
 
-        if use_arp:
-            rewards = lambda_mr * dataset["multimodal_rewards"] + dataset["rewards"]
-        else:
-            rewards = dataset["rewards"] 
         super().__init__(dataset["observations"],
                          actions=dataset["actions"],
                          rewards=rewards,
