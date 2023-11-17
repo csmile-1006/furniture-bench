@@ -66,7 +66,9 @@ class Learner(object):
         value_lr: float = 3e-4,
         critic_lr: float = 3e-4,
         hidden_dims: Sequence[int] = (256, 256),
-        emb_dim: int = 1024,
+        emb_dim: int = 256,
+        depth: int = 2,
+        num_heads: int = 8,
         discount: float = 0.99,
         tau: float = 0.005,
         expectile: float = 0.8,
@@ -96,8 +98,6 @@ class Learner(object):
 
         encoder = Transformer(
             emb_dim=emb_dim,
-            depth=1,
-            num_heads=4,
             att_drop=0.0 if dropout_rate is None else dropout_rate,
             drop=0.0 if dropout_rate is None else dropout_rate,
         ) if use_encoder else None
