@@ -12,28 +12,22 @@ class FrameStackWrapper(gym.ActionWrapper):
         self._skip_frame = skip_frame
         self._i = 0
         self._frames = {frame: {key: deque([], maxlen=num_frames) for key in self.env.observation_space} for frame in range(self._skip_frame)}
-        for i in range(self._skip_frame):
-            self._frames[i]["timestep"] = deque([], maxlen=num_frames)
 
     def _transform_observation(self, obs):
         stack = self._frames[self._i % self._skip_frame]
         for key in obs:
             assert len(stack[key]) == self._num_frames, f"{len(stack[key])} != {self._num_frames}"
             obs[key] = np.stack(stack[key])
-        obs['timestep'] = np.stack(stack['timestep'])
         return obs
 
     def reset(self):
         self._i = 0
         self._frames = {frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space} for frame in range(self._skip_frame)}
-        for i in range(self._skip_frame):
-            self._frames[i]["timestep"] = deque([], maxlen=self._num_frames)
         _obs = self.env.reset()
         for frame in range(self._skip_frame):
             for _ in range(self._num_frames):
                 for key in _obs:
                     self._frames[frame][key].append(_obs[key].squeeze())
-                self._frames[frame]["timestep"].append(self._i)
         return self._transform_observation(_obs)
 
     def step(self, action):
@@ -41,7 +35,6 @@ class FrameStackWrapper(gym.ActionWrapper):
         _obs, reward, done, info = self.env.step(action)
         for key in _obs:
             self._frames[self._i % self._skip_frame][key].append(_obs[key].squeeze())
-        self._frames[self._i % self._skip_frame]["timestep"].append(self._i)
         obs = self._transform_observation(_obs)
         return obs, reward, done, info
 
