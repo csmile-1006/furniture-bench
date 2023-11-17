@@ -25,7 +25,7 @@ class FrameStackWrapper(gym.ActionWrapper):
 
     def reset(self):
         self._i = 0
-        self._frames = {frame: {key: deque([], maxlen=num_frames) for key in self.env.observation_space} for frame in range(self._skip_frame)}
+        self._frames = {frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space} for frame in range(self._skip_frame)}
         for i in range(self._skip_frame):
             self._frames[i]["timestep"] = deque([], maxlen=self._num_frames)
         _obs = self.env.reset()
