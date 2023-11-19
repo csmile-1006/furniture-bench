@@ -43,37 +43,40 @@ class NormalTanhPolicy(nn.Module):
         for k, v in observations.items():
             if v.ndim == 2:
                 v = v[jnp.newaxis]
-            if self.use_encoder and (k == 'image1' or k == 'image2'):
+            if self.use_encoder and (k == "image1" or k == "image2"):
                 image_features[k] = v
-            else:
-                state_embed = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(v)
+            # else:
+            #     state_embed = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(v)
         if self.use_encoder:
             image_features = jnp.array(list(image_features.values()))
             num_image, batch_size, num_timestep, _ = image_features.shape
             image_features = concat_multiple_image_emb(image_features)
             # Image features: (batch_size, num_timestep, num_images * embd_dim)
-            image_features = MLP([self.emb_dim, self.emb_dim, self.emb_dim], dropout_rate=self.dropout_rate)(image_features)
+            image_features = MLP([self.emb_dim, self.emb_dim, self.emb_dim], dropout_rate=self.dropout_rate)(
+                image_features
+            )
             image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
             token_embed = jnp.concatenate(
-                [image_embed, state_embed], axis=-1
+                # [image_embed, state_embed], axis=-1
+                [image_embed],
+                axis=-1,
             )
             token_embed = jnp.reshape(
                 token_embed,
-                [batch_size, 2 * num_timestep, self.emb_dim],
+                # [batch_size, 2 * num_timestep, self.emb_dim],
+                [batch_size, 1 * num_timestep, self.emb_dim],
             )
             obs = self.encoder(token_embed, deterministic=training)[:, -1]
         # obs = jnp.concatenate([image_feature1, image_feature2, observations['robot_state']], axis=-1)
         # obs = jnp.concatenate(features, axis=-1)
-        outputs = MLP(self.hidden_dims, activate_final=True,
-                      dropout_rate=self.dropout_rate)(obs, training=training)
+        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate)(obs, training=training)
 
         means = nn.Dense(self.action_dim, kernel_init=default_init())(outputs)
 
         if self.state_dependent_std:
-            log_stds = nn.Dense(self.action_dim,
-                                kernel_init=default_init(self.log_std_scale))(outputs)
+            log_stds = nn.Dense(self.action_dim, kernel_init=default_init(self.log_std_scale))(outputs)
         else:
-            log_stds = self.param("log_stds", nn.initializers.zeros, (self.action_dim, ))
+            log_stds = self.param("log_stds", nn.initializers.zeros, (self.action_dim,))
 
         log_std_min = self.log_std_min or LOG_STD_MIN
         log_std_max = self.log_std_max or LOG_STD_MAX
@@ -82,8 +85,7 @@ class NormalTanhPolicy(nn.Module):
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)
 
-        base_dist = tfd.MultivariateNormalDiag(loc=means,
-                                               scale_diag=jnp.exp(log_stds) * temperature)
+        base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds) * temperature)
         if self.tanh_squash_distribution:
             return tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh())
         else:
