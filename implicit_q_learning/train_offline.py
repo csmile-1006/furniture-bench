@@ -43,6 +43,7 @@ flags.DEFINE_boolean('wandb', False, 'Use wandb')
 flags.DEFINE_string('wandb_project', '', 'wandb project')
 flags.DEFINE_string('wandb_entity', '', 'wandb entity')
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
+flags.DEFINE_float("lambda_mr", 0.01, "lambda value for dataset.")
 
 
 def normalize(dataset):
@@ -70,7 +71,7 @@ def normalize(dataset):
 
 
 def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: bool,
-                         encoder_type: str, use_arp: bool, use_step: bool):
+                         encoder_type: str, use_arp: bool, use_step: bool, lambda_mr: float):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
@@ -102,7 +103,7 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, use_arp=use_arp, use_step=use_step)
+        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, use_arp=use_arp, use_step=use_step, lambda_mr=lambda_mr)
     else:
         dataset = D4RLDataset(env)
 
@@ -128,7 +129,7 @@ def main(_):
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     env, dataset = make_env_and_dataset(FLAGS.env_name, FLAGS.seed, FLAGS.data_path,
-                                        FLAGS.use_encoder, FLAGS.encoder_type, FLAGS.use_arp, FLAGS.use_step)
+                                        FLAGS.use_encoder, FLAGS.encoder_type, FLAGS.use_arp, FLAGS.use_step, FLAGS.lambda_mr)
 
     kwargs = dict(FLAGS.config)
     log_kwargs = kwargs.copy()
