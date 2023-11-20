@@ -246,7 +246,8 @@ class FurnitureDataset(Dataset):
 
         dones_float[-1] = 1
         if use_arp:
-            rewards = lambda_mr * dataset["multimodal_rewards"] + dataset["rewards"]
+            # rewards = lambda_mr * dataset["multimodal_rewards"] + dataset["rewards"]
+            rewards = lambda_mr * dataset["multimodal_rewards"]
         elif use_step:
             rewards = dataset["step_rewards"] / np.max(dataset["step_rewards"])
         else:
