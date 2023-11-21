@@ -213,7 +213,7 @@ class FurnitureDataset(Dataset):
         use_encoder: bool = False,
         use_arp: bool = False,
         use_step: bool = False,
-        lambda_mr: float = 1e-2
+        lambda_mr: float = 1e-1
     ):
         with open(data_path, "rb") as f:
             dataset = pickle.load(f)
