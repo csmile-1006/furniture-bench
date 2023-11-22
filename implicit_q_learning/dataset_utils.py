@@ -25,6 +25,16 @@ def split_into_trajectories(observations, actions, rewards, masks, dones_float, 
                 next_observations[i],
             )
         )
+        trajs[-1].append(
+            (
+                observations[i],
+                actions[i],
+                rewards[i],
+                masks[i],
+                dones_float[i],
+                next_observations[i],
+            )
+        )
         if dones_float[i] == 1.0 and i + 1 < len(observations):
             trajs.append([])
 
@@ -59,6 +69,17 @@ def merge_trajectories(trajs):
 
 
 class Dataset(object):
+    def __init__(
+        self,
+        observations: Dict[str, np.ndarray],
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        masks: np.ndarray,
+        dones_float: np.ndarray,
+        next_observations: np.ndarray,
+        size: int,
+        use_encoder: bool = False,
+    ):
     def __init__(
         self,
         observations: Dict[str, np.ndarray],
