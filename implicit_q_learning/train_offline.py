@@ -1,6 +1,5 @@
-import isaacgym
+import isaacgym  # noqa: F401
 import os
-from typing import Tuple
 
 import gym
 import numpy as np
@@ -28,7 +27,7 @@ flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
-flags.DEFINE_string("data_path", '', "Path to data.")
+flags.DEFINE_string("data_path", "", "Path to data.")
 config_flags.DEFINE_config_file(
     "config",
     "default.py",
@@ -38,15 +37,15 @@ config_flags.DEFINE_config_file(
 flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
-flags.DEFINE_string("encoder_type", '', 'vip or r3m')
-flags.DEFINE_boolean('wandb', False, 'Use wandb')
-flags.DEFINE_string('wandb_project', '', 'wandb project')
-flags.DEFINE_string('wandb_entity', '', 'wandb entity')
+flags.DEFINE_string("encoder_type", "", "vip or r3m")
+flags.DEFINE_boolean("wandb", False, "Use wandb")
+flags.DEFINE_string("wandb_project", "", "wandb project")
+flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
+flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
 
 
 def normalize(dataset):
-
     trajs = split_into_trajectories(
         dataset.observations,
         dataset.actions,
@@ -69,14 +68,24 @@ def normalize(dataset):
     dataset.rewards *= 1000.0
 
 
-def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: bool,
-                         encoder_type: str, use_arp: bool, use_step: bool):
+def make_env_and_dataset(
+    env_name: str,
+    seed: int,
+    data_path: str,
+    use_encoder: bool,
+    encoder_type: str,
+    use_arp: bool,
+    use_step: bool,
+    lambda_mr: float,
+):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
-        import furniture_bench
+        import furniture_bench  # noqa: F401
+
         env_id, furniture_name = env_name.split("/")
-        env = gym.make(env_id,
+        env = gym.make(
+            env_id,
             furniture=furniture_name,
             data_path=data_path,
             use_encoder=use_encoder,
@@ -86,7 +95,7 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
-            max_env_steps=600 if "Sim" in env_id else 3000
+            max_env_steps=600 if "Sim" in env_id else 3000,
         )
     else:
         env = gym.make(env_name)
@@ -103,7 +112,9 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, use_arp=use_arp, use_step=use_step)
+        dataset = FurnitureDataset(
+            data_path, use_encoder=use_encoder, use_arp=use_arp, use_step=use_step, lambda_mr=lambda_mr
+        )
     else:
         dataset = D4RLDataset(env)
 
@@ -122,14 +133,23 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
 
 def main(_):
     import jax
+
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     tb_dir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
-    env, dataset = make_env_and_dataset(FLAGS.env_name, FLAGS.seed, FLAGS.data_path,
-                                        False, FLAGS.encoder_type, FLAGS.use_arp, FLAGS.use_step)
+    env, dataset = make_env_and_dataset(
+        FLAGS.env_name,
+        FLAGS.seed,
+        FLAGS.data_path,
+        FLAGS.use_encoder,
+        FLAGS.encoder_type,
+        FLAGS.use_arp,
+        FLAGS.use_step,
+        FLAGS.lambda_mr,
+    )
 
     kwargs = dict(FLAGS.config)
     log_kwargs = kwargs.copy()
@@ -139,20 +159,24 @@ def main(_):
     log_kwargs["use_encoder"] = FLAGS.use_encoder
 
     if FLAGS.wandb:
-        wandb.init(project=FLAGS.wandb_project,
-                   entity=FLAGS.wandb_entity,
-                   name=FLAGS.env_name + '-' + str(FLAGS.seed) + '-' + str(FLAGS.data_path) + '-' + str(FLAGS.run_name),
-                   config=log_kwargs,
-                   sync_tensorboard=True)
+        wandb.init(
+            project=FLAGS.wandb_project,
+            entity=FLAGS.wandb_entity,
+            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.data_path) + "-" + str(FLAGS.run_name),
+            config=log_kwargs,
+            sync_tensorboard=True,
+        )
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
-    agent = Learner(FLAGS.seed,
-                    env.observation_space.sample(),
-                    env.action_space.sample()[np.newaxis],
-                    max_steps=FLAGS.max_steps,
-                    **kwargs,
-                    use_encoder=FLAGS.use_encoder)
+    agent = Learner(
+        FLAGS.seed,
+        env.observation_space.sample(),
+        env.action_space.sample()[np.newaxis],
+        max_steps=FLAGS.max_steps,
+        **kwargs,
+        use_encoder=FLAGS.use_encoder,
+    )
 
     eval_returns = []
     for i in tqdm.tqdm(range(1, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm):

@@ -11,9 +11,7 @@ except ImportError as e:
         "[red]  - Download Isaac Gym following https://clvrai.github.io/furniture-bench/docs/getting_started/installation_guide_furniture_sim.html#download-isaac-gym[/red]"
     )
     print("[red]  - Then, pip install -e isaacgym/python[/red]")
-    print(
-        "[red]2. If PyTorch was imported before furniture_bench, please import torch after furniture_bench.[/red]"
-    )
+    print("[red]2. If PyTorch was imported before furniture_bench, please import torch after furniture_bench.[/red]")
     print()
     raise ImportError(e)
 
@@ -65,6 +63,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         record: bool = False,
         max_env_steps: int = 3000,
         record_dir: str = "./",
+        record_every: int = 5,
         **kwargs,
     ):
         """
@@ -109,9 +108,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.grasp_margin = 0.02 - 0.001  # To prevent repeating open an close actions.
 
         self.save_camera_input = save_camera_input
-        self.img_size = sim_config["camera"][
-            "resized_img_size" if resize_img else "color_img_size"
-        ]
+        self.img_size = sim_config["camera"]["resized_img_size" if resize_img else "color_img_size"]
         self.furniture.max_env_steps = max_env_steps
         for furn in self.furnitures:
             furn.max_env_steps = max_env_steps
@@ -146,6 +143,7 @@ class FurnitureSimEnvLegacy(gym.Env):
 
         self.record = record
         self.record_dir = record_dir
+        self.record_every = record_every
 
     def _create_ground_plane(self):
         # add ground plane
@@ -157,9 +155,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         l_color = gymapi.Vec3(0.8, 0.8, 0.8)
         l_ambient = gymapi.Vec3(0.35, 0.35, 0.35)
         l_direction = gymapi.Vec3(0.1, -0.03, 0.2)
-        self.isaac_gym.set_light_parameters(
-            self.sim, 0, l_color, l_ambient, l_direction
-        )
+        self.isaac_gym.set_light_parameters(self.sim, 0, l_color, l_ambient, l_direction)
 
     def create_envs(self):
         table_pos = gymapi.Vec3(0.8, 0.8, 0.4)
@@ -167,9 +163,7 @@ class FurnitureSimEnvLegacy(gym.Env):
 
         table_half_width = 0.015
         table_surface_z = table_pos.z + table_half_width
-        self.franka_pose.p = gymapi.Vec3(
-            0.5 * -table_pos.x + 0.1, 0, table_surface_z + ROBOT_HEIGHT
-        )
+        self.franka_pose.p = gymapi.Vec3(0.5 * -table_pos.x + 0.1, 0, table_surface_z + ROBOT_HEIGHT)
 
         self.franka_from_origin_mat = get_mat(
             [self.franka_pose.p.x, self.franka_pose.p.y, self.franka_pose.p.z],
@@ -185,9 +179,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.part_assets = {}
         for part in self.furniture.parts:
             asset_option = sim_config["asset"][part.name]
-            self.part_assets[part.name] = self.isaac_gym.load_asset(
-                self.sim, ASSET_ROOT, part.asset_file, asset_option
-            )
+            self.part_assets[part.name] = self.isaac_gym.load_asset(self.sim, ASSET_ROOT, part.asset_file, asset_option)
         # Create envs.
         num_per_row = int(math.sqrt(self.num_envs))
         spacing = 1.0
@@ -212,22 +204,14 @@ class FurnitureSimEnvLegacy(gym.Env):
             table_pose = gymapi.Transform()
             table_pose.p = gymapi.Vec3(0.0, 0.0, table_pos.z)
 
-            table_handle = self.isaac_gym.create_actor(
-                env, self.table_asset, table_pose, "table", i, 0
-            )
-            table_props = self.isaac_gym.get_actor_rigid_shape_properties(
-                env, table_handle
-            )
+            table_handle = self.isaac_gym.create_actor(env, self.table_asset, table_pose, "table", i, 0)
+            table_props = self.isaac_gym.get_actor_rigid_shape_properties(env, table_handle)
             table_props[0].friction = sim_config["table"]["friction"]
-            self.isaac_gym.set_actor_rigid_shape_properties(
-                env, table_handle, table_props
-            )
+            self.isaac_gym.set_actor_rigid_shape_properties(env, table_handle, table_props)
 
             self.base_tag_pose = gymapi.Transform()
             base_tag_pos = T.pos_from_mat(config["robot"]["tag_base_from_robot_base"])
-            self.base_tag_pose.p = self.franka_pose.p + gymapi.Vec3(
-                base_tag_pos[0], base_tag_pos[1], -ROBOT_HEIGHT
-            )
+            self.base_tag_pose.p = self.franka_pose.p + gymapi.Vec3(base_tag_pos[0], base_tag_pos[1], -ROBOT_HEIGHT)
             self.base_tag_pose.p.z = table_surface_z
             base_tag_handle = self.isaac_gym.create_actor(
                 env, self.base_tag_asset, self.base_tag_pose, "base_tag", i, 0
@@ -235,24 +219,16 @@ class FurnitureSimEnvLegacy(gym.Env):
             bg_pos = gymapi.Vec3(-0.8, 0, 0.75)
             bg_pose = gymapi.Transform()
             bg_pose.p = gymapi.Vec3(bg_pos.x, bg_pos.y, bg_pos.z)
-            bg_handle = self.isaac_gym.create_actor(
-                env, self.background_asset, bg_pose, "background", i, 0
-            )
+            bg_handle = self.isaac_gym.create_actor(env, self.background_asset, bg_pose, "background", i, 0)
             # TODO: Make config
             obstacle_pose = gymapi.Transform()
-            obstacle_pose.p = gymapi.Vec3(
-                self.base_tag_pose.p.x + 0.37 + 0.01, 0.0, table_surface_z + 0.015
-            )
-            obstacle_pose.r = gymapi.Quat.from_axis_angle(
-                gymapi.Vec3(0, 0, 1), 0.5 * math.pi
-            )
+            obstacle_pose.p = gymapi.Vec3(self.base_tag_pose.p.x + 0.37 + 0.01, 0.0, table_surface_z + 0.015)
+            obstacle_pose.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), 0.5 * math.pi)
 
             obstacle_handle = self.isaac_gym.create_actor(
                 env, self.obstacle_front_asset, obstacle_pose, f"obstacle_front", i, 0
             )
-            part_idx = self.isaac_gym.get_actor_rigid_body_index(
-                env, obstacle_handle, 0, gymapi.DOMAIN_SIM
-            )
+            part_idx = self.isaac_gym.get_actor_rigid_body_index(env, obstacle_handle, 0, gymapi.DOMAIN_SIM)
             if self.part_idxs.get("obstacle_front") is None:
                 self.part_idxs["obstacle_front"] = [part_idx]
             else:
@@ -266,58 +242,34 @@ class FurnitureSimEnvLegacy(gym.Env):
                     y,
                     table_surface_z + 0.015,
                 )
-                obstacle_pose.r = gymapi.Quat.from_axis_angle(
-                    gymapi.Vec3(0, 0, 1), 0.5 * math.pi
-                )
+                obstacle_pose.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), 0.5 * math.pi)
 
-                obstacle_handle = self.isaac_gym.create_actor(
-                    env, self.obstacle_side_asset, obstacle_pose, name, i, 0
-                )
-                part_idx = self.isaac_gym.get_actor_rigid_body_index(
-                    env, obstacle_handle, 0, gymapi.DOMAIN_SIM
-                )
+                obstacle_handle = self.isaac_gym.create_actor(env, self.obstacle_side_asset, obstacle_pose, name, i, 0)
+                part_idx = self.isaac_gym.get_actor_rigid_body_index(env, obstacle_handle, 0, gymapi.DOMAIN_SIM)
                 if self.part_idxs.get(name) is None:
                     self.part_idxs[name] = [part_idx]
                 else:
                     self.part_idxs[name].append(part_idx)
             # Add robot.
-            franka_handle = self.isaac_gym.create_actor(
-                env, self.franka_asset, self.franka_pose, "franka", i, 0
-            )
-            self.franka_num_dofs = self.isaac_gym.get_actor_dof_count(
-                env, franka_handle
-            )
+            franka_handle = self.isaac_gym.create_actor(env, self.franka_asset, self.franka_pose, "franka", i, 0)
+            self.franka_num_dofs = self.isaac_gym.get_actor_dof_count(env, franka_handle)
 
             self.isaac_gym.enable_actor_dof_force_sensors(env, franka_handle)
             self.franka_handles.append(franka_handle)
-            franka_dof_props = self.isaac_gym.get_actor_dof_properties(
-                env, franka_handle
-            )
+            franka_dof_props = self.isaac_gym.get_actor_dof_properties(env, franka_handle)
             franka_dof_props["friction"][:7] = 55.0
             franka_dof_props["friction"][7:] = 70.0  # Gripper.
-            self.isaac_gym.set_actor_dof_properties(
-                env, franka_handle, franka_dof_props
-            )
+            self.isaac_gym.set_actor_dof_properties(env, franka_handle, franka_dof_props)
             # Get global index of hand and base.
             self.ee_idxs.append(
-                self.isaac_gym.get_actor_rigid_body_index(
-                    env, franka_handle, self.franka_ee_index, gymapi.DOMAIN_SIM
-                )
+                self.isaac_gym.get_actor_rigid_body_index(env, franka_handle, self.franka_ee_index, gymapi.DOMAIN_SIM)
             )
-            self.ee_handles.append(
-                self.isaac_gym.find_actor_rigid_body_handle(
-                    env, franka_handle, "k_ee_link"
-                )
-            )
+            self.ee_handles.append(self.isaac_gym.find_actor_rigid_body_handle(env, franka_handle, "k_ee_link"))
             self.base_idxs.append(
-                self.isaac_gym.get_actor_rigid_body_index(
-                    env, franka_handle, self.franka_base_index, gymapi.DOMAIN_SIM
-                )
+                self.isaac_gym.get_actor_rigid_body_index(env, franka_handle, self.franka_base_index, gymapi.DOMAIN_SIM)
             )
             # Set dof properties.
-            franka_dof_props = self.isaac_gym.get_asset_dof_properties(
-                self.franka_asset
-            )
+            franka_dof_props = self.isaac_gym.get_asset_dof_properties(self.franka_asset)
             franka_dof_props["driveMode"][:7].fill(gymapi.DOF_MODE_EFFORT)
             franka_dof_props["stiffness"][:7].fill(0.0)
             franka_dof_props["damping"][:7].fill(0.0)
@@ -328,23 +280,15 @@ class FurnitureSimEnvLegacy(gym.Env):
             franka_dof_props["stiffness"][7:].fill(200.0)
             franka_dof_props["damping"][7:].fill(60.0)
 
-            self.isaac_gym.set_actor_dof_properties(
-                env, franka_handle, franka_dof_props
-            )
+            self.isaac_gym.set_actor_dof_properties(env, franka_handle, franka_dof_props)
             # Set initial dof states
             franka_num_dofs = self.isaac_gym.get_asset_dof_count(self.franka_asset)
             self.default_dof_pos = np.zeros(franka_num_dofs, dtype=np.float32)
-            self.default_dof_pos[:7] = np.array(
-                config["robot"]["reset_joints"], dtype=np.float32
-            )
-            self.default_dof_pos[7:] = (
-                config["robot"]["max_gripper_width"][self.furniture_name] / 2
-            )
+            self.default_dof_pos[:7] = np.array(config["robot"]["reset_joints"], dtype=np.float32)
+            self.default_dof_pos[7:] = config["robot"]["max_gripper_width"][self.furniture_name] / 2
             default_dof_state = np.zeros(franka_num_dofs, gymapi.DofState.dtype)
             default_dof_state["pos"] = self.default_dof_pos
-            self.isaac_gym.set_actor_dof_states(
-                env, franka_handle, default_dof_state, gymapi.STATE_ALL
-            )
+            self.isaac_gym.set_actor_dof_states(env, franka_handle, default_dof_state, gymapi.STATE_ALL)
             # Add furniture parts.
             poses = []
 
@@ -352,28 +296,18 @@ class FurnitureSimEnvLegacy(gym.Env):
                 pos, ori = self._get_reset_pose(part)
                 part_pose_mat = self.april_coord_to_sim_coord(get_mat(pos, [0, 0, 0]))
                 part_pose = gymapi.Transform()
-                part_pose.p = gymapi.Vec3(
-                    part_pose_mat[0, 3], part_pose_mat[1, 3], part_pose_mat[2, 3]
-                )
+                part_pose.p = gymapi.Vec3(part_pose_mat[0, 3], part_pose_mat[1, 3], part_pose_mat[2, 3])
                 reset_ori = self.april_coord_to_sim_coord(ori)
                 part_pose.r = gymapi.Quat(*T.mat2quat(reset_ori[:3, :3]))
                 poses.append(part_pose)
-                part_handle = self.isaac_gym.create_actor(
-                    env, self.part_assets[part.name], part_pose, part.name, i, 0
-                )
+                part_handle = self.isaac_gym.create_actor(env, self.part_assets[part.name], part_pose, part.name, i, 0)
                 self.handles[part.name] = part_handle
 
-                part_idx = self.isaac_gym.get_actor_rigid_body_index(
-                    env, part_handle, 0, gymapi.DOMAIN_SIM
-                )
+                part_idx = self.isaac_gym.get_actor_rigid_body_index(env, part_handle, 0, gymapi.DOMAIN_SIM)
                 # Set properties of part.
-                part_props = self.isaac_gym.get_actor_rigid_shape_properties(
-                    env, part_handle
-                )
+                part_props = self.isaac_gym.get_actor_rigid_shape_properties(env, part_handle)
                 part_props[0].friction = sim_config["parts"]["friction"]
-                self.isaac_gym.set_actor_rigid_shape_properties(
-                    env, part_handle, part_props
-                )
+                self.isaac_gym.set_actor_rigid_shape_properties(env, part_handle, part_props)
 
                 if self.part_idxs.get(part.name) is None:
                     self.part_idxs[part.name] = [part_idx]
@@ -382,9 +316,7 @@ class FurnitureSimEnvLegacy(gym.Env):
 
             self.parts_handles = {}
             for part in self.furniture.parts:
-                self.parts_handles[part.name] = self.isaac_gym.find_actor_index(
-                    env, part.name, gymapi.DOMAIN_ENV
-                )
+                self.parts_handles[part.name] = self.isaac_gym.find_actor_index(env, part.name, gymapi.DOMAIN_ENV)
 
     def _get_reset_pose(self, part):
         if self.init_assembled:
@@ -410,17 +342,10 @@ class FurnitureSimEnvLegacy(gym.Env):
                 else:
                     pos = (
                         attach_part_pose
-                        @ self.furniture.assembled_rel_poses[
-                            (attach_to.part_idx, part.part_idx)
-                        ][0][:4, 3]
+                        @ self.furniture.assembled_rel_poses[(attach_to.part_idx, part.part_idx)][0][:4, 3]
                     )
                     pos = pos[:3]
-                    ori = (
-                        attach_part_pose
-                        @ self.furniture.assembled_rel_poses[
-                            (attach_to.part_idx, part.part_idx)
-                        ][0]
-                    )
+                    ori = attach_part_pose @ self.furniture.assembled_rel_poses[(attach_to.part_idx, part.part_idx)][0]
                 part.reset_pos[0] = pos
                 part.reset_ori[0] = ori
             pos = part.reset_pos[self.from_skill]
@@ -438,16 +363,12 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.viewer = None
 
         if self.headless == False:
-            self.viewer = self.isaac_gym.create_viewer(
-                self.sim, gymapi.CameraProperties()
-            )
+            self.viewer = self.isaac_gym.create_viewer(self.sim, gymapi.CameraProperties())
             # Point camera at middle env.
             cam_pos = gymapi.Vec3(0.97, 0, 0.74)
             cam_target = gymapi.Vec3(-1, 0, 0.62)
             middle_env = self.envs[0]
-            self.isaac_gym.viewer_camera_look_at(
-                self.viewer, middle_env, cam_pos, cam_target
-            )
+            self.isaac_gym.viewer_camera_look_at(self.viewer, middle_env, cam_pos, cam_target)
 
     def set_camera(self):
         self.camera_handles = []
@@ -474,24 +395,18 @@ class FurnitureSimEnvLegacy(gym.Env):
 
             # Wrist camera.
             if not self.resize_img:
-                h1 = self.isaac_gym.create_camera_sensor(
-                    self.envs[i], camera_properties
-                )
+                h1 = self.isaac_gym.create_camera_sensor(self.envs[i], camera_properties)
             else:
                 wrist_properties = gymapi.CameraProperties()
                 wrist_properties.enable_tensors = True
-                wrist_properties.horizontal_fov = (
-                    55.0  # A special case for wrist camera to have a wider view.
-                )
+                wrist_properties.horizontal_fov = 55.0  # A special case for wrist camera to have a wider view.
                 wrist_properties.width = sim_config["camera"]["resized_img_size"][0]
                 wrist_properties.height = sim_config["camera"]["resized_img_size"][1]
                 h1 = self.isaac_gym.create_camera_sensor(self.envs[i], wrist_properties)
 
             local_transform = gymapi.Transform()
             local_transform.p = gymapi.Vec3(-0.04, 0, -0.05)
-            local_transform.r = gymapi.Quat.from_axis_angle(
-                gymapi.Vec3(0, 1, 0), np.radians(-70.0)
-            )
+            local_transform.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.radians(-70.0))
             self.isaac_gym.attach_camera_to_body(
                 h1,
                 self.envs[i],
@@ -512,12 +427,8 @@ class FurnitureSimEnvLegacy(gym.Env):
             h3 = self.isaac_gym.create_camera_sensor(self.envs[i], camera_properties)
             transform = gymapi.Transform()
 
-            transform.p = gymapi.Vec3(
-                self.franka_pose.p.x + 0.08, 0, self.franka_pose.p.z + 0.2
-            )
-            transform.r = gymapi.Quat.from_axis_angle(
-                gymapi.Vec3(0, 1, 0), np.radians(35.0)
-            )
+            transform.p = gymapi.Vec3(self.franka_pose.p.x + 0.08, 0, self.franka_pose.p.z + 0.2)
+            transform.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), np.radians(35.0))
             self.isaac_gym.set_camera_transform(h3, env, transform)
             self.camera_handles[i].append(h3)
 
@@ -528,17 +439,13 @@ class FurnitureSimEnvLegacy(gym.Env):
             for j, handle in enumerate(handles):
                 camera_colors[j].append(
                     gymtorch.wrap_tensor(
-                        self.isaac_gym.get_camera_image_gpu_tensor(
-                            self.sim, self.envs[i], handle, gymapi.IMAGE_COLOR
-                        )
+                        self.isaac_gym.get_camera_image_gpu_tensor(self.sim, self.envs[i], handle, gymapi.IMAGE_COLOR)
                     )
                 )
 
                 camera_depths[j].append(
                     gymtorch.wrap_tensor(
-                        self.isaac_gym.get_camera_image_gpu_tensor(
-                            self.sim, self.envs[i], handle, gymapi.IMAGE_DEPTH
-                        )
+                        self.isaac_gym.get_camera_image_gpu_tensor(self.sim, self.envs[i], handle, gymapi.IMAGE_DEPTH)
                     )
                 )
 
@@ -566,9 +473,7 @@ class FurnitureSimEnvLegacy(gym.Env):
 
         # Get DoF tensor
         _dof_states = self.isaac_gym.acquire_dof_state_tensor(self.sim)
-        self.dof_states = gymtorch.wrap_tensor(
-            _dof_states
-        )  # (num_dofs, 2), 2 for pos and vel.
+        self.dof_states = gymtorch.wrap_tensor(_dof_states)  # (num_dofs, 2), 2 for pos and vel.
         self.dof_pos = self.dof_states[:, 0].view(self.num_envs, 9)
         self.dof_vel = self.dof_states[:, 1].view(self.num_envs, 9)
         # Get jacobian tensor
@@ -576,9 +481,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         _jacobian = self.isaac_gym.acquire_jacobian_tensor(self.sim, "franka")
         self.jacobian = gymtorch.wrap_tensor(_jacobian)
         # jacobian entries corresponding to franka hand
-        self.jacobian_eef = self.jacobian[
-            :, self.franka_ee_index - 1, :, :7
-        ]  # -1 due to finxed base link.
+        self.jacobian_eef = self.jacobian[:, self.franka_ee_index - 1, :, :7]  # -1 due to finxed base link.
         # Prepare mass matrix tensor
         # For franka, tensor shape is (num_envs, 7 + 2, 7 + 2), 2 for grippers.
         _massmatrix = self.isaac_gym.acquire_mass_matrix_tensor(self.sim, "franka")
@@ -598,8 +501,7 @@ class FurnitureSimEnvLegacy(gym.Env):
     @property
     def sim_to_april_mat(self):
         return torch.tensor(
-            np.linalg.inv(self.base_tag_from_robot_mat)
-            @ np.linalg.inv(self.franka_from_origin_mat),
+            np.linalg.inv(self.base_tag_from_robot_mat) @ np.linalg.inv(self.franka_from_origin_mat),
             device=self.device,
         )
 
@@ -617,9 +519,7 @@ class FurnitureSimEnvLegacy(gym.Env):
 
     @property
     def action_space(self):
-        return gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(self.num_envs, self.pose_dim + 1)
-        )
+        return gym.spaces.Box(low=-1.0, high=1.0, shape=(self.num_envs, self.pose_dim + 1))
 
     @property
     def observation_space(self):
@@ -665,11 +565,7 @@ class FurnitureSimEnvLegacy(gym.Env):
             action = action.unsqueeze(0)
 
         sim_steps = int(
-            1.0
-            / config["robot"]["hz"]
-            / sim_config["sim_params"].dt
-            / sim_config["sim_params"].substeps
-            + 0.1
+            1.0 / config["robot"]["hz"] / sim_config["sim_params"].dt / sim_config["sim_params"].substeps + 0.1
         )
         if not self.ctrl_started:
             self.init_ctrl()
@@ -694,22 +590,15 @@ class FurnitureSimEnvLegacy(gym.Env):
             grip_action = torch.zeros((self.num_envs, 1))
             for env_idx in range(self.num_envs):
                 grasp = action[env_idx, -1]
-                if (
-                    torch.sign(grasp) != torch.sign(self.last_grasp[env_idx])
-                    and torch.abs(grasp) > self.grasp_margin
-                ):
+                if torch.sign(grasp) != torch.sign(self.last_grasp[env_idx]) and torch.abs(grasp) > self.grasp_margin:
                     if grasp < 0:
-                        grip_sep = config["robot"]["max_gripper_width"][
-                            self.furniture_name
-                        ]
+                        grip_sep = config["robot"]["max_gripper_width"][self.furniture_name]
                     else:
                         grip_sep = 0.0
                     self.last_grasp[env_idx] = grasp
                 else:
                     if self.last_grasp[env_idx] < 0:
-                        grip_sep = config["robot"]["max_gripper_width"][
-                            self.furniture_name
-                        ]
+                        grip_sep = config["robot"]["max_gripper_width"][self.furniture_name]
                     else:
                         grip_sep = 0.0
 
@@ -722,23 +611,13 @@ class FurnitureSimEnvLegacy(gym.Env):
                 ).t()  # OSC expect column major
                 state_dict["joint_positions"] = self.dof_pos[env_idx][:7]
                 state_dict["joint_velocities"] = self.dof_vel[env_idx][:7]
-                state_dict["mass_matrix"] = self.mm[env_idx][
-                    :7, :7
-                ].t()  # OSC expect column major
-                state_dict["jacobian"] = self.jacobian_eef[
-                    env_idx
-                ].t()  # OSC expect column major
-                torque_action[:, :7] = self.osc_ctrls[env_idx](state_dict)[
-                    "joint_torques"
-                ]
+                state_dict["mass_matrix"] = self.mm[env_idx][:7, :7].t()  # OSC expect column major
+                state_dict["jacobian"] = self.jacobian_eef[env_idx].t()  # OSC expect column major
+                torque_action[:, :7] = self.osc_ctrls[env_idx](state_dict)["joint_torques"]
             # Gripper action
             pos_action[:, 7:9] = grip_action
-            self.isaac_gym.set_dof_position_target_tensor(
-                self.sim, gymtorch.unwrap_tensor(pos_action)
-            )
-            self.isaac_gym.set_dof_actuation_force_tensor(
-                self.sim, gymtorch.unwrap_tensor(torque_action)
-            )
+            self.isaac_gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(pos_action))
+            self.isaac_gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(torque_action))
             # update viewer
             if not self.headless:
                 self.isaac_gym.draw_viewer(self.viewer, self.sim, False)
@@ -761,17 +640,13 @@ class FurnitureSimEnvLegacy(gym.Env):
 
     def _reward(self):
         """Reward is 1 if two parts are assembled."""
-        rewards = torch.zeros(
-            (self.num_envs, 1), dtype=torch.float32, device=self.device
-        )
+        rewards = torch.zeros((self.num_envs, 1), dtype=torch.float32, device=self.device)
 
         parts_poses, founds = self._get_parts_poses()
         for env_idx in range(self.num_envs):
             env_parts_poses = parts_poses[env_idx].cpu().numpy()
             env_founds = founds[env_idx].cpu().numpy()
-            rewards[env_idx] = self.furnitures[env_idx].compute_assemble(
-                env_parts_poses, env_founds
-            )
+            rewards[env_idx] = self.furnitures[env_idx].compute_assemble(env_parts_poses, env_founds)
 
         if self.np_step_out:
             return rewards.cpu().numpy()
@@ -798,17 +673,11 @@ class FurnitureSimEnvLegacy(gym.Env):
                 part_pose = torch.concat(
                     [
                         *C.mat2pose(
-                            self.sim_coord_to_april_coord(
-                                C.pose2mat(
-                                    part_pose[:3], part_pose[3:7], device=self.device
-                                )
-                            )
+                            self.sim_coord_to_april_coord(C.pose2mat(part_pose[:3], part_pose[3:7], device=self.device))
                         )
                     ]
                 )
-                parts_poses[
-                    env_idx, part_idx * self.pose_dim : (part_idx + 1) * self.pose_dim
-                ] = part_pose
+                parts_poses[env_idx, part_idx * self.pose_dim : (part_idx + 1) * self.pose_dim] = part_pose
         return parts_poses, founds
 
     def _save_camera_input(self):
@@ -873,15 +742,11 @@ class FurnitureSimEnvLegacy(gym.Env):
                     real_robot=False,
                     ee_pos_current=ee_pos[env_idx],
                     ee_quat_current=ee_quat[env_idx],
-                    init_joints=torch.tensor(
-                        config["robot"]["reset_joints"], device=self.device
-                    ),
+                    init_joints=torch.tensor(config["robot"]["reset_joints"], device=self.device),
                     kp=kp,
                     kv=kv,
                     mass_matrix_offset_val=[0.0, 0.0, 0.0],
-                    position_limits=torch.tensor(
-                        config["robot"]["position_limits"], device=self.device
-                    ),
+                    position_limits=torch.tensor(config["robot"]["position_limits"], device=self.device),
                     joint_kp=10,
                 )
             )
@@ -943,7 +808,7 @@ class FurnitureSimEnvLegacy(gym.Env):
                 robot_state[k] = v.cpu().numpy()
             robot_state = PandaState(**robot_state)
 
-        if self.record:
+        if self.record and self.episode_cnts[0] % self.record_every == 0:
             # Record the first environment.
             record_images = [color_img1[0], color_img2[0]]
             for i, img in enumerate(record_images):
@@ -995,14 +860,16 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.env_steps[env_idx] = 0
         self.episode_cnts[env_idx] += 1
         self.move_neutral = False
-        if self.record:
+        if self.record and self.episode_cnts[env_idx] % self.record_every == 0:
             if hasattr(self, "video_writer"):
                 self.video_writer.release()
-            record_dir = Path(self.record_dir) / f"ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            record_dir = (
+                Path(self.record_dir) / f"ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
             record_dir.mkdir(parents=True, exist_ok=True)
             self.video_writer = cv2.VideoWriter(
                 str(record_dir / "video.mp4"),
-                cv2.VideoWriter_fourcc('m', 'p', '4', 'v'),
+                cv2.VideoWriter_fourcc("m", "p", "4", "v"),
                 30,
                 # (self.img_size[1] * 2, self.img_size[0]),  # Wrist and front cameras.
                 (self.img_size[0], self.img_size[1] * 2),  # Wrist and front cameras.
@@ -1014,25 +881,17 @@ class FurnitureSimEnvLegacy(gym.Env):
         # Low randomness only.
         if self.from_skill >= 1:
             dof_pos = torch.from_numpy(self.default_dof_pos)
-            ee_pos = torch.from_numpy(
-                self.furniture.furniture_conf["ee_pos"][self.from_skill]
-            )
-            ee_quat = torch.from_numpy(
-                self.furniture.furniture_conf["ee_quat"][self.from_skill]
-            )
+            ee_pos = torch.from_numpy(self.furniture.furniture_conf["ee_pos"][self.from_skill])
+            ee_quat = torch.from_numpy(self.furniture.furniture_conf["ee_quat"][self.from_skill])
             dof_pos = self.robot_model.inverse_kinematics(ee_pos, ee_quat)
         else:
             dof_pos = self.default_dof_pos
 
-        self.dof_pos[:, 0 : self.franka_num_dofs] = torch.tensor(
-            dof_pos, device=self.device, dtype=torch.float32
-        )
+        self.dof_pos[:, 0 : self.franka_num_dofs] = torch.tensor(dof_pos, device=self.device, dtype=torch.float32)
         self.dof_vel[:, 0 : self.franka_num_dofs] = torch.tensor(
             [0] * len(self.default_dof_pos), device=self.device, dtype=torch.float32
         )
-        idxs = torch.tensor(self.franka_handles, device=self.device, dtype=torch.int32)[
-            env_idx : env_idx + 1
-        ]
+        idxs = torch.tensor(self.franka_handles, device=self.device, dtype=torch.int32)[env_idx : env_idx + 1]
 
         self.isaac_gym.set_dof_state_tensor_indexed(
             self.sim,
@@ -1052,9 +911,7 @@ class FurnitureSimEnvLegacy(gym.Env):
 
             part_pose_mat = self.april_coord_to_sim_coord(get_mat(pos, [0, 0, 0]))
             part_pose = gymapi.Transform()
-            part_pose.p = gymapi.Vec3(
-                part_pose_mat[0, 3], part_pose_mat[1, 3], part_pose_mat[2, 3]
-            )
+            part_pose.p = gymapi.Vec3(part_pose_mat[0, 3], part_pose_mat[1, 3], part_pose_mat[2, 3])
             if self.randomness == Randomness.LOW and random_noise_fixed:
                 part_pose.p = part_pose.p + gymapi.Vec3(
                     np.random.uniform(-0.015, 0.015), np.random.uniform(-0.015, 0.015), 0
@@ -1064,9 +921,7 @@ class FurnitureSimEnvLegacy(gym.Env):
             part_pose.r = gymapi.Quat(*T.mat2quat(reset_ori[:3, :3]))
             if self.randomness == Randomness.LOW and random_noise_fixed:
                 part_pose.r = (
-                    gymapi.Quat.from_axis_angle(
-                        gymapi.Vec3(0, 0, 1), np.radians(np.random.uniform(-15, 15))
-                    )
+                    gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), np.radians(np.random.uniform(-15, 15)))
                     * part_pose.r
                 )  # 15 degrees. noise
             idxs = self.parts_handles[part.name]
@@ -1080,9 +935,7 @@ class FurnitureSimEnvLegacy(gym.Env):
                 device=self.device,
             )
 
-        idxs = torch.tensor(
-            list(self.parts_handles.values()), dtype=torch.int32, device=self.device
-        )
+        idxs = torch.tensor(list(self.parts_handles.values()), dtype=torch.int32, device=self.device)
         self.isaac_gym.get_sim_actor_count(self.sim)
         self.isaac_gym.set_actor_root_state_tensor_indexed(
             self.sim,
@@ -1095,54 +948,40 @@ class FurnitureSimEnvLegacy(gym.Env):
         asset_options = gymapi.AssetOptions()
         asset_options.fix_base_link = True
         base_asset_file = "furniture/urdf/base_tag.urdf"
-        return self.isaac_gym.load_asset(
-            self.sim, ASSET_ROOT, base_asset_file, asset_options
-        )
+        return self.isaac_gym.load_asset(self.sim, ASSET_ROOT, base_asset_file, asset_options)
 
     def _import_obstacle_front_asset(self):
         asset_options = gymapi.AssetOptions()
         asset_options.fix_base_link = True
         obstacle_asset_file = "furniture/urdf/obstacle_front.urdf"
-        return self.isaac_gym.load_asset(
-            self.sim, ASSET_ROOT, obstacle_asset_file, asset_options
-        )
+        return self.isaac_gym.load_asset(self.sim, ASSET_ROOT, obstacle_asset_file, asset_options)
 
     def _import_obstacle_side_asset(self):
         asset_options = gymapi.AssetOptions()
         asset_options.fix_base_link = True
         obstacle_asset_file = "furniture/urdf/obstacle_side.urdf"
-        return self.isaac_gym.load_asset(
-            self.sim, ASSET_ROOT, obstacle_asset_file, asset_options
-        )
+        return self.isaac_gym.load_asset(self.sim, ASSET_ROOT, obstacle_asset_file, asset_options)
 
     def _import_background_asset(self):
         asset_options = gymapi.AssetOptions()
         asset_options.fix_base_link = True
         background_asset_file = "furniture/urdf/background.urdf"
-        return self.isaac_gym.load_asset(
-            self.sim, ASSET_ROOT, background_asset_file, asset_options
-        )
+        return self.isaac_gym.load_asset(self.sim, ASSET_ROOT, background_asset_file, asset_options)
 
     def _import_table_asset(self):
         asset_options = gymapi.AssetOptions()
         asset_options.fix_base_link = True
         table_asset_file = "furniture/urdf/table.urdf"
-        return self.isaac_gym.load_asset(
-            self.sim, ASSET_ROOT, table_asset_file, asset_options
-        )
+        return self.isaac_gym.load_asset(self.sim, ASSET_ROOT, table_asset_file, asset_options)
 
     def _import_franka_asset(self):
-        self.franka_asset_file = (
-            "franka_description_ros/franka_description/robots/franka_panda.urdf"
-        )
+        self.franka_asset_file = "franka_description_ros/franka_description/robots/franka_panda.urdf"
         asset_options = gymapi.AssetOptions()
         asset_options.armature = 0.01
         asset_options.fix_base_link = True
         asset_options.disable_gravity = True
         asset_options.flip_visual_attachments = True
-        return self.isaac_gym.load_asset(
-            self.sim, ASSET_ROOT, self.franka_asset_file, asset_options
-        )
+        return self.isaac_gym.load_asset(self.sim, ASSET_ROOT, self.franka_asset_file, asset_options)
 
     def get_assembly_action(self) -> torch.Tensor:
         """
@@ -1160,9 +999,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         if self.move_neutral:
             if ee_pos[2] <= 0.15 - 0.01:
                 gripper = torch.tensor([-1], dtype=torch.float32, device=self.device)
-                goal_pos = torch.tensor(
-                    [ee_pos[0], ee_pos[1], 0.15], device=self.device
-                )
+                goal_pos = torch.tensor([ee_pos[0], ee_pos[1], 0.15], device=self.device)
                 delta_pos = goal_pos - ee_pos
                 delta_quat = torch.tensor([0, 0, 0, 1], device=self.device)
                 action = torch.concat([delta_pos, delta_quat, gripper])
@@ -1189,9 +1026,7 @@ class FurnitureSimEnvLegacy(gym.Env):
             self.assemble_idx += 1
             self.move_neutral = True
             return (
-                torch.tensor(
-                    [0, 0, 0, 0, 0, 0, 1, -1], dtype=torch.float32, device=self.device
-                ).unsqueeze(0),
+                torch.tensor([0, 0, 0, 0, 0, 0, 1, -1], dtype=torch.float32, device=self.device).unsqueeze(0),
                 1,
             )  # Skill complete is always 1 when assembled.
         if not part1.pre_assemble_done:
@@ -1215,9 +1050,7 @@ class FurnitureSimEnvLegacy(gym.Env):
                 self.april_to_robot_mat,
             )
         else:
-            goal_pos, goal_ori, gripper, skill_complete = self.furniture.parts[
-                part_idx2
-            ].fsm_step(
+            goal_pos, goal_ori, gripper, skill_complete = self.furniture.parts[part_idx2].fsm_step(
                 ee_pos,
                 ee_quat,
                 gripper_width,
@@ -1249,10 +1082,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         # delta_quat = roma.utils.unitquat_slerp(q0, delta_quat, t)[0]
 
         # Add random noise to the action.
-        if (
-            self.furniture.parts[part_idx2].state_no_noise()
-            and np.random.random() < 0.50
-        ):
+        if self.furniture.parts[part_idx2].state_no_noise() and np.random.random() < 0.50:
             delta_pos = torch.normal(delta_pos, 0.005)
             delta_quat = C.quat_multiply(
                 delta_quat,
@@ -1278,5 +1108,5 @@ class FurnitureSimEnvLegacy(gym.Env):
             self.isaac_gym.destroy_viewer(self.viewer)
         self.isaac_gym.destroy_sim(self.sim)
 
-        if self.record:
+        if self.record and self.episode_cnts[0] % self.record_every == 0:
             self.video_writer.release()
