@@ -2,7 +2,7 @@ import collections
 import pickle
 from typing import Optional, Dict
 
-import d4rl
+# import d4rl
 import gym
 import numpy as np
 import jax.numpy as jnp
