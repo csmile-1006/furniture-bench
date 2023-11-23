@@ -35,7 +35,8 @@ flags.DEFINE_boolean("use_encoder", False, "Use CNN for the image encoder.")
 flags.DEFINE_boolean("record", False, "Record video")
 flags.DEFINE_string("encoder_type", "r3m", "vip or r3m")
 flags.DEFINE_float("temperature", 0.00, "Temperature for the policy.")
-flags.DEFINE_boolean('headless', False, 'Run in headless mode')
+flags.DEFINE_boolean("headless", False, "Run in headless mode")
+flags.DEFINE_integer("device_id", 0, "device_id")
 
 config_flags.DEFINE_config_file(
     "config",
@@ -53,12 +54,14 @@ def make_env(
     from_skill: int,
     skill: int,
     randomness: str,
-    high_random_idx,
+    high_random_idx: int,
     encoder_type: str,
-    headless: bool
+    headless: bool,
+    device_id: int,
 ) -> gym.Env:
     if "Furniture" in env_name:
         import furniture_bench
+
         env_id, furniture_name = env_name.split("/")
         env = gym.make(
             env_id,
@@ -73,12 +76,15 @@ def make_env(
             randomness=randomness,
             encoder_type=encoder_type,
             headless=headless,
-            max_env_steps=600
+            max_env_steps=600,
+            compute_device_id=device_id,
+            graphics_device_id=device_id,
         )
     else:
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
+    env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
@@ -92,6 +98,10 @@ def make_env(
 
 
 def main(_):
+    import jax
+
+    jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
+
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     os.makedirs(os.path.join(FLAGS.save_dir, "eval"), exist_ok=True)
     eval_path = os.path.join(FLAGS.save_dir, "eval", f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -109,7 +119,8 @@ def main(_):
         high_random_idx=FLAGS.high_random_idx,
         randomness=FLAGS.randomness,
         encoder_type=FLAGS.encoder_type,
-        headless=FLAGS.headless
+        headless=FLAGS.headless,
+        device_id=FLAGS.device_id,
     )
 
     kwargs = dict(FLAGS.config)
