@@ -43,6 +43,7 @@ flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
+flags.DEFINE_string("randomness", "low", "randomness of env.")
 
 
 def normalize(dataset):
@@ -71,6 +72,7 @@ def normalize(dataset):
 def make_env_and_dataset(
     env_name: str,
     seed: int,
+    randomness: str,
     data_path: str,
     use_encoder: bool,
     encoder_type: str,
@@ -92,6 +94,7 @@ def make_env_and_dataset(
             encoder_type=encoder_type,
             headless=True,
             record=True,
+            randomness=randomness,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
@@ -143,6 +146,7 @@ def main(_):
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
         FLAGS.seed,
+        FLAGS.randomness,
         FLAGS.data_path,
         FLAGS.use_encoder,
         FLAGS.encoder_type,
@@ -157,12 +161,14 @@ def main(_):
     log_kwargs["use_step"] = FLAGS.use_step
     log_kwargs["encoder_type"] = FLAGS.encoder_type
     log_kwargs["use_encoder"] = FLAGS.use_encoder
+    log_kwargs["randomness"] = FLAGS.randomness
+    log_kwargs["lambda_mr"] = FLAGS.lambda_mr
 
     if FLAGS.wandb:
         wandb.init(
             project=FLAGS.wandb_project,
             entity=FLAGS.wandb_entity,
-            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.data_path) + "-" + str(FLAGS.run_name),
+            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.data_path.split("/")[-1]) + "-" + str(FLAGS.run_name),
             config=log_kwargs,
             sync_tensorboard=True,
         )
