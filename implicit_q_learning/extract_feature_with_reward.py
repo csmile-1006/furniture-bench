@@ -18,6 +18,7 @@ flags.DEFINE_string("demo_dir", "square_table_parts_state", "Demonstration dir."
 flags.DEFINE_string("out_file_path", None, "Path to save converted data.")
 flags.DEFINE_boolean("use_r3m", False, "Use r3m to encode images.")
 flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
+flags.DEFINE_boolean("use_liv", False, "Use liv to encode images.")
 flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
 flags.DEFINE_integer("num_demos", None, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
@@ -90,14 +91,20 @@ def main(_):
 
         encoder = load_vip()
 
-    if FLAGS.use_r3m or FLAGS.use_vip:
+    if FLAGS.use_liv:
+        # Use LIV for the image encoder.
+        from liv import load_liv
+
+        encoder = load_liv()
+
+    if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
         encoder.eval()
         for param in encoder.parameters():
             param.requires_grad = False
         encoder.to("cuda")
         device = torch.device("cuda")
 
-    files = list(dir_path.glob("2023-*.pkl"))
+    files = list(dir_path.glob(r"[0-9]*.pkl"))
     len_files = len(files)
 
     if len_files == 0:
@@ -115,7 +122,7 @@ def main(_):
                 x["observations"].append(x["observations"][-1])
             length = len(x["observations"])
 
-            if FLAGS.use_r3m or FLAGS.use_vip:
+            if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
                 img1 = [x["observations"][i]["color_image1"] for i in range(length)]
                 img2 = [x["observations"][i]["color_image2"] for i in range(length)]
                 img1 = torch.from_numpy(np.stack(img1))
@@ -124,7 +131,7 @@ def main(_):
                 if FLAGS.use_r3m:
                     img1_feature = np.zeros((length, 2048), dtype=np.float32)
                     img2_feature = np.zeros((length, 2048), dtype=np.float32)
-                elif FLAGS.use_vip:
+                elif FLAGS.use_vip or FLAGS.use_liv:
                     img1_feature = np.zeros((length, 1024), dtype=np.float32)
                     img2_feature = np.zeros((length, 1024), dtype=np.float32)
 
@@ -173,13 +180,13 @@ def main(_):
             cumsum_skills = np.cumsum(x["skills"])
 
             for i in range(length - 1):
-                if FLAGS.use_r3m or FLAGS.use_vip:
+                if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
                     image1 = img1_feature[i]
                     next_image1 = img1_feature[i + 1]
                     image2 = img2_feature[i]
                     next_image2 = img2_feature[i + 1]
                 else:
-                    raise ValueError("You have to choose either use_r3m or use_vip.")
+                    raise ValueError("You have to choose either use_r3m or use_vip or use_liv.")
 
                 obs_.append(
                     {
