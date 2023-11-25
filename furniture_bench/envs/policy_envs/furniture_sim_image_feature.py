@@ -3,9 +3,8 @@ from gym import spaces
 
 import torch
 
-from furniture_bench.config import config
-from furniture_bench.envs.furniture_sim_env import FurnitureSimEnv
-from furniture_bench.envs.legacy_envs.furniture_sim_legacy_env import FurnitureSimEnvLegacy # Deprecated.
+from furniture_bench.envs.furniture_sim_env import FurnitureSimEnv  # noqa: F401
+from furniture_bench.envs.legacy_envs.furniture_sim_legacy_env import FurnitureSimEnvLegacy  # Deprecated.
 from furniture_bench.perception.image_utils import resize, resize_crop
 from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 
@@ -27,11 +26,18 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
 
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
+
             self.layer = load_r3m("resnet50").module
             self.embedding_dim = 2048
         elif kwargs["encoder_type"] == "vip":
             from vip import load_vip
+
             self.layer = load_vip().module
+            self.embedding_dim = 1024
+        elif kwargs["encoder_type"] == "liv":
+            from liv import load_liv
+
+            self.layer = load_liv().module
             self.embedding_dim = 1024
         self.layer.requires_grad_(False)
         self.layer.eval()
@@ -39,7 +45,6 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
 
     @property
     def observation_space(self):
-        img_shape = (*config["camera"]["resized_img_size"], 3)
         robot_state_dim = 14
 
         return spaces.Dict(
@@ -53,9 +58,9 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
     def _get_observation(self):
         obs = super()._get_observation()
 
-        if isinstance(obs['robot_state'],  dict):
+        if isinstance(obs["robot_state"], dict):
             # For legacy envs.
-            obs['robot_state'] = filter_and_concat_robot_state(obs["robot_state"])
+            obs["robot_state"] = filter_and_concat_robot_state(obs["robot_state"])
 
         robot_state = obs["robot_state"].squeeze()
         image1 = obs["color_image1"].squeeze()
