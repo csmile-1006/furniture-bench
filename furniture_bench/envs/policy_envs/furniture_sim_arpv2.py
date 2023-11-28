@@ -67,6 +67,7 @@ class FurnitureSimARPV2(FurnitureSimEnvLegacy):
 
         self.phase = 0
         self._current_instruct = self._get_instruct_feature(self.phase)
+        self._lambda_mr = kwargs.get("lambda_mr", 0.01)
 
     @property
     def observation_space(self):
@@ -174,7 +175,7 @@ class FurnitureSimARPV2(FurnitureSimEnvLegacy):
         current_reward = np.asarray(self._reward_model.get_reward(batch))
         batch.update(instruct=new_instruct[None, ...])
         next_reward = np.asarray(self._reward_model.get_reward(batch))
-        reward = max(current_reward, next_reward)
+        reward = max(current_reward, next_reward) * self._lambda_mr
         if next_reward > current_reward:
             self._current_instruct = new_instruct
             self.phase += 1
