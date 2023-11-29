@@ -164,8 +164,6 @@ class FurnitureSimARPV2(FurnitureSimEnvLegacy):
         stacked_obs = {key: self._batchify(stack[key]) for key in ["color_image2", "color_image1"]}
         new_instruct = self._get_instruct_feature(self.phase + 1)
 
-        # print(f"stacked_obs: {[(key, val.shape) for key, val in stacked_obs.items()]}")
-        # print(f"instruct: {self._current_instruct.shape}")
         batch = {
             "image": stacked_obs,
             "instruct": self._current_instruct[None, ...],
