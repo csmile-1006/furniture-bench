@@ -1,6 +1,5 @@
 """Implementations of algorithms for continuous control."""
 
-import copy
 import functools
 from functools import partial
 from typing import Dict, Optional, Sequence, Tuple
@@ -25,7 +24,7 @@ def _update_jit(
     rng: PRNGKey,
     actor: TrainState,
     critic: TrainState,
-    target_critic_params: Params,
+    target_critic: TrainState,
     value: TrainState,
     batch: TrainState,
     discount: float,
@@ -34,21 +33,20 @@ def _update_jit(
     A_scaling: float,
     critic_reduction: str,
 ) -> Tuple[PRNGKey, TrainState, TrainState, Params, TrainState, Dict[str, float]]:
-    target_critic = critic.replace(params=target_critic_params)
     new_value, value_info = update_v(target_critic, value, batch, expectile, critic_reduction)
     key, rng = jax.random.split(rng)
     new_actor, actor_info = update_actor(key, actor, target_critic, new_value, batch, A_scaling, critic_reduction)
 
     new_critic, critic_info = update_q(critic, new_value, batch, discount)
 
-    # new_target_critic_params = soft_target_update(new_critic.params, target_critic_params, tau)
-    new_target_critic_params = optax.incremental_update(new_critic.params, target_critic_params, tau)
+    new_target_critic_params = optax.incremental_update(new_critic.params, target_critic.params, tau)
+    new_target_critic = target_critic.replace(params=new_target_critic_params)
 
     return (
         rng,
         new_actor,
         new_critic,
-        new_target_critic_params,
+        new_target_critic,
         new_value,
         {**critic_info, **value_info, **actor_info},
     )
@@ -56,7 +54,7 @@ def _update_jit(
 
 class IQLLearner(Agent):
     critic: TrainState
-    target_critic_params: Params
+    target_critic: TrainState
     value: TrainState
     tau: float
     discount: float
@@ -87,12 +85,6 @@ class IQLLearner(Agent):
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
         """
 
-        # self.expectile = expectile
-        # self.tau = tau
-        # self.discount = discount
-        # self.critic_reduction = critic_reduction
-        # self.A_scaling = A_scaling
-
         action_dim = action_space.shape[-1]
         observations = observation_space.sample()
         actions = action_space.sample()
@@ -109,14 +101,11 @@ class IQLLearner(Agent):
             squash_tanh=False,
         )
         if decay_steps is not None:
-            actor_lr = optax.cosine_decay_schedule(actor_lr, decay_steps)
+            schedule_fn = optax.cosine_decay_schedule(-actor_lr, decay_steps)
+            optimiser = optax.chain(optax.scale_by_adam(), optax.scale_by_schedule(schedule_fn))
 
         actor_params = actor_def.init(actor_key, observations)["params"]
-        actor = TrainState.create(
-            apply_fn=actor_def.apply,
-            params=actor_params,
-            tx=optax.adam(learning_rate=actor_lr),
-        )
+        actor = TrainState.create(apply_fn=actor_def.apply, params=actor_params, tx=optimiser)
         critic_base_cls = partial(
             MLP,
             hidden_dims=hidden_dims,
@@ -132,7 +121,13 @@ class IQLLearner(Agent):
             params=critic_params,
             tx=optax.adam(learning_rate=critic_lr),
         )
-        target_critic_params = copy.deepcopy(critic_params)
+
+        target_critic_params = critic_def.init(critic_key, observations, actions)["params"]
+        target_critic = TrainState.create(
+            apply_fn=critic_def.apply,
+            params=target_critic_params,
+            tx=optax.GradientTransformation(lambda _: None, lambda _: None),
+        )
 
         value_def = StateValue(base_cls=critic_base_cls)
         value_params = value_def.init(value_key, observations)["params"]
@@ -142,17 +137,11 @@ class IQLLearner(Agent):
             tx=optax.adam(learning_rate=value_lr),
         )
 
-        # self.expectile = expectile
-        # self.tau = tau
-        # self.discount = discount
-        # self.critic_reduction = critic_reduction
-        # self.A_scaling = A_scaling
-
         return cls(
             rng=rng,
             actor=actor,
             critic=critic,
-            target_critic_params=target_critic_params,
+            target_critic=target_critic,
             value=value,
             expectile=expectile,
             tau=tau,
@@ -160,12 +149,6 @@ class IQLLearner(Agent):
             critic_reduction=critic_reduction,
             A_scaling=A_scaling,
         )
-
-        # self.rng = rng
-        # self.actor = actor
-        # self.critic = critic
-        # self.target_critic_params = target_critic_params
-        # self.value = value
 
     def update(self, batch: FrozenDict) -> Dict[str, float]:
         (
@@ -179,7 +162,7 @@ class IQLLearner(Agent):
             self.rng,
             self.actor,
             self.critic,
-            self.target_critic_params,
+            self.target_critic,
             self.value,
             batch,
             self.discount,
@@ -189,8 +172,8 @@ class IQLLearner(Agent):
             self.critic_reduction,
         )
 
-        self.replace(
-            rng=new_rng, actor=new_actor, critic=new_critic, target_critic_params=new_target_critic, value=new_value
+        new_agent = self.replace(
+            rng=new_rng, actor=new_actor, critic=new_critic, target_critic=new_target_critic, value=new_value
         )
-        info["mse"] = jnp.mean((batch.actions - self.eval_actions(batch.observations)) ** 2)
-        return info
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
+        return new_agent, info

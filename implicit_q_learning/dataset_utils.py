@@ -146,7 +146,7 @@ class Dataset(object):
             )
         return Batch(
             # observations=jnp.zeros((len(indx), 2062), dtype=jnp.float32),
-            observations=np.array(
+            observations=jnp.asarray(
                 [
                     np.concatenate([self.observations[i][key] for key in ["robot_state", "image1", "image2"]])
                     for i in indx
@@ -170,7 +170,7 @@ class Dataset(object):
             #     "robot_state": jnp.array([self.next_observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
             # },
             # next_observations=jnp.zeros((len(indx), 2062), dtype=jnp.float32),
-            next_observations=np.array(
+            next_observations=jnp.asarray(
                 [
                     np.concatenate([self.next_observations[i][key] for key in ["robot_state", "image1", "image2"]])
                     for i in indx

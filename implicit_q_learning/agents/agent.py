@@ -16,5 +16,5 @@ class Agent(struct.PyTreeNode):
 
     def sample_actions(self, observations: np.ndarray) -> np.ndarray:
         rng, actions = sample_actions_jit(self.rng, self.actor.apply_fn, self.actor.params, observations)
-        self.rng = rng
+        self.replace(rng=rng)
         return np.array(actions)
