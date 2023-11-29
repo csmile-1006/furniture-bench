@@ -1,1 +1,1 @@
-from agents.iql import IQLLearner
+from agents.iql import IQLLearner, IQLTransformerLearner

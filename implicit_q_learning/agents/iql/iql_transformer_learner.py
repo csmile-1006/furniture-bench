@@ -1,59 +1,33 @@
 """Implementations of algorithms for continuous control."""
 
-import functools
 from functools import partial
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence
 
 import gym
 import jax
 import optax
-import jax.numpy as jnp
 from flax.core.frozen_dict import FrozenDict
 from flax.training.train_state import TrainState
 
-from agents.agent import Agent
-from agents.iql.actor_updater import update_actor
-from agents.iql.critic_updater import update_q, update_v
-from networks import MLP, Ensemble
-from networks.distributions import UnitStdNormalPolicy
+from networks import UnitStdNormalPolicy, MLP, Ensemble, SequenceMultiplexer
 from networks.values import StateValue, StateActionValue
-from data_types import Params, PRNGKey
+from networks.encoders import TransformerEncoder
+from agents.iql.iql_learner import IQLLearner
 
 
-@functools.partial(jax.jit, static_argnames="critic_reduction")
-def _update_jit(
-    rng: PRNGKey,
-    actor: TrainState,
-    critic: TrainState,
-    target_critic: TrainState,
-    value: TrainState,
-    batch: TrainState,
-    discount: float,
-    tau: float,
-    expectile: float,
-    A_scaling: float,
-    critic_reduction: str,
-) -> Tuple[PRNGKey, TrainState, TrainState, Params, TrainState, Dict[str, float]]:
-    new_value, value_info = update_v(target_critic, value, batch, expectile, critic_reduction)
-    key, rng = jax.random.split(rng)
-    new_actor, actor_info = update_actor(key, actor, target_critic, new_value, batch, A_scaling, critic_reduction)
+def _share_encoder(source, target):
+    replacers = {}
 
-    new_critic, critic_info = update_q(critic, new_value, batch, discount)
+    for k, v in source.params.items():
+        if "encoder" in k:
+            replacers[k] = v
 
-    new_target_critic_params = optax.incremental_update(new_critic.params, target_critic.params, tau)
-    new_target_critic = target_critic.replace(params=new_target_critic_params)
-
-    return (
-        rng,
-        new_actor,
-        new_critic,
-        new_target_critic,
-        new_value,
-        {**critic_info, **value_info, **actor_info},
-    )
+    # Use critic conv layers in actor:
+    new_params = target.params.copy(add_or_replace=replacers)
+    return target.replace(params=new_params)
 
 
-class IQLLearner(Agent):
+class IQLTransformerLearner(IQLLearner):
     critic: TrainState
     target_critic: TrainState
     value: TrainState
@@ -81,6 +55,10 @@ class IQLLearner(Agent):
         critic_reduction: str = "min",
         apply_tanh: bool = False,
         dropout_rate: Optional[float] = None,
+        encoder: str = "transformer",
+        latent_dim: int = 512,
+        depth: int = 2,
+        num_heads: int = 8,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -93,8 +71,21 @@ class IQLLearner(Agent):
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
 
+        if encoder == "transformer":
+            encoder_cls = partial(TransformerEncoder, emb_dim=latent_dim, depth=depth, num_heads=num_heads)
+        else:
+            raise NotImplementedError
+
         actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True)
-        actor_def = UnitStdNormalPolicy(base_cls=actor_base_cls, action_dim=action_dim)
+        actor_cls = partial(
+            UnitStdNormalPolicy,
+            base_cls=actor_base_cls,
+            action_dim=action_dim,
+            log_std_min=-5.0,
+            state_dependent_std=False,
+            squash_tanh=False,
+        )
+        actor_def = SequenceMultiplexer(encoder_cls=encoder_cls, network_cls=actor_cls, latent_dim=latent_dim)
         if decay_steps is not None:
             schedule_fn = optax.cosine_decay_schedule(-actor_lr, decay_steps)
             optimiser = optax.chain(optax.scale_by_adam(), optax.scale_by_schedule(schedule_fn))
@@ -109,7 +100,8 @@ class IQLLearner(Agent):
             use_layer_norm=False,
         )
         critic_cls = partial(StateActionValue, base_cls=critic_base_cls)
-        critic_def = Ensemble(critic_cls, num=2)
+        critic_cls = partial(Ensemble, net_cls=critic_cls, num=2)
+        critic_def = SequenceMultiplexer(encoder_cls=encoder_cls, network_cls=critic_cls, latent_dim=latent_dim)
         critic_params = critic_def.init(critic_key, observations, actions)["params"]
         critic = TrainState.create(
             apply_fn=critic_def.apply,
@@ -124,7 +116,8 @@ class IQLLearner(Agent):
             tx=optax.GradientTransformation(lambda _: None, lambda _: None),
         )
 
-        value_def = StateValue(base_cls=critic_base_cls)
+        value_cls = partial(StateValue, base_cls=critic_base_cls)
+        value_def = SequenceMultiplexer(encoder_cls=encoder_cls, network_cls=value_cls, latent_dim=latent_dim)
         value_params = value_def.init(value_key, observations)["params"]
         value = TrainState.create(
             apply_fn=value_def.apply,
@@ -146,29 +139,8 @@ class IQLLearner(Agent):
         )
 
     def update(self, batch: FrozenDict) -> Dict[str, float]:
-        (
-            new_rng,
-            new_actor,
-            new_critic,
-            new_target_critic,
-            new_value,
-            info,
-        ) = _update_jit(
-            self.rng,
-            self.actor,
-            self.critic,
-            self.target_critic,
-            self.value,
-            batch,
-            self.discount,
-            self.tau,
-            self.expectile,
-            self.A_scaling,
-            self.critic_reduction,
-        )
-
-        new_agent = self.replace(
-            rng=new_rng, actor=new_actor, critic=new_critic, target_critic=new_target_critic, value=new_value
-        )
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
-        return new_agent, info
+        new_agent = self
+        target_critic = _share_encoder(source=new_agent.critic, target=new_agent.target_critic)
+        actor = _share_encoder(source=new_agent.critic, target=new_agent.actor)
+        new_agent = new_agent.replace(target_critic=target_critic, actor=actor)
+        return IQLLearner.update(new_agent, batch)

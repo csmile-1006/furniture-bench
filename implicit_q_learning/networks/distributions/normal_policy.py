@@ -1,6 +1,7 @@
-from typing import Any, Optional, Type
+from typing import Optional, Type, Any
 
 import tensorflow_probability
+
 
 tfp = tensorflow_probability.substrates.jax
 tfd = tfp.distributions
@@ -45,10 +46,6 @@ class UnitStdNormalPolicy(nn.Module):
             log_stds = self.param("OutpuLogStd", nn.initializers.zeros, (self.action_dim,), jnp.float32)
 
         log_stds = jnp.clip(log_stds, self.log_std_min, self.log_std_max)
-
-        if not self.squash_tanh:
-            means = nn.tanh(means)
-
         distribution = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds))
 
         if self.squash_tanh:

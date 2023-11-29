@@ -14,8 +14,7 @@ import wrappers
 from dataset_utils import D4RLDataset, FurnitureDataset, split_into_trajectories
 from evaluation import evaluate
 
-# from learner import Learner
-from agents.iql.iql_learner import IQLLearner
+from agents import IQLLearner, IQLTransformerLearner  # noqa: F401
 
 FLAGS = flags.FLAGS
 
@@ -185,15 +184,8 @@ def main(_):
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
-    # agent = Learner(
-    #     FLAGS.seed,
-    #     env.observation_space.sample(),
-    #     env.action_space.sample()[np.newaxis],
-    #     max_steps=FLAGS.max_steps,
-    #     **kwargs,
-    #     use_encoder=FLAGS.use_encoder,
-    # )
-    agent = IQLLearner.create(
+    model_cls = kwargs.pop("model_cls")
+    agent = globals()[model_cls].create(
         seed=FLAGS.seed,
         observation_space=env.observation_space,
         action_space=env.action_space,
