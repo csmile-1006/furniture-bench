@@ -77,14 +77,7 @@ class IQLTransformerLearner(IQLLearner):
             raise NotImplementedError
 
         actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True)
-        actor_cls = partial(
-            UnitStdNormalPolicy,
-            base_cls=actor_base_cls,
-            action_dim=action_dim,
-            log_std_min=-5.0,
-            state_dependent_std=False,
-            squash_tanh=False,
-        )
+        actor_cls = partial(UnitStdNormalPolicy, base_cls=actor_base_cls, action_dim=action_dim)
         actor_def = SequenceMultiplexer(encoder_cls=encoder_cls, network_cls=actor_cls, latent_dim=latent_dim)
         if decay_steps is not None:
             schedule_fn = optax.cosine_decay_schedule(-actor_lr, decay_steps)
