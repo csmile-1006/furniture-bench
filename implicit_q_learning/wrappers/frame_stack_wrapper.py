@@ -11,18 +11,26 @@ class FrameStackWrapper(gym.ActionWrapper):
         self._num_frames = num_frames
         self._skip_frame = skip_frame
         self._i = 0
-        self._frames = {frame: {key: deque([], maxlen=num_frames) for key in self.env.observation_space} for frame in range(self._skip_frame)}
+        self._frames = {
+            frame: {key: deque([], maxlen=num_frames) for key in self.env.observation_space}
+            for frame in range(self._skip_frame)
+        }
+        self._target_keys = ["robot_state", "image1", "image2"]
 
     def _transform_observation(self, obs):
         stack = self._frames[self._i % self._skip_frame]
         for key in obs:
             assert len(stack[key]) == self._num_frames, f"{len(stack[key])} != {self._num_frames}"
             obs[key] = np.stack(stack[key])
-        return obs
+        ret = np.concatenate([obs[key] for key in self._target_keys], axis=-1)
+        return ret
 
     def reset(self):
         self._i = 0
-        self._frames = {frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space} for frame in range(self._skip_frame)}
+        self._frames = {
+            frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
+            for frame in range(self._skip_frame)
+        }
         _obs = self.env.reset()
         for frame in range(self._skip_frame):
             for _ in range(self._num_frames):
@@ -39,18 +47,37 @@ class FrameStackWrapper(gym.ActionWrapper):
         return obs, reward, done, info
 
     @property
+    def action_space(self):
+        return gym.spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(self.env.pose_dim + 1,),
+        )
+
+    @property
     def observation_space(self):
-        obs_space = {}
-        for key, val in self.env.observation_space.items():
-            obs_space[key] = spaces.Box(val.low.reshape(-1)[0], val.high.reshape(-1)[0], (self._num_frames, *val.shape))
-        return spaces.Dict(obs_space)
+        robot_state_dim = 14
+        obs_dim = 0
+        for key in self._target_keys:
+            if key == "robot_state":
+                obs_dim += robot_state_dim
+            elif "image" in key:
+                obs_dim += self.embedding_dim
+        return gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(self._num_frames, obs_dim),
+        )
+
 
 if __name__ == "__main__":
     import furniture_bench
+
     env_name = "FurnitureSimImageFeature-v0/one_leg"
     # env_name = "FurnitureSim-v0/one_leg"
     env_id, furniture_name = env_name.split("/")
-    env = gym.make(env_id,
+    env = gym.make(
+        env_id,
         furniture=furniture_name,
         data_path="",
         use_encoder=False,
@@ -76,5 +103,3 @@ if __name__ == "__main__":
         print(f"timestep {timestep} / stack step {env._i} / current stack {res['timestep']}")
         if done:
             break
-    
- 
