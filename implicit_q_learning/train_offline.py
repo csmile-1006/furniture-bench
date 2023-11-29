@@ -8,11 +8,14 @@ from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 import wandb
+from flax.training import checkpoints
 
 import wrappers
 from dataset_utils import D4RLDataset, FurnitureDataset, split_into_trajectories
 from evaluation import evaluate
-from learner import Learner
+
+# from learner import Learner
+from agents.iql.iql_learner import IQLLearner
 
 FLAGS = flags.FLAGS
 
@@ -104,7 +107,8 @@ def make_env_and_dataset(
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
-    env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
+    env = wrappers.Flatten(env)
+    # env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
@@ -168,20 +172,33 @@ def main(_):
         wandb.init(
             project=FLAGS.wandb_project,
             entity=FLAGS.wandb_entity,
-            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.data_path.split("/")[-1]) + "-" + str(FLAGS.run_name),
+            name=FLAGS.env_name
+            + "-"
+            + str(FLAGS.seed)
+            + "-"
+            + str(FLAGS.data_path.split("/")[-1])
+            + "-"
+            + str(FLAGS.run_name),
             config=log_kwargs,
             sync_tensorboard=True,
         )
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
-    agent = Learner(
-        FLAGS.seed,
-        env.observation_space.sample(),
-        env.action_space.sample()[np.newaxis],
-        max_steps=FLAGS.max_steps,
+    # agent = Learner(
+    #     FLAGS.seed,
+    #     env.observation_space.sample(),
+    #     env.action_space.sample()[np.newaxis],
+    #     max_steps=FLAGS.max_steps,
+    #     **kwargs,
+    #     use_encoder=FLAGS.use_encoder,
+    # )
+    agent = IQLLearner.create(
+        seed=FLAGS.seed,
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        decay_steps=FLAGS.max_steps,
         **kwargs,
-        use_encoder=FLAGS.use_encoder,
     )
 
     eval_returns = []
@@ -199,7 +216,8 @@ def main(_):
             summary_writer.flush()
 
         if i % FLAGS.ckpt_interval == 0:
-            agent.save(ckpt_dir, i)
+            # agent.save(ckpt_dir, i)
+            checkpoints.save_checkpoint(ckpt_dir, agent, step=i, keep=20, overwrite=True)
 
         if i % FLAGS.eval_interval == 0:
             env.env.episode_cnts = np.zeros(env.env.num_envs, dtype=np.int32)
@@ -218,7 +236,8 @@ def main(_):
 
     if not i % FLAGS.ckpt_interval == 0:
         # Save last step if it is not saved.
-        agent.save(ckpt_dir, i)
+        # agent.save(ckpt_dir, i)
+        checkpoints.save_checkpoint(ckpt_dir, agent, step=i, keep=20, overwrite=True)
 
     if FLAGS.wandb:
         wandb.finish()
