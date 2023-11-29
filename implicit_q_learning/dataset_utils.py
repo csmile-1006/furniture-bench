@@ -148,7 +148,7 @@ class Dataset(object):
             # observations=jnp.zeros((len(indx), 2062), dtype=jnp.float32),
             observations=jnp.asarray(
                 [
-                    np.concatenate([self.observations[i][key] for key in ["robot_state", "image1", "image2"]])
+                    np.concatenate([self.observations[i][key] for key in ["robot_state", "image1", "image2"]], axis=-1)
                     for i in indx
                 ],
                 dtype=jnp.float32,
@@ -172,7 +172,9 @@ class Dataset(object):
             # next_observations=jnp.zeros((len(indx), 2062), dtype=jnp.float32),
             next_observations=jnp.asarray(
                 [
-                    np.concatenate([self.next_observations[i][key] for key in ["robot_state", "image1", "image2"]])
+                    np.concatenate(
+                        [self.next_observations[i][key] for key in ["robot_state", "image1", "image2"]], axis=-1
+                    )
                     for i in indx
                 ],
                 dtype=jnp.float32,

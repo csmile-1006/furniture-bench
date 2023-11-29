@@ -81,6 +81,7 @@ def make_env_and_dataset(
     use_arp: bool,
     use_step: bool,
     lambda_mr: float,
+    model_cls: str,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -106,8 +107,10 @@ def make_env_and_dataset(
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
-    env = wrappers.Flatten(env)
-    # env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
+    if model_cls == "IQLLearner":
+        env = wrappers.Flatten(env)
+    elif model_cls == "IQLTransformerLearner":
+        env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
@@ -146,6 +149,16 @@ def main(_):
     tb_dir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
+    kwargs = dict(FLAGS.config)
+    log_kwargs = kwargs.copy()
+    log_kwargs["use_arp"] = FLAGS.use_arp
+    log_kwargs["use_step"] = FLAGS.use_step
+    log_kwargs["encoder_type"] = FLAGS.encoder_type
+    log_kwargs["use_encoder"] = FLAGS.use_encoder
+    log_kwargs["randomness"] = FLAGS.randomness
+    log_kwargs["lambda_mr"] = FLAGS.lambda_mr
+    model_cls = kwargs.pop("model_cls")
+
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
         FLAGS.seed,
@@ -156,16 +169,8 @@ def main(_):
         FLAGS.use_arp,
         FLAGS.use_step,
         FLAGS.lambda_mr,
+        model_cls,
     )
-
-    kwargs = dict(FLAGS.config)
-    log_kwargs = kwargs.copy()
-    log_kwargs["use_arp"] = FLAGS.use_arp
-    log_kwargs["use_step"] = FLAGS.use_step
-    log_kwargs["encoder_type"] = FLAGS.encoder_type
-    log_kwargs["use_encoder"] = FLAGS.use_encoder
-    log_kwargs["randomness"] = FLAGS.randomness
-    log_kwargs["lambda_mr"] = FLAGS.lambda_mr
 
     if FLAGS.wandb:
         wandb.init(
@@ -178,13 +183,13 @@ def main(_):
             + str(FLAGS.data_path.split("/")[-1])
             + "-"
             + str(FLAGS.run_name),
-            config=log_kwargs,
+            # config=log_kwargs,
             sync_tensorboard=True,
         )
+        wandb.config.update(FLAGS)
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
-    model_cls = kwargs.pop("model_cls")
     agent = globals()[model_cls].create(
         seed=FLAGS.seed,
         observation_space=env.observation_space,
