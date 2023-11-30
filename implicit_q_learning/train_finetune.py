@@ -41,13 +41,21 @@ config_flags.DEFINE_config_file(
 flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
+flags.DEFINE_integer("skip_frame", 16, "how often skip frame.")
+flags.DEFINE_integer("num_frames", 4, "Number of frames in context window.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
-flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
+flags.DEFINE_float("lambda_mr", 0.01, "lambda value for dataset.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
+flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
+flags.DEFINE_string(
+    "rm_ckpt_path",
+    "/mnt/changyeon/ICML2024/arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_none-liv-img2+1-legacy-withlogit100-demo1000/s0/best_model.pkl",
+    "reward model checkpoint path.",
+)
 
 
 def normalize(dataset):
@@ -102,7 +110,12 @@ def make_env_and_dataset(
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
+            window_size=FLAGS.num_frames,
+            skip_frame=FLAGS.skip_frame,
             max_env_steps=600 if "Sim" in env_id else 3000,
+            rm_type=FLAGS.rm_type,
+            rm_ckpt_path=FLAGS.rm_ckpt_path,
+            lambda_mr=FLAGS.lambda_mr,
         )
     else:
         env = gym.make(env_name)
