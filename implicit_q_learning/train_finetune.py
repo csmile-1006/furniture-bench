@@ -252,7 +252,7 @@ def main(_):
             if i <= 0:
                 if FLAGS.ckpt_step == 0:
                     checkpoints.save_checkpoint(
-                        ckpt_dir, agent, step=abs(i) + FLAGS.num_pretraining_steps, keep=20, overwrite=True
+                        ckpt_dir, agent, step=i + FLAGS.num_pretraining_steps, keep=20, overwrite=True
                     )
             else:
                 checkpoints.save_checkpoint(ft_ckpt_dir, agent, step=i + start_step, keep=20, overwrite=True)
