@@ -150,15 +150,7 @@ def main(_):
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     kwargs = dict(FLAGS.config)
-    log_kwargs = kwargs.copy()
-    log_kwargs["use_arp"] = FLAGS.use_arp
-    log_kwargs["use_step"] = FLAGS.use_step
-    log_kwargs["encoder_type"] = FLAGS.encoder_type
-    log_kwargs["use_encoder"] = FLAGS.use_encoder
-    log_kwargs["randomness"] = FLAGS.randomness
-    log_kwargs["lambda_mr"] = FLAGS.lambda_mr
     model_cls = kwargs.pop("model_cls")
-
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
         FLAGS.seed,

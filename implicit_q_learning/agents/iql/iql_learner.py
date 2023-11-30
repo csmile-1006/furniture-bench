@@ -2,7 +2,7 @@
 
 import functools
 from functools import partial
-from typing import Dict, Optional, Sequence, Tuple, Callable
+from typing import Dict, Optional, Sequence, Tuple
 
 import gym
 import jax
@@ -185,4 +185,4 @@ class IQLLearner(Agent):
 
     def eval_actions(self, observations: np.ndarray) -> np.ndarray:
         new_rng, actions = iql_eval_actions_jit(self.rng, self.actor.apply_fn, self.actor.params, observations)
-        return np.array(actions), self.replace(rng=new_rng)
+        return np.clip(np.array(actions), -1, 1), self.replace(rng=new_rng)
