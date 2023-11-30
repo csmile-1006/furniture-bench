@@ -248,7 +248,6 @@ class FurnitureDataset(Dataset):
         #                 dataset[obs][i][img][:, :, 1] = (dataset[obs][i][img][:, :, 1] - 0.456) / 0.224
         #                 dataset[obs][i][img][:, :, 2] = (dataset[obs][i][img][:, :, 2] - 0.406) / 0.225
 
-        observations, next_observations = [], []
         for i in range(len(dones_float) - 1):
             if (
                 np.linalg.norm(
@@ -260,6 +259,9 @@ class FurnitureDataset(Dataset):
                 dones_float[i] = 1
             else:
                 dones_float[i] = 0
+
+        observations, next_observations = [], []
+        for i in range(len(dataset["observations"])):
             observations.append(
                 np.concatenate(
                     [dataset["observations"][i][key] for key in ["robot_state", "image1", "image2"]], axis=-1

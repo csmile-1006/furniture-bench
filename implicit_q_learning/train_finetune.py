@@ -144,10 +144,10 @@ def main(_):
 
     torch.cuda.set_device(FLAGS.device_id)
 
+    os.makedirs(FLAGS.save_dir, exist_ok=True)
     root_logdir = os.path.join(FLAGS.save_dir, "tb", str(FLAGS.seed))
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
-    os.makedirs(FLAGS.save_dir, exist_ok=True)
 
     kwargs = dict(FLAGS.config)
     model_cls = kwargs.pop("model_cls")
@@ -197,7 +197,6 @@ def main(_):
     )
 
     eval_returns = []
-    observation, done = env.reset(), False
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         print(f"load trained checkpoints from {ckpt_dir}")
         chkpt = checkpoints.restore_checkpoint(ckpt_dir=ckpt_dir, target=None, step=FLAGS.ckpt_step)
@@ -208,6 +207,8 @@ def main(_):
 
     # Use negative indices for pretraining steps.
     for i in tqdm.tqdm(steps, smoothing=0.1, disable=not FLAGS.tqdm):
+        if i == 0:
+            observation, done = env.reset(), False
         if i >= 1:
             action, agent = agent.sample_actions(observation)
             action = np.clip(action, -1, 1)
