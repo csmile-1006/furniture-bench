@@ -140,6 +140,10 @@ def main(_):
 
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
+    import torch
+
+    torch.cuda.set_device(FLAGS.device_id)
+
     root_logdir = os.path.join(FLAGS.save_dir, "tb", str(FLAGS.seed))
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -246,9 +250,10 @@ def main(_):
 
         if i % FLAGS.ckpt_interval == 0:
             if i <= 0:
-                checkpoints.save_checkpoint(
-                    ckpt_dir, agent, step=abs(i) + FLAGS.num_pretraining_steps, keep=20, overwrite=True
-                )
+                if FLAGS.ckpt_step == 0:
+                    checkpoints.save_checkpoint(
+                        ckpt_dir, agent, step=abs(i) + FLAGS.num_pretraining_steps, keep=20, overwrite=True
+                    )
             else:
                 checkpoints.save_checkpoint(ft_ckpt_dir, agent, step=i + start_step, keep=20, overwrite=True)
 

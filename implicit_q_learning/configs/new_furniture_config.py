@@ -21,8 +21,9 @@ def get_config():
     config.tau = 0.005  # For soft target updates.
 
     # transformer setup
-    config.emb_dim = 512
-    config.depth = 2
-    config.num_heads = 8
+    if config.model_cls == "IQLTransformerLearner":
+        config.latent_dim = 512
+        config.depth = 2
+        config.num_heads = 8
 
     return config

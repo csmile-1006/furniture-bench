@@ -142,6 +142,10 @@ def main(_):
 
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
+    import torch
+
+    torch.cuda.set_device(FLAGS.device_id)
+
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     tb_dir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
