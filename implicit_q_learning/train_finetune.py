@@ -144,7 +144,7 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-    root_logdir = os.path.join(FLAGS.save_dir, "tb", str(FLAGS.seed))
+    root_logdir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}_{FLAGS.seed}_ft")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
