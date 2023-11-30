@@ -40,7 +40,7 @@ class FlattenWrapper(gym.ActionWrapper):
         return gym.spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(self._num_frames, obs_dim),
+            shape=(obs_dim,),
         )
 
 
@@ -66,6 +66,8 @@ if __name__ == "__main__":
         # concat_robot_state=True,
     )
     env = FlattenWrapper(env)
+    print(f"observation_space: {env.observation_space}")
+    print(f"action_space: {env.action_space}")
     obs = env.reset()
     timestep = 0
     print(f"timestep {timestep} / obs: {obs.shape}")
