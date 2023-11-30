@@ -13,7 +13,7 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
         pbar = tqdm(total=env.furniture.max_env_steps, leave=False, desc=f"episode {ep + 1}")
         observation, done = env.reset(), False
         while not done:
-            action, agent = agent.eval_actions(observation)
+            action = agent.eval_actions(observation)
             observation, _, done, info = env.step(action)
             pbar.update(1)
 
@@ -23,4 +23,4 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
     for k, v in stats.items():
         stats[k] = np.mean(v)
 
-    return stats, agent
+    return stats

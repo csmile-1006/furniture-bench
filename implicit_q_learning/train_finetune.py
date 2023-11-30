@@ -1,12 +1,11 @@
 import os
-from typing import Tuple
 
-import gym
 import numpy as np
 import tqdm
 from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
+from flax.training import checkpoints
 
 from dataset_utils import Batch, ReplayBuffer
 from evaluation import evaluate
@@ -17,10 +16,13 @@ FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
+flags.DEFINE_string("run_name", "", "Run specific name")
+flags.DEFINE_string("ckpt_step", 0, "Specific checkpoint step")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_integer("eval_episodes", 100, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
+flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
@@ -50,7 +52,12 @@ flags.DEFINE_string("randomness", "low", "randomness of env.")
 
 def main(_):
     root_logdir = os.path.join(FLAGS.save_dir, "tb", str(FLAGS.seed))
+    ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     os.makedirs(FLAGS.save_dir, exist_ok=True)
+
+    if "Sim" in FLAGS.env_name:
+        import isaacgym  # noqa: F401
 
     kwargs = dict(FLAGS.config)
     model_cls = kwargs.pop("model_cls")
@@ -103,11 +110,15 @@ def main(_):
 
     eval_returns = []
     observation, done = env.reset(), False
+    if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
+        chkpt = checkpoints.restore_checkpoint(ckpt_dir=ckpt_dir, target=None, step=FLAGS.ckpt_step)
+        agent.load(chkpt)
+        start_step, steps = FLAGS.ckpt_step, range(FLAGS.max_steps + 1)
+    else:
+        start_step, steps = FLAGS.num_pretraining_steps, range(1 - FLAGS.num_pretraining_steps, FLAGS.max_steps + 1)
 
     # Use negative indices for pretraining steps.
-    for i in tqdm.tqdm(
-        range(1 - FLAGS.num_pretraining_steps, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm
-    ):
+    for i in tqdm.tqdm(steps, smoothing=0.1, disable=not FLAGS.tqdm):
         if i >= 1:
             action = agent.sample_actions(observation)
             action = np.clip(action, -1, 1)
@@ -138,7 +149,7 @@ def main(_):
                 masks=batch.masks,
                 next_observations=batch.next_observations,
             )
-        update_info = agent.update(batch)
+        agent, update_info = agent.update(batch)
 
         if i % FLAGS.log_interval == 0:
             for k, v in update_info.items():
@@ -147,6 +158,12 @@ def main(_):
                 else:
                     summary_writer.add_histogram(f"training/{k}", v, i)
             summary_writer.flush()
+
+        if i % FLAGS.ckpt_interval == 0:
+            if i < 0:
+                checkpoints.save_checkpoint(ckpt_dir, agent, step=abs(i), keep=20, overwrite=True)
+            else:
+                checkpoints.save_checkpoint(ft_ckpt_dir, agent, step=i + start_step, keep=20, overwrite=True)
 
         if i % FLAGS.eval_interval == 0:
             eval_stats = evaluate(agent, env, FLAGS.eval_episodes)

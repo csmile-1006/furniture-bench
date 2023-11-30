@@ -1,6 +1,7 @@
 import numpy as np
 from flax import struct
 from flax.training.train_state import TrainState
+from flax.core.frozen_dict import FrozenDict
 
 from agents.common import eval_actions_jit, sample_actions_jit
 from data_types import PRNGKey
@@ -17,3 +18,13 @@ class Agent(struct.PyTreeNode):
     def sample_actions(self, observations: np.ndarray) -> np.ndarray:
         rng, actions = sample_actions_jit(self.rng, self.actor.apply_fn, self.actor.params, observations)
         return np.array(actions), self.replace(rng=rng)
+
+    def load(self, chkpt):
+        new_agent = self
+        for key in chkpt:
+            if isinstance(chkpt[key], dict):
+                module = getattr(new_agent, key)
+                module.replace(params=FrozenDict(chkpt[key]["params"]))
+            else:
+                new_agent.replace(**{key: chkpt[key]})
+        return new_agent

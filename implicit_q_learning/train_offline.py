@@ -172,7 +172,6 @@ def main(_):
             + str(FLAGS.data_path.split("/")[-1])
             + "-"
             + str(FLAGS.run_name),
-            # config=log_kwargs,
             sync_tensorboard=True,
         )
         wandb.config.update(FLAGS)
@@ -202,12 +201,11 @@ def main(_):
             summary_writer.flush()
 
         if i % FLAGS.ckpt_interval == 0:
-            # agent.save(ckpt_dir, i)
             checkpoints.save_checkpoint(ckpt_dir, agent, step=i, keep=20, overwrite=True)
 
         if i % FLAGS.eval_interval == 0:
             env.env.episode_cnts = np.zeros(env.env.num_envs, dtype=np.int32)
-            eval_stats, agent = evaluate(agent, env, FLAGS.eval_episodes)
+            eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
@@ -222,7 +220,6 @@ def main(_):
 
     if not i % FLAGS.ckpt_interval == 0:
         # Save last step if it is not saved.
-        # agent.save(ckpt_dir, i)
         checkpoints.save_checkpoint(ckpt_dir, agent, step=i, keep=20, overwrite=True)
 
     if FLAGS.wandb:

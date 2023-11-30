@@ -2,3 +2,4 @@
 # Allow lines to be as long as 120.
 line-length = 120
 ignore = ["E731"]
+exclude = ["__init__.py"]
