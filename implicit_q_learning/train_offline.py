@@ -108,7 +108,7 @@ def make_env_and_dataset(
 
     env = wrappers.SinglePrecision(env)
     if model_cls == "IQLLearner":
-        env = wrappers.Flatten(env)
+        env = wrappers.FlattenWrapper(env)
     elif model_cls == "IQLTransformerLearner":
         env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
     env = wrappers.EpisodeMonitor(env)
@@ -131,9 +131,6 @@ def make_env_and_dataset(
         dataset.rewards -= 1.0
         # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
         # but I found no difference between (x - 0.5) * 4 and x - 1.0
-    # elif FLAGS.use_arp:
-    #     print("normalize dataset for arpv2 rewards.")
-    #     normalize(dataset)
     elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
         normalize(dataset)
 
