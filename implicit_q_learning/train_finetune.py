@@ -136,6 +136,10 @@ def make_env_and_dataset(
 
 
 def main(_):
+    import jax
+
+    jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
+
     root_logdir = os.path.join(FLAGS.save_dir, "tb", str(FLAGS.seed))
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
