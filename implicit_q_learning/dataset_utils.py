@@ -146,13 +146,14 @@ class Dataset(object):
             )
         return Batch(
             # observations=jnp.zeros((len(indx), 2062), dtype=jnp.float32),
-            observations=jnp.asarray(
-                [
-                    np.concatenate([self.observations[i][key] for key in ["robot_state", "image1", "image2"]], axis=-1)
-                    for i in indx
-                ],
-                dtype=jnp.float32,
-            ),
+            # observations=jnp.asarray(
+            #     [
+            #         np.concatenate([self.observations[i][key] for key in ["robot_state", "image1", "image2"]], axis=-1)
+            #         for i in indx
+            #     ],
+            #     dtype=jnp.float32,
+            # ),
+            observations=self.observations[indx],
             # observations={
             #     'image1':
             #     jnp.array([self.observations[i]['image1'] for i in indx], dtype=jnp.float32),
@@ -170,15 +171,16 @@ class Dataset(object):
             #     "robot_state": jnp.array([self.next_observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
             # },
             # next_observations=jnp.zeros((len(indx), 2062), dtype=jnp.float32),
-            next_observations=jnp.asarray(
-                [
-                    np.concatenate(
-                        [self.next_observations[i][key] for key in ["robot_state", "image1", "image2"]], axis=-1
-                    )
-                    for i in indx
-                ],
-                dtype=jnp.float32,
-            ),
+            # next_observations=jnp.asarray(
+            #     [
+            #         np.concatenate(
+            #             [self.next_observations[i][key] for key in ["robot_state", "image1", "image2"]], axis=-1
+            #         )
+            #         for i in indx
+            #     ],
+            #     dtype=jnp.float32,
+            # ),
+            next_observations=self.next_observations[indx],
         )
 
 
@@ -246,6 +248,7 @@ class FurnitureDataset(Dataset):
         #                 dataset[obs][i][img][:, :, 1] = (dataset[obs][i][img][:, :, 1] - 0.456) / 0.224
         #                 dataset[obs][i][img][:, :, 2] = (dataset[obs][i][img][:, :, 2] - 0.406) / 0.225
 
+        observations, next_observations = [], []
         for i in range(len(dones_float) - 1):
             if (
                 np.linalg.norm(
@@ -257,6 +260,16 @@ class FurnitureDataset(Dataset):
                 dones_float[i] = 1
             else:
                 dones_float[i] = 0
+            observations.append(
+                np.concatenate(
+                    [dataset["observations"][i][key] for key in ["robot_state", "image1", "image2"]], axis=-1
+                )
+            )
+            next_observations.append(
+                np.concatenate(
+                    [dataset["next_observations"][i][key] for key in ["robot_state", "image1", "image2"]], axis=-1
+                )
+            )
 
         dones_float[-1] = 1
         if use_arp:
@@ -268,12 +281,12 @@ class FurnitureDataset(Dataset):
             rewards = dataset["rewards"]
 
         super().__init__(
-            dataset["observations"],
+            np.asarray(observations),
             actions=dataset["actions"],
             rewards=rewards,
             masks=1.0 - dataset["terminals"],
             dones_float=dones_float,
-            next_observations=dataset["next_observations"],
+            next_observations=np.asarray(next_observations),
             size=len(dataset["observations"]),
             use_encoder=use_encoder,
         )

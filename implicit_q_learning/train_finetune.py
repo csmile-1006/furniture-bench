@@ -1,25 +1,26 @@
 import os
 
+import gym
+import isaacgym  # noqa: F401
 import numpy as np
 import tqdm
+import wrappers
 from absl import app, flags
+from agents import IQLLearner, IQLTransformerLearner  # noqa: F401
+from dataset_utils import Batch, D4RLDataset, FurnitureDataset, ReplayBuffer, split_into_trajectories
+from evaluation import evaluate
+from flax.training import checkpoints
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
-from flax.training import checkpoints
-
-from dataset_utils import Batch, ReplayBuffer
-from evaluation import evaluate
-from train_offline import make_env_and_dataset
-from agents import IQLLearner, IQLTransformerLearner  # noqa: F401
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
 flags.DEFINE_string("run_name", "", "Run specific name")
-flags.DEFINE_string("ckpt_step", 0, "Specific checkpoint step")
+flags.DEFINE_integer("ckpt_step", 0, "Specific checkpoint step")
 flags.DEFINE_integer("seed", 42, "Random seed.")
-flags.DEFINE_integer("eval_episodes", 100, "Number of episodes used for evaluation.")
+flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
@@ -29,9 +30,7 @@ flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining s
 flags.DEFINE_integer("replay_buffer_size", 2000000, "Replay buffer size (=max_steps if unspecified).")
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
-flags.DEFINE_boolean("wandb", True, "Use wandb")
-flags.DEFINE_STRING("wandb_project", "furniture-bench", "wandb project")
-flags.DEFINE_STRING("wandb_entity", "clvr", "wandb entity")
+flags.DEFINE_string("data_path", "", "Path to data.")
 config_flags.DEFINE_config_file(
     "config",
     "configs/antmaze_finetune_config.py",
@@ -50,14 +49,100 @@ flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 
 
+def normalize(dataset):
+    trajs = split_into_trajectories(
+        dataset.observations,
+        dataset.actions,
+        dataset.rewards,
+        dataset.masks,
+        dataset.dones_float,
+        dataset.next_observations,
+    )
+
+    def compute_returns(traj):
+        episode_return = 0
+        for _, _, rew, _, _, _ in traj:
+            episode_return += rew
+
+        return episode_return
+
+    trajs.sort(key=compute_returns)
+
+    dataset.rewards /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
+    dataset.rewards *= 1000.0
+
+
+def make_env_and_dataset(
+    env_name: str,
+    seed: int,
+    randomness: str,
+    data_path: str,
+    use_encoder: bool,
+    encoder_type: str,
+    use_arp: bool,
+    use_step: bool,
+    lambda_mr: float,
+    model_cls: str,
+):
+    #  -> Tuple[gym.Env, D4RLDataset]:
+    record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
+    if "Furniture" in env_name:
+        import furniture_bench  # noqa: F401
+
+        env_id, furniture_name = env_name.split("/")
+        env = gym.make(
+            env_id,
+            furniture=furniture_name,
+            data_path=data_path,
+            use_encoder=use_encoder,
+            encoder_type=encoder_type,
+            headless=True,
+            record=True,
+            randomness=randomness,
+            record_dir=record_dir,
+            compute_device_id=FLAGS.device_id,
+            graphics_device_id=FLAGS.device_id,
+            max_env_steps=600 if "Sim" in env_id else 3000,
+        )
+    else:
+        env = gym.make(env_name)
+
+    env = wrappers.SinglePrecision(env)
+    if model_cls == "IQLLearner":
+        env = wrappers.FlattenWrapper(env)
+    elif model_cls == "IQLTransformerLearner":
+        env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
+    env = wrappers.EpisodeMonitor(env)
+
+    env.seed(seed)
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+
+    print("Observation space", env.observation_space)
+    print("Action space", env.action_space)
+
+    if "Furniture" in env_name:
+        dataset = FurnitureDataset(
+            data_path, use_encoder=False, use_arp=use_arp, use_step=use_step, lambda_mr=lambda_mr
+        )
+    else:
+        dataset = D4RLDataset(env)
+
+    if "antmaze" in env_name:
+        dataset.rewards -= 1.0
+        # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
+        # but I found no difference between (x - 0.5) * 4 and x - 1.0
+    elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
+        normalize(dataset)
+
+    return env, dataset
+
+
 def main(_):
     root_logdir = os.path.join(FLAGS.save_dir, "tb", str(FLAGS.seed))
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-
-    if "Sim" in FLAGS.env_name:
-        import isaacgym  # noqa: F401
 
     kwargs = dict(FLAGS.config)
     model_cls = kwargs.pop("model_cls")
@@ -78,7 +163,6 @@ def main(_):
     replay_buffer = ReplayBuffer(env.observation_space, action_dim, FLAGS.replay_buffer_size or FLAGS.max_steps)
     replay_buffer.initialize_with_dataset(dataset, FLAGS.init_dataset_size)
 
-    kwargs = dict(FLAGS.config)
     if FLAGS.wandb:
         import wandb
 
@@ -111,6 +195,7 @@ def main(_):
     eval_returns = []
     observation, done = env.reset(), False
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
+        print(f"load trained checkpoints from {ckpt_dir}")
         chkpt = checkpoints.restore_checkpoint(ckpt_dir=ckpt_dir, target=None, step=FLAGS.ckpt_step)
         agent.load(chkpt)
         start_step, steps = FLAGS.ckpt_step, range(FLAGS.max_steps + 1)
@@ -120,7 +205,7 @@ def main(_):
     # Use negative indices for pretraining steps.
     for i in tqdm.tqdm(steps, smoothing=0.1, disable=not FLAGS.tqdm):
         if i >= 1:
-            action = agent.sample_actions(observation)
+            action, agent = agent.sample_actions(observation)
             action = np.clip(action, -1, 1)
             next_observation, reward, done, info = env.step(action)
 
@@ -160,8 +245,10 @@ def main(_):
             summary_writer.flush()
 
         if i % FLAGS.ckpt_interval == 0:
-            if i < 0:
-                checkpoints.save_checkpoint(ckpt_dir, agent, step=abs(i), keep=20, overwrite=True)
+            if i <= 0:
+                checkpoints.save_checkpoint(
+                    ckpt_dir, agent, step=abs(i) + FLAGS.num_pretraining_steps, keep=20, overwrite=True
+                )
             else:
                 checkpoints.save_checkpoint(ft_ckpt_dir, agent, step=i + start_step, keep=20, overwrite=True)
 
