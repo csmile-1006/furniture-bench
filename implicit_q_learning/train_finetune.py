@@ -4,6 +4,7 @@ import os
 import gym
 import numpy as np
 import tqdm
+import wandb
 from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
@@ -165,15 +166,19 @@ def main(_):
 
     kwargs = dict(FLAGS.config)
     if FLAGS.wandb:
-        import wandb
-
-        wandb.tensorboard.patch(root_logdir=root_logdir)
         wandb.init(
             project=FLAGS.wandb_project,
             entity=FLAGS.wandb_entity,
-            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + FLAGS.data,
-            config=kwargs,
+            name=FLAGS.env_name
+            + "-"
+            + str(FLAGS.seed)
+            + "-"
+            + str(FLAGS.data_path.split("/")[-1])
+            + "-"
+            + str(FLAGS.run_name),
+            sync_tensorboard=True,
         )
+        wandb.config.update(FLAGS)
 
     summary_writer = SummaryWriter(root_logdir, write_to_disk=True)
 
