@@ -2,20 +2,22 @@
 
 import functools
 from functools import partial
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple, Callable
 
 import gym
 import jax
 import optax
+import numpy as np
 import jax.numpy as jnp
 from flax.core.frozen_dict import FrozenDict
 from flax.training.train_state import TrainState
 
 from agents.agent import Agent
+from agents.common import iql_eval_actions_jit
 from agents.iql.actor_updater import update_actor
 from agents.iql.critic_updater import update_q, update_v
 from networks import MLP, Ensemble
-from networks.distributions import UnitStdNormalPolicy
+from networks.distributions import NormalTanhPolicy
 from networks.values import StateValue, StateActionValue
 from data_types import Params, PRNGKey
 
@@ -93,8 +95,15 @@ class IQLLearner(Agent):
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
 
-        actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True)
-        actor_def = UnitStdNormalPolicy(base_cls=actor_base_cls, action_dim=action_dim)
+        actor_base_cls = partial(MLP, hidden_dims=hidden_dims, activate_final=True, dropout_rate=dropout_rate)
+        actor_def = NormalTanhPolicy(
+            base_cls=actor_base_cls,
+            action_dim=action_dim,
+            log_std_scale=1e-3,
+            log_std_min=-5.0,
+            state_dependent_std=False,
+            squash_tanh=False,
+        )
         if decay_steps is not None:
             schedule_fn = optax.cosine_decay_schedule(-actor_lr, decay_steps)
             optimiser = optax.chain(optax.scale_by_adam(), optax.scale_by_schedule(schedule_fn))
@@ -170,5 +179,10 @@ class IQLLearner(Agent):
         new_agent = self.replace(
             rng=new_rng, actor=new_actor, critic=new_critic, target_critic=new_target_critic, value=new_value
         )
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
+        sampled_actions, new_agent = new_agent.eval_actions(batch.observations)
+        info["mse"] = jnp.mean((batch.actions - sampled_actions) ** 2)
         return new_agent, info
+
+    def eval_actions(self, observations: np.ndarray) -> np.ndarray:
+        new_rng, actions = iql_eval_actions_jit(self.rng, self.actor.apply_fn, self.actor.params, observations)
+        return np.array(actions), self.replace(rng=new_rng)

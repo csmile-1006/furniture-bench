@@ -218,7 +218,7 @@ def main(_):
 
         if i % FLAGS.eval_interval == 0:
             env.env.episode_cnts = np.zeros(env.env.num_envs, dtype=np.int32)
-            eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+            eval_stats, agent = evaluate(agent, env, FLAGS.eval_episodes)
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
