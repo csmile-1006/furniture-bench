@@ -34,7 +34,7 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
-flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
+flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
