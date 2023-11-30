@@ -5,6 +5,7 @@ from typing import Dict, Optional, Sequence
 
 import gym
 import jax
+import jax.numpy as jnp
 import optax
 from flax.core.frozen_dict import FrozenDict
 from flax.training.train_state import TrainState
@@ -12,7 +13,7 @@ from flax.training.train_state import TrainState
 from networks import UnitStdNormalPolicy, MLP, Ensemble, SequenceMultiplexer
 from networks.values import StateValue, StateActionValue
 from networks.encoders import TransformerEncoder
-from agents.iql.iql_learner import IQLLearner
+from agents.iql.iql_learner import IQLLearner, _update_jit
 
 
 def _share_encoder(source, target):
@@ -132,8 +133,32 @@ class IQLTransformerLearner(IQLLearner):
         )
 
     def update(self, batch: FrozenDict) -> Dict[str, float]:
-        new_agent = self
-        target_critic = _share_encoder(source=new_agent.critic, target=new_agent.target_critic)
-        actor = _share_encoder(source=new_agent.critic, target=new_agent.actor)
-        new_agent = new_agent.replace(target_critic=target_critic, actor=actor)
-        return IQLLearner.update(new_agent, batch)
+        target_critic = _share_encoder(source=self.critic, target=self.target_critic)
+        actor = _share_encoder(source=self.critic, target=self.actor)
+        self.replace(target_critic=target_critic, actor=actor)
+        (
+            new_rng,
+            new_actor,
+            new_critic,
+            new_target_critic,
+            new_value,
+            info,
+        ) = _update_jit(
+            self.rng,
+            self.actor,
+            self.critic,
+            self.target_critic,
+            self.value,
+            batch,
+            self.discount,
+            self.tau,
+            self.expectile,
+            self.A_scaling,
+            self.critic_reduction,
+        )
+
+        new_agent = self.replace(
+            rng=new_rng, actor=new_actor, critic=new_critic, target_critic=new_target_critic, value=new_value
+        )
+        info["mse"] = jnp.mean((batch.actions - new_agent.eval_actions(batch.observations)) ** 2)
+        return new_agent, info
