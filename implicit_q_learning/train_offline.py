@@ -156,22 +156,21 @@ def main(_):
     )
 
     kwargs = dict(FLAGS.config)
-    log_kwargs = kwargs.copy()
-    log_kwargs["use_arp"] = FLAGS.use_arp
-    log_kwargs["use_step"] = FLAGS.use_step
-    log_kwargs["encoder_type"] = FLAGS.encoder_type
-    log_kwargs["use_encoder"] = FLAGS.use_encoder
-    log_kwargs["randomness"] = FLAGS.randomness
-    log_kwargs["lambda_mr"] = FLAGS.lambda_mr
 
     if FLAGS.wandb:
         wandb.init(
             project=FLAGS.wandb_project,
             entity=FLAGS.wandb_entity,
-            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.data_path.split("/")[-1]) + "-" + str(FLAGS.run_name),
-            config=log_kwargs,
+            name=FLAGS.env_name
+            + "-"
+            + str(FLAGS.seed)
+            + "-"
+            + str(FLAGS.data_path.split("/")[-1])
+            + "-"
+            + str(FLAGS.run_name),
             sync_tensorboard=True,
         )
+        wandb.config.update(FLAGS)
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
