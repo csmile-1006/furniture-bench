@@ -37,7 +37,6 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
-flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
@@ -77,7 +76,6 @@ def make_env_and_dataset(
     seed: int,
     randomness: str,
     data_path: str,
-    use_encoder: bool,
     encoder_type: str,
     use_arp: bool,
     use_step: bool,
@@ -94,7 +92,6 @@ def make_env_and_dataset(
             env_id,
             furniture=furniture_name,
             data_path=data_path,
-            use_encoder=use_encoder,
             encoder_type=encoder_type,
             headless=True,
             record=True,
@@ -151,7 +148,6 @@ def main(_):
         FLAGS.seed,
         FLAGS.randomness,
         FLAGS.data_path,
-        FLAGS.use_encoder,
         FLAGS.encoder_type,
         FLAGS.use_arp,
         FLAGS.use_step,
