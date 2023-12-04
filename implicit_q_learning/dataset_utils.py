@@ -386,12 +386,13 @@ class ReplayBuffer(Dataset):
         next_observation = np.concatenate(
             [next_observation[key] for key in ["image1", "image2", "robot_state"]], axis=-1
         )
-        self.observations[self.insert_index] = observation
-        self.actions[self.insert_index] = action
-        self.rewards[self.insert_index] = reward
-        self.masks[self.insert_index] = mask
-        self.dones_float[self.insert_index] = done_float
-        self.next_observations[self.insert_index] = next_observation
+        insert_size = observation.shape[0]
+        self.observations[self.insert_index : self.insert_index + insert_size] = observation
+        self.actions[self.insert_index : self.insert_index + insert_size] = action
+        self.rewards[self.insert_index : self.insert_index + insert_size] = reward
+        self.masks[self.insert_index : self.insert_index + insert_size] = mask
+        self.dones_float[self.insert_index : self.insert_index + insert_size] = done_float
+        self.next_observations[self.insert_index : self.insert_index + insert_size] = next_observation
 
-        self.insert_index = (self.insert_index + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
+        self.insert_index = (self.insert_index + insert_size) % self.capacity
+        self.size = min(self.size + insert_size, self.capacity)

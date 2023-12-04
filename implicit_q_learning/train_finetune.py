@@ -17,6 +17,7 @@ from learner import Learner
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
+flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
 flags.DEFINE_integer("ckpt_step", 0, "Specific checkpoint step")
@@ -100,6 +101,7 @@ def make_env_and_dataset(
         env_id, furniture_name = env_name.split("/")
         env = gym.make(
             env_id,
+            num_envs=FLAGS.num_envs,
             furniture=furniture_name,
             data_path=data_path,
             use_encoder=use_encoder,
@@ -198,14 +200,14 @@ def main(_):
     agent = Learner(
         FLAGS.seed,
         env.observation_space.sample(),
-        env.action_space.sample()[np.newaxis],
+        env.action_space.sample()[:1],
         max_steps=FLAGS.max_steps,
         **kwargs,
         use_encoder=FLAGS.use_encoder,
     )
 
     eval_returns = []
-    observation, done = env.reset(), False
+    observation, done = env.reset(), np.zeros((env._num_envs,), dtype=np.bool)
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         print(f"load trained checkpoints from {ckpt_dir}")
         agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
@@ -214,61 +216,72 @@ def main(_):
         start_step, steps = FLAGS.num_pretraining_steps, range(1 - FLAGS.num_pretraining_steps, FLAGS.max_steps + 1)
 
     # Use negative indices for pretraining steps.
-    for i in tqdm.tqdm(steps, smoothing=0.1, disable=not FLAGS.tqdm):
-        if i >= 1:
-            action = agent.sample_actions(observation)
-            action = np.clip(action, -1, 1)
-            next_observation, reward, done, info = env.step(action)
+    pbar = tqdm.tqdm(steps, smoothing=0.1, disable=not FLAGS.tqdm)
+    i = start_step
+    with pbar:
+        while i <= steps:
+            if i >= 1:
+                action = agent.sample_actions(observation)
+                action = np.clip(action, -1, 1)
+                next_observation, reward, done, info = env.step(action)
 
-            if not done or "TimeLimit.truncated" in info:
-                mask = 1.0
+                mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
+                for i in range(FLAGS.num_envs):
+                    if not done[i] or "TimeLimit.truncated" in info:
+                        mask[i] = 1.0
+                    else:
+                        mask[i] = 0.0
+
+                replay_buffer.insert(observation, action, reward, mask, done.astype(np.float32), next_observation)
+                observation = next_observation
+
+                for idx in range(FLAGS.num_envs):
+                    if done[idx]:
+                        env.reset_env(idx)
+                        observation[idx] = env._transform_observation(env._get_observation())[idx]
+                        done[idx] = False
+                        for k, v in info[f"episode_{i}"].items():
+                            summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{i}"])
             else:
-                mask = 0.0
+                info = {}
+                info["total"] = {"timesteps": i}
 
-            replay_buffer.insert(observation, action, reward, mask, float(done), next_observation)
-            observation = next_observation
+            batch = replay_buffer.sample(FLAGS.batch_size)
+            if "antmaze" in FLAGS.env_name:
+                batch = Batch(
+                    observations=batch.observations,
+                    actions=batch.actions,
+                    rewards=batch.rewards - 1,
+                    masks=batch.masks,
+                    next_observations=batch.next_observations,
+                )
+            update_info = agent.update(batch)
 
-            if done:
-                observation, done = env.reset(), False
-                for k, v in info["episode"].items():
-                    summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
-        else:
-            info = {}
-            info["total"] = {"timesteps": i}
+            if i % FLAGS.log_interval == 0:
+                for k, v in update_info.items():
+                    if v.ndim == 0:
+                        summary_writer.add_scalar(f"training/{k}", v, i)
+                    else:
+                        summary_writer.add_histogram(f"training/{k}", v, i)
 
-        batch = replay_buffer.sample(FLAGS.batch_size)
-        if "antmaze" in FLAGS.env_name:
-            batch = Batch(
-                observations=batch.observations,
-                actions=batch.actions,
-                rewards=batch.rewards - 1,
-                masks=batch.masks,
-                next_observations=batch.next_observations,
-            )
-        update_info = agent.update(batch)
-
-        if i % FLAGS.log_interval == 0:
-            for k, v in update_info.items():
-                if v.ndim == 0:
-                    summary_writer.add_scalar(f"training/{k}", v, i)
+            if i % FLAGS.ckpt_interval == 0:
+                if i <= 0:
+                    agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
                 else:
-                    summary_writer.add_histogram(f"training/{k}", v, i)
+                    agent.save(ft_ckpt_dir, i + start_step)
 
-        if i % FLAGS.ckpt_interval == 0:
-            if i <= 0:
-                agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
-            else:
-                agent.save(ft_ckpt_dir, i + start_step)
+            if i % FLAGS.eval_interval == 0:
+                eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
-        if i % FLAGS.eval_interval == 0:
-            eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+                for k, v in eval_stats.items():
+                    summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
+                summary_writer.flush()
 
-            for k, v in eval_stats.items():
-                summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
-            summary_writer.flush()
+                eval_returns.append((i, eval_stats["return"]))
+                np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
 
-            eval_returns.append((i, eval_stats["return"]))
-            np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
+            i += observation.shape[0]
+            pbar.update(observation.shape[0])
 
     if FLAGS.wandb:
         wandb.finish()

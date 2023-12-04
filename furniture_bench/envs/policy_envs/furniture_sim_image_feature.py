@@ -22,7 +22,7 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
 
         device_id = kwargs["compute_device_id"]
         self._device = torch.device(f"cuda:{device_id}")
-        assert self.num_envs == 1, "FurnitureSimImageFeature supports only 1 env."
+        # assert self.num_envs == 1, "FurnitureSimImageFeature supports only 1 env."
 
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
@@ -49,9 +49,21 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
 
         return spaces.Dict(
             dict(
-                robot_state=spaces.Box(-np.inf, np.inf, (robot_state_dim,)),
-                image1=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
-                image2=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
+                robot_state=spaces.Box(
+                    -np.inf,
+                    np.inf,
+                    (robot_state_dim,),
+                ),
+                image1=spaces.Box(
+                    -np.inf,
+                    np.inf,
+                    (self.embedding_dim,),
+                ),
+                image2=spaces.Box(
+                    -np.inf,
+                    np.inf,
+                    (self.embedding_dim,),
+                ),
             )
         )
 
@@ -62,20 +74,22 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
             # For legacy envs.
             obs["robot_state"] = filter_and_concat_robot_state(obs["robot_state"])
 
-        robot_state = obs["robot_state"].squeeze()
-        image1 = obs["color_image1"].squeeze()
-        image2 = obs["color_image2"].squeeze()
+        robot_state = obs["robot_state"]
+        image1 = obs["color_image1"]
+        image2 = obs["color_image2"]
 
-        image1 = np.moveaxis(resize(np.moveaxis(image1, 0, -1)), -1, 0)
-        crop_image2 = resize_crop(np.moveaxis(image2, 0, -1))
-        image2 = np.moveaxis(crop_image2, -1, 0)
+        # image1 = np.moveaxis(resize(np.moveaxis(image1, 0, -1)), -1, 0)
+        image1 = np.stack([np.moveaxis(resize(np.moveaxis(img, 0, -1)), -1, 0) for img in image1])
+        # crop_image2 = resize_crop(np.moveaxis(image2, 0, -1))
+        # image2 = np.moveaxis(crop_image2, -1, 0)
+        image2 = np.stack([np.moveaxis(resize_crop(np.moveaxis(img, 0, -1)), -1, 0) for img in image2])
 
         with torch.no_grad():
             image1 = torch.tensor(image1).to(self._device)
             image2 = torch.tensor(image2).to(self._device)
 
-            image1 = self.layer(image1.unsqueeze(0)).squeeze()
-            image2 = self.layer(image2.unsqueeze(0)).squeeze()
+            image1 = self.layer(image1).squeeze()
+            image2 = self.layer(image2).squeeze()
             image1 = image1.detach().cpu().numpy()
             image2 = image2.detach().cpu().numpy()
 
