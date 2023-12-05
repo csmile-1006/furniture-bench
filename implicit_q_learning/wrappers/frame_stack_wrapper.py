@@ -5,12 +5,13 @@ from gym import spaces
 from collections import deque
 
 
-class FrameStackWrapper(gym.ActionWrapper):
+class FrameStackWrapper(gym.Wrapper):
     def __init__(self, env, num_frames, skip_frame):
         super().__init__(env)
         self._num_frames = num_frames
         self._skip_frame = skip_frame
         self._i = 0
+        self.max_env_steps = env.furniture.max_env_steps
         self._num_envs = self.env.num_envs
         self._frames = {
             env_idx: {
@@ -31,21 +32,24 @@ class FrameStackWrapper(gym.ActionWrapper):
 
     def reset_env(self, idx):
         self.env.reset_env(idx)
+        self.env.refresh()
+
         self._frames[idx] = {
-            frame: {key: deque([], maxlen=num_frames) for key in self.env.observation_space}
+            frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
             for frame in range(self._skip_frame)
         }
-        _obs = self._get_observation()
+        _obs = self.env.unwrapped._get_observation()
         for frame in range(self._skip_frame):
             for _ in range(self._num_frames):
                 for key in _obs:
                     self._frames[idx][frame][key].append(_obs[key][idx])
+        return self._frames[idx][0]
 
     def reset(self):
         self._i = 0
         self._frames = {
             env_idx: {
-                frame: {key: deque([], maxlen=num_frames) for key in self.env.observation_space}
+                frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
                 for frame in range(self._skip_frame)
             }
             for env_idx in range(self._num_envs)
@@ -71,9 +75,7 @@ class FrameStackWrapper(gym.ActionWrapper):
     def observation_space(self):
         obs_space = {}
         for key, val in self.env.observation_space.items():
-            obs_space[key] = spaces.Box(
-                val.low.reshape(-1)[0], val.high.reshape(-1)[0], (self.env.num_envs, self._num_frames, *val.shape)
-            )
+            obs_space[key] = spaces.Box(val.low.reshape(-1)[0], val.high.reshape(-1)[0], (self._num_frames, *val.shape))
         return spaces.Dict(obs_space)
 
 
@@ -90,7 +92,7 @@ if __name__ == "__main__":
     env = gym.make(
         env_id,
         furniture=furniture_name,
-        num_envs=10,
+        num_envs=1,
         data_path="",
         use_encoder=False,
         encoder_type="vip",
@@ -100,13 +102,14 @@ if __name__ == "__main__":
         record=False,
         # np_step_out=True,
         record_dir="",
-        max_env_steps=100 if "Sim" in env_id else 3000,
+        max_env_steps=20 if "Sim" in env_id else 3000,
         # concat_robot_state=True,
     )
     num_frames, skip_frame = 4, 16
     env = FrameStackWrapper(env, num_frames, skip_frame)
     env = EpisodeMonitor(env)
     init = env.reset()
+    env.reset_env(0)
     timestep = 0
     print(f"timestep {timestep} / stack step {env.env._i} / current stack {init['image1'].shape}")
     for _ in range(630):

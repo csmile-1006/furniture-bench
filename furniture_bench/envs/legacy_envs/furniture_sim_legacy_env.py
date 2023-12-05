@@ -144,6 +144,7 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.record = record
         self.record_dir = record_dir
         self.record_every = record_every
+        self.video_writer = {key: None for key in range(self.num_envs)}
 
     def _create_ground_plane(self):
         # add ground plane
@@ -808,20 +809,20 @@ class FurnitureSimEnvLegacy(gym.Env):
                 robot_state[k] = v.cpu().numpy()
             robot_state = PandaState(**robot_state)
 
-        if self.record and self.episode_cnts[0] % self.record_every == 0:
-            # Record the first environment.
-            record_images = [color_img1[0], color_img2[0]]
-            for i, img in enumerate(record_images):
-                if not self.np_step_out:
-                    img = img.cpu().numpy().copy()
-                if self.channel_first:
+        for env_idx in range(color_img1.shape[0]):
+            if self.record and self.episode_cnts[env_idx] % self.record_every == 0:
+                record_images = [color_img1[env_idx], color_img2[env_idx]]
+                for i, img in enumerate(record_images):
                     if not self.np_step_out:
-                        img = img.transpose(0, 2, 3, 1)
-                    else:
-                        img = img.transpose(1, 2, 0)
-                record_images[i] = img.squeeze()
-            stacked_img = np.vstack(record_images)
-            self.video_writer.write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
+                        img = img.cpu().numpy().copy()
+                    if self.channel_first:
+                        if not self.np_step_out:
+                            img = img.transpose(0, 2, 3, 1)
+                        else:
+                            img = img.transpose(1, 2, 0)
+                    record_images[i] = img.squeeze()
+                stacked_img = np.vstack(record_images)
+                self.video_writer[env_idx].write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
 
         return dict(
             robot_state=robot_state.__dict__,
@@ -860,18 +861,18 @@ class FurnitureSimEnvLegacy(gym.Env):
         self.env_steps[env_idx] = 0
         self.episode_cnts[env_idx] += 1
         self.move_neutral = False
+        if self.video_writer.get(env_idx) is not None:
+            self.video_writer[env_idx].release()
+            self.video_writer[env_idx] = None
         if self.record and self.episode_cnts[env_idx] % self.record_every == 0:
-            if hasattr(self, "video_writer"):
-                self.video_writer.release()
-            record_dir = (
-                Path(self.record_dir) / f"ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            )
+            record_dir = Path(
+                self.record_dir
+            ) / f"env{env_idx}_ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
             record_dir.mkdir(parents=True, exist_ok=True)
-            self.video_writer = cv2.VideoWriter(
+            self.video_writer[env_idx] = cv2.VideoWriter(
                 str(record_dir / "video.mp4"),
                 cv2.VideoWriter_fourcc("m", "p", "4", "v"),
                 30,
-                # (self.img_size[1] * 2, self.img_size[0]),  # Wrist and front cameras.
                 (self.img_size[0], self.img_size[1] * 2),  # Wrist and front cameras.
             )
 
@@ -1108,5 +1109,10 @@ class FurnitureSimEnvLegacy(gym.Env):
             self.isaac_gym.destroy_viewer(self.viewer)
         self.isaac_gym.destroy_sim(self.sim)
 
-        if self.record and self.episode_cnts[0] % self.record_every == 0:
-            self.video_writer.release()
+        for env_idx in range(self.num_envs):
+            if (
+                self.record
+                and self.episode_cnts[env_idx] % self.record_every == 0
+                and self.video_writer.get(env_idx) is not None
+            ):
+                self.video_writer[env_idx].release()

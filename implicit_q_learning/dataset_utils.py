@@ -324,12 +324,12 @@ class ReplayBuffer(Dataset):
             observation_space["image1"].shape[0],
             sum([observation_space[key].shape[-1] for key in observation_space]),
         )
-        observations = np.empty((capacity, *obs_shape), dtype=observation_space.dtype)
-        actions = np.empty((capacity, action_dim), dtype=np.float32)
-        rewards = np.empty((capacity,), dtype=np.float32)
-        masks = np.empty((capacity,), dtype=np.float32)
-        dones_float = np.empty((capacity,), dtype=np.float32)
-        next_observations = np.empty((capacity, *obs_shape), dtype=observation_space.dtype)
+        observations = np.zeros((capacity, *obs_shape), dtype=observation_space.dtype)
+        actions = np.zeros((capacity, action_dim), dtype=np.float32)
+        rewards = np.zeros((capacity,), dtype=np.float32)
+        masks = np.zeros((capacity,), dtype=np.float32)
+        dones_float = np.zeros((capacity,), dtype=np.float32)
+        next_observations = np.zeros((capacity, *obs_shape), dtype=observation_space.dtype)
         super().__init__(
             observations=observations,
             actions=actions,
@@ -389,9 +389,9 @@ class ReplayBuffer(Dataset):
         insert_size = observation.shape[0]
         self.observations[self.insert_index : self.insert_index + insert_size] = observation
         self.actions[self.insert_index : self.insert_index + insert_size] = action
-        self.rewards[self.insert_index : self.insert_index + insert_size] = reward
+        self.rewards[self.insert_index : self.insert_index + insert_size] = reward.squeeze()
         self.masks[self.insert_index : self.insert_index + insert_size] = mask
-        self.dones_float[self.insert_index : self.insert_index + insert_size] = done_float
+        self.dones_float[self.insert_index : self.insert_index + insert_size] = done_float.squeeze()
         self.next_observations[self.insert_index : self.insert_index + insert_size] = next_observation
 
         self.insert_index = (self.insert_index + insert_size) % self.capacity

@@ -29,7 +29,7 @@ flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
-flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_steps if unspecified).")
+flags.DEFINE_integer("replay_buffer_size", int(5e5), "Replay buffer size (=max_steps if unspecified).")
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_string("data_path", "", "Path to data.")
@@ -207,81 +207,83 @@ def main(_):
     )
 
     eval_returns = []
-    observation, done = env.reset(), np.zeros((env._num_envs,), dtype=np.bool)
+    observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         print(f"load trained checkpoints from {ckpt_dir}")
         agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
-        start_step, steps = FLAGS.ckpt_step, range(FLAGS.max_steps + 1)
+        # start_step, steps = FLAGS.ckpt_step, range(FLAGS.max_steps + 1)
+        start_step, steps = FLAGS.ckpt_step, FLAGS.max_steps
     else:
-        start_step, steps = FLAGS.num_pretraining_steps, range(1 - FLAGS.num_pretraining_steps, FLAGS.max_steps + 1)
+        start_step, steps = -1 * FLAGS.num_pretraining_steps, FLAGS.max_steps
 
     # Use negative indices for pretraining steps.
-    pbar = tqdm.tqdm(steps, smoothing=0.1, disable=not FLAGS.tqdm)
+    pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm)
     i = start_step
     with pbar:
         while i <= steps:
-            if i >= 1:
+            if i >= 0:
                 action = agent.sample_actions(observation)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
 
                 mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
-                for i in range(FLAGS.num_envs):
-                    if not done[i] or "TimeLimit.truncated" in info:
-                        mask[i] = 1.0
+                for env_idx in range(FLAGS.num_envs):
+                    if not done[env_idx] or "TimeLimit.truncated" in info:
+                        mask[env_idx] = 1.0
                     else:
-                        mask[i] = 0.0
+                        mask[env_idx] = 0.0
 
                 replay_buffer.insert(observation, action, reward, mask, done.astype(np.float32), next_observation)
                 observation = next_observation
 
-                for idx in range(FLAGS.num_envs):
-                    if done[idx]:
-                        env.reset_env(idx)
-                        observation[idx] = env._transform_observation(env._get_observation())[idx]
-                        done[idx] = False
+                for env_idx in range(FLAGS.num_envs):
+                    if done[env_idx]:
+                        observation[env_idx] = env.reset_env(env_idx)
+                        done[env_idx] = False
                         for k, v in info[f"episode_{i}"].items():
                             summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{i}"])
             else:
                 info = {}
                 info["total"] = {"timesteps": i}
 
-            batch = replay_buffer.sample(FLAGS.batch_size)
-            if "antmaze" in FLAGS.env_name:
-                batch = Batch(
-                    observations=batch.observations,
-                    actions=batch.actions,
-                    rewards=batch.rewards - 1,
-                    masks=batch.masks,
-                    next_observations=batch.next_observations,
-                )
-            update_info = agent.update(batch)
+            for _ in range(FLAGS.num_envs):
+                batch = replay_buffer.sample(FLAGS.batch_size)
+                if "antmaze" in FLAGS.env_name:
+                    batch = Batch(
+                        observations=batch.observations,
+                        actions=batch.actions,
+                        rewards=batch.rewards - 1,
+                        masks=batch.masks,
+                        next_observations=batch.next_observations,
+                    )
+                update_info = agent.update(batch)
 
-            if i % FLAGS.log_interval == 0:
-                for k, v in update_info.items():
-                    if v.ndim == 0:
-                        summary_writer.add_scalar(f"training/{k}", v, i)
+                if i > 0 and i % FLAGS.log_interval == 0:
+                    for k, v in update_info.items():
+                        if v.ndim == 0:
+                            summary_writer.add_scalar(f"training/{k}", v, i)
+                        else:
+                            summary_writer.add_histogram(f"training/{k}", v, i)
+
+                if i > 0 and i % FLAGS.ckpt_interval == 0:
+                    if i <= 0:
+                        agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
                     else:
-                        summary_writer.add_histogram(f"training/{k}", v, i)
+                        agent.save(ft_ckpt_dir, i + start_step)
 
-            if i % FLAGS.ckpt_interval == 0:
-                if i <= 0:
-                    agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
-                else:
-                    agent.save(ft_ckpt_dir, i + start_step)
+                if i > 0 and i % FLAGS.eval_interval == 0:
+                    eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
-            if i % FLAGS.eval_interval == 0:
-                eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+                    for k, v in eval_stats.items():
+                        summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
+                    summary_writer.flush()
 
-                for k, v in eval_stats.items():
-                    summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
-                summary_writer.flush()
+                    eval_returns.append((i, eval_stats["return"]))
+                    np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
 
-                eval_returns.append((i, eval_stats["return"]))
-                np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
-
-            i += observation.shape[0]
-            pbar.update(observation.shape[0])
+            i += done.shape[0]
+            pbar.update(done.shape[0])
+            pbar.set_description(f" current {i} / total step {steps}")
 
     if FLAGS.wandb:
         wandb.finish()

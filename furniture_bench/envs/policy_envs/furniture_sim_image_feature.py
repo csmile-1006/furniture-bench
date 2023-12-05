@@ -88,8 +88,8 @@ class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
             image1 = torch.tensor(image1).to(self._device)
             image2 = torch.tensor(image2).to(self._device)
 
-            image1 = self.layer(image1).squeeze()
-            image2 = self.layer(image2).squeeze()
+            image1 = self.layer(image1)
+            image2 = self.layer(image2)
             image1 = image1.detach().cpu().numpy()
             image2 = image2.detach().cpu().numpy()
 
