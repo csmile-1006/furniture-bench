@@ -41,6 +41,7 @@ class EpisodeMonitor(gym.ActionWrapper):
         for i in range(self._num_envs):
             if done[i]:
                 info[f"episode_{i}"] = {}
+                info[f"episode_{i}"]["success"] = float(self.episode_length[i] < self.env.max_env_steps)
                 info[f"episode_{i}"]["return"] = self.reward_sum[i]
                 info[f"episode_{i}"]["length"] = self.episode_length[i]
                 info[f"episode_{i}"]["duration"] = time.time() - self.start_time[i]
