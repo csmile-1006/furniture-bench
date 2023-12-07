@@ -2,10 +2,11 @@ import numpy as np
 from gym import spaces
 
 import torch
+from kornia.augmentation import Resize, CenterCrop
 
 from furniture_bench.envs.furniture_sim_env import FurnitureSimEnv  # noqa: F401
 from furniture_bench.envs.legacy_envs.furniture_sim_legacy_env import FurnitureSimEnvLegacy  # Deprecated. # noqa: F401
-from furniture_bench.perception.image_utils import resize, resize_crop
+
 from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 
 
@@ -15,14 +16,13 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         super().__init__(
             concat_robot_state=True,
             resize_img=True,
-            np_step_out=True,
+            np_step_out=False,
             channel_first=True,
             **kwargs,
         )
 
         device_id = kwargs["compute_device_id"]
         self._device = torch.device(f"cuda:{device_id}")
-        # assert self.num_envs == 1, "FurnitureSimImageFeature supports only 1 env."
 
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
@@ -42,6 +42,13 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         self.layer.requires_grad_(False)
         self.layer.eval()
         self.layer = self.layer.to(self._device)
+
+        # Data Augmentation
+        self.resize = Resize((224, 224))
+        img_size = self.img_size
+        ratio = 256 / min(img_size[0], img_size[1])
+        ratio_size = (int(img_size[1] * ratio), int(img_size[0] * ratio))
+        self.resize_crop = torch.nn.Sequential(Resize(ratio_size), CenterCrop((224, 224)))
 
     @property
     def observation_space(self):
@@ -78,19 +85,11 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         image1 = obs["color_image1"]
         image2 = obs["color_image2"]
 
-        # image1 = np.moveaxis(resize(np.moveaxis(image1, 0, -1)), -1, 0)
-        image1 = np.stack([np.moveaxis(resize(np.moveaxis(img, 0, -1)), -1, 0) for img in image1])
-        # crop_image2 = resize_crop(np.moveaxis(image2, 0, -1))
-        # image2 = np.moveaxis(crop_image2, -1, 0)
-        image2 = np.stack([np.moveaxis(resize_crop(np.moveaxis(img, 0, -1)), -1, 0) for img in image2])
-
         with torch.no_grad():
-            image1 = torch.tensor(image1).to(self._device)
-            image2 = torch.tensor(image2).to(self._device)
+            image1 = self.resize(image1.float())
+            image2 = self.resize_crop(image2.float())
 
-            image1 = self.layer(image1)
-            image2 = self.layer(image2)
-            image1 = image1.detach().cpu().numpy()
-            image2 = image2.detach().cpu().numpy()
+            image1 = self.layer(image1).detach().cpu().numpy()
+            image2 = self.layer(image2).detach().cpu().numpy()
 
         return dict(robot_state=robot_state, image1=image1, image2=image2)
