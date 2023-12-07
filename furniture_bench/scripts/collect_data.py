@@ -11,9 +11,7 @@ from furniture_bench.envs.initialization_mode import Randomness
 
 def main():
     parser = argparse.ArgumentParser(description="Collect IL data")
-    parser.add_argument(
-        "--out-data-path", help="Path to directory to save the data", required=True
-    )
+    parser.add_argument("--out-data-path", help="Path to directory to save the data", required=True)
     parser.add_argument(
         "--input-device",
         help="Device to control the robot.",
@@ -46,25 +44,33 @@ def main():
         action="store_true",
         help="Save failure trajectories.",
     )
-    parser.add_argument(
-        "--headless", help="With front camera view", action="store_true"
-    )
-    parser.add_argument(
-        "--draw-marker", action="store_true", help="Draw AprilTag marker"
-    )
+    parser.add_argument("--headless", help="With front camera view", action="store_true")
+    parser.add_argument("--draw-marker", action="store_true", help="Draw AprilTag marker")
     parser.add_argument(
         "--manual-label",
         action="store_true",
         help="Manually label the reward",
     )
-    parser.add_argument(
-        "--env_option",
-        default="legacy",
-        choices=["legacy", "sim"]
-    )
+    parser.add_argument("--env_option", default="legacy", choices=["legacy", "sim"])
     parser.add_argument("--randomness", default="low", choices=["low", "med", "high"])
-    parser.add_argument("--gpu-id", default=0, type=int)
+    parser.add_argument(
+        "--compute-device-id",
+        type=int,
+        default=0,
+        help="GPU device ID used for simulation.",
+    )
+
+    parser.add_argument(
+        "--graphics-device-id",
+        type=int,
+        default=0,
+        help="GPU device ID used for rendering.",
+    )
+
     parser.add_argument("--num-demos", default=100, type=int)
+
+    parser.add_argument("--resize-sim-img", action="store_true")
+
     args = parser.parse_args()
 
     if args.scripted:
@@ -87,11 +93,13 @@ def main():
         manual_label=args.manual_label,
         scripted=args.scripted,
         randomness=args.randomness,
-        gpu_id=args.gpu_id,
+        compute_device_id=args.compute_device_id,
+        graphics_device_id=args.graphics_device_id,
         pkl_only=args.pkl_only,
         save_failure=args.save_failure,
         num_demos=args.num_demos,
-        env_option=args.env_option
+        env_option=args.env_option,
+        resize_sim_img=args.resize_sim_img,
     )
     data_collector.collect()
 
