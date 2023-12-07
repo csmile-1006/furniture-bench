@@ -4,17 +4,17 @@ from gym import spaces
 import torch
 
 from furniture_bench.envs.furniture_sim_env import FurnitureSimEnv  # noqa: F401
-from furniture_bench.envs.legacy_envs.furniture_sim_legacy_env import FurnitureSimEnvLegacy  # Deprecated.
+from furniture_bench.envs.legacy_envs.furniture_sim_legacy_env import FurnitureSimEnvLegacy  # Deprecated. # noqa: F401
 from furniture_bench.perception.image_utils import resize, resize_crop
 from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 
 
-# class FurnitureSimImageFeature(FurnitureSimEnv):
-class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
+class FurnitureSimImageFeature(FurnitureSimEnv):
+    # class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
     def __init__(self, **kwargs):
         super().__init__(
             concat_robot_state=True,
-            resize_img=False,
+            resize_img=True,
             np_step_out=True,
             channel_first=True,
             **kwargs,
