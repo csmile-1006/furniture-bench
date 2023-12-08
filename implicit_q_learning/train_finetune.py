@@ -224,6 +224,9 @@ def main(_):
             if i >= 0:
                 action = agent.sample_actions(observation)
                 action = np.clip(action, -1, 1)
+                if action[6] < 0:
+                    action = np.array(action)
+                    action[3:7] = -1 * action[3:7]  # Make sure quaternion scalar is positive.
                 next_observation, reward, done, info = env.step(action)
 
                 mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
