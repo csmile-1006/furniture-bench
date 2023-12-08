@@ -229,7 +229,7 @@ def main():
 
         out_dir = Path(args.out_data_path)
         out_dir.mkdir(parents=True, exist_ok=True)
-        new_file = out_dir / file.name
+        new_file = out_dir / f"{str(file.parent).split('/')[-1]}.pkl"
 
         print(f">> save to {new_file}")
 
