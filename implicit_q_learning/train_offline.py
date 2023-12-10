@@ -94,6 +94,7 @@ def make_env_and_dataset(
             encoder_type=encoder_type,
             headless=True,
             record=True,
+            resize_img=True,
             randomness=randomness,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,

@@ -13,10 +13,8 @@ from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 class FurnitureSimImageFeature(FurnitureSimEnv):
     # class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
     def __init__(self, **kwargs):
-        self._resize_img = kwargs["resize_img"]
         super().__init__(
             concat_robot_state=True,
-            resize_img=self._resize_img,
             np_step_out=False,
             channel_first=True,
             **kwargs,
