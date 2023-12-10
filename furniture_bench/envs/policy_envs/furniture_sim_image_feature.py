@@ -45,7 +45,7 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         self.layer = self.layer.to(self._device)
 
         # Data Augmentation
-        if kwargs["resize_img"]:
+        if not self._resize_img:
             self.resize = Resize((224, 224))
             img_size = self.img_size
             ratio = 256 / min(img_size[0], img_size[1])
@@ -88,7 +88,7 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         image2 = obs["color_image2"]
 
         with torch.no_grad():
-            if self._resize_img:
+            if not self._resize_img:
                 image1 = self.resize(image1.float())
                 image2 = self.resize_crop(image2.float())
 
