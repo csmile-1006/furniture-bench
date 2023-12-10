@@ -19,6 +19,7 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
             channel_first=True,
             **kwargs,
         )
+        self._resize_img = kwargs["resize_img"]
 
         device_id = kwargs["compute_device_id"]
         self._device = torch.device(f"cuda:{device_id}")
