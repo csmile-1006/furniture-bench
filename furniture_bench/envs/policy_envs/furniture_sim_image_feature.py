@@ -13,9 +13,10 @@ from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 class FurnitureSimImageFeature(FurnitureSimEnv):
     # class FurnitureSimImageFeature(FurnitureSimEnvLegacy):
     def __init__(self, **kwargs):
+        self._resize_img = kwargs["resize_img"]
         super().__init__(
             concat_robot_state=True,
-            resize_img=True,
+            resize_img=self._resize_img,
             np_step_out=False,
             channel_first=True,
             **kwargs,
@@ -44,11 +45,12 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         self.layer = self.layer.to(self._device)
 
         # Data Augmentation
-        self.resize = Resize((224, 224))
-        img_size = self.img_size
-        ratio = 256 / min(img_size[0], img_size[1])
-        ratio_size = (int(img_size[1] * ratio), int(img_size[0] * ratio))
-        self.resize_crop = torch.nn.Sequential(Resize(ratio_size), CenterCrop((224, 224)))
+        if kwargs["resize_img"]:
+            self.resize = Resize((224, 224))
+            img_size = self.img_size
+            ratio = 256 / min(img_size[0], img_size[1])
+            ratio_size = (int(img_size[1] * ratio), int(img_size[0] * ratio))
+            self.resize_crop = torch.nn.Sequential(Resize(ratio_size), CenterCrop((224, 224)))
 
     @property
     def observation_space(self):
@@ -86,8 +88,9 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         image2 = obs["color_image2"]
 
         with torch.no_grad():
-            image1 = self.resize(image1.float())
-            image2 = self.resize_crop(image2.float())
+            if self._resize_img:
+                image1 = self.resize(image1.float())
+                image2 = self.resize_crop(image2.float())
 
             image1 = self.layer(image1).detach().cpu().numpy()
             image2 = self.layer(image2).detach().cpu().numpy()
