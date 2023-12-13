@@ -10,9 +10,9 @@ class FrameStackWrapper(gym.Wrapper):
         super().__init__(env)
         self._num_frames = num_frames
         self._skip_frame = skip_frame
-        self._i = 0
-        self.max_env_steps = env.furniture.max_env_steps
         self._num_envs = self.env.num_envs
+        self._i = {env_idx: 0 for env_idx in range(self._num_envs)}
+        self.max_env_steps = env.furniture.max_env_steps
         self._frames = {
             env_idx: {
                 frame: {key: deque([], maxlen=num_frames) for key in self.env.observation_space}
@@ -24,7 +24,7 @@ class FrameStackWrapper(gym.Wrapper):
     def _transform_observation(self, obs):
         new_obs = {key: np.zeros((self._num_envs, self._num_frames, *obs[key].shape[1:])) for key in obs}
         for env_idx in range(self._num_envs):
-            stack = self._frames[env_idx][self._i % self._skip_frame]
+            stack = self._frames[env_idx][self._i[env_idx] % self._skip_frame]
             for key in obs:
                 assert len(stack[key]) == self._num_frames, f"{len(stack[key])} != {self._num_frames}"
                 new_obs[key][env_idx] = np.stack(stack[key])
@@ -34,6 +34,7 @@ class FrameStackWrapper(gym.Wrapper):
         self.env.reset_env(idx)
         self.env.refresh()
 
+        self._i[idx] = 0
         self._frames[idx] = {
             frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
             for frame in range(self._skip_frame)
@@ -43,10 +44,11 @@ class FrameStackWrapper(gym.Wrapper):
             for _ in range(self._num_frames):
                 for key in _obs:
                     self._frames[idx][frame][key].append(_obs[key][idx])
-        return self._frames[idx][0]
+        stack = self._frames[idx][0]
+        return {key: np.stack(stack[key]) for key in _obs}
 
     def reset(self):
-        self._i = 0
+        self._i = {env_idx: 0 for env_idx in range(self._num_envs)}
         self._frames = {
             env_idx: {
                 frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
@@ -63,11 +65,11 @@ class FrameStackWrapper(gym.Wrapper):
         return self._transform_observation(_obs)
 
     def step(self, action):
-        self._i += 1
         _obs, reward, done, info = self.env.step(action)
-        for key in _obs:
-            for env_idx in range(self._num_envs):
-                self._frames[env_idx][self._i % self._skip_frame][key].append(_obs[key][env_idx])
+        for env_idx in range(self._num_envs):
+            self._i[env_idx] += 1
+            for key in _obs:
+                self._frames[env_idx][self._i[env_idx] % self._skip_frame][key].append(_obs[key][env_idx])
         obs = self._transform_observation(_obs)
         return obs, reward, done, info
 
@@ -92,7 +94,7 @@ if __name__ == "__main__":
     env = gym.make(
         env_id,
         furniture=furniture_name,
-        num_envs=1,
+        num_envs=10,
         data_path="",
         use_encoder=False,
         encoder_type="vip",
@@ -118,5 +120,8 @@ if __name__ == "__main__":
         timestep += 1
         print(f"timestep {timestep} / stack step {env.env._i} / current stack {res['image1'].shape}")
         if np.any(done):
-            print(f"info: {info}")
+            for env_idx in range(10):
+                res[env_idx] = env.reset_env(env_idx)
+                done[env_idx] = False
+            print(f"timestep {timestep} / stack step {env.env._i} / current stack {res['image1'].shape} / done: {done}")
             break
