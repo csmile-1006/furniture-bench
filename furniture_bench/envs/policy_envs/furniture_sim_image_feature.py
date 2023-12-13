@@ -15,7 +15,7 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
     def __init__(self, **kwargs):
         super().__init__(
             concat_robot_state=True,
-            np_step_out=False,
+            np_step_out=True,
             channel_first=True,
             **kwargs,
         )
@@ -87,6 +87,9 @@ class FurnitureSimImageFeature(FurnitureSimEnv):
         image2 = obs["color_image2"]
 
         with torch.no_grad():
+            image1 = torch.tensor(image1).cuda()
+            image2 = torch.tensor(image2).cuda()
+
             if not self._resize_img:
                 image1 = self.resize(image1.float())
                 image2 = self.resize_crop(image2.float())

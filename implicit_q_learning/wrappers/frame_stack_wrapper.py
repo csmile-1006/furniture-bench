@@ -100,6 +100,7 @@ if __name__ == "__main__":
         graphics_device_id=0,
         headless=True,
         record=False,
+        resize_img=True,
         # np_step_out=True,
         record_dir="",
         max_env_steps=20 if "Sim" in env_id else 3000,
