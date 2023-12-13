@@ -245,8 +245,8 @@ def main(_):
                     if done[env_idx]:
                         observation[env_idx] = env.reset_env(env_idx)
                         done[env_idx] = False
-                        for k, v in info[f"episode_{i}"].items():
-                            summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{i}"])
+                        for k, v in info[f"episode_{env_idx}"].items():
+                            summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{env_idx}"])
             else:
                 info = {}
                 info["total"] = {"timesteps": i}
