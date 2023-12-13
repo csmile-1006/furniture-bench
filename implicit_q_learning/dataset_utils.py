@@ -386,13 +386,13 @@ class ReplayBuffer(Dataset):
         next_observation = np.concatenate(
             [next_observation[key] for key in ["image1", "image2", "robot_state"]], axis=-1
         )
-        insert_size = observation.shape[0]
-        self.observations[self.insert_index : self.insert_index + insert_size] = observation
-        self.actions[self.insert_index : self.insert_index + insert_size] = action
-        self.rewards[self.insert_index : self.insert_index + insert_size] = reward.squeeze()
-        self.masks[self.insert_index : self.insert_index + insert_size] = mask
-        self.dones_float[self.insert_index : self.insert_index + insert_size] = done_float.squeeze()
-        self.next_observations[self.insert_index : self.insert_index + insert_size] = next_observation
+        insert_size = min(observation.shape[0], self.capacity - self.insert_index)
+        self.observations[self.insert_index : self.insert_index + insert_size] = observation[:insert_size]
+        self.actions[self.insert_index : self.insert_index + insert_size] = action[:insert_size]
+        self.rewards[self.insert_index : self.insert_index + insert_size] = reward.squeeze()[:insert_size]
+        self.masks[self.insert_index : self.insert_index + insert_size] = mask[:insert_size]
+        self.dones_float[self.insert_index : self.insert_index + insert_size] = done_float.squeeze()[:insert_size]
+        self.next_observations[self.insert_index : self.insert_index + insert_size] = next_observation[:insert_size]
 
         self.insert_index = (self.insert_index + insert_size) % self.capacity
         self.size = min(self.size + insert_size, self.capacity)
