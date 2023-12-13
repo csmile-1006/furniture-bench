@@ -243,7 +243,8 @@ def main(_):
 
                 for env_idx in range(FLAGS.num_envs):
                     if done[env_idx]:
-                        observation[env_idx] = env.reset_env(env_idx)
+                        for key in observation:
+                            observation[key][env_idx] = env.reset_env(env_idx)[key]
                         done[env_idx] = False
                         for k, v in info[f"episode_{env_idx}"].items():
                             summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{env_idx}"])
