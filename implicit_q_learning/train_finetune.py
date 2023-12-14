@@ -227,10 +227,10 @@ def main(_):
                 action = agent.sample_actions(observation)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
-                # for j in range(action.shape[0]):
-                #     if action[j][6] < 0:
-                #         action[j] = np.array(action[j])
-                #         action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
+                for j in range(action.shape[0]):
+                    if action[j][6] < 0:
+                        action[j] = np.array(action[j])
+                        action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
 
                 mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
                 for env_idx in range(FLAGS.num_envs):
