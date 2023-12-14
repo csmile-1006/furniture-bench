@@ -19,6 +19,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
 flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
+flags.DEFINE_string("ckpt_dir", "./tmp/", "Checkpoint dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
 flags.DEFINE_integer("ckpt_step", 0, "Specific checkpoint step")
 flags.DEFINE_integer("seed", 42, "Random seed.")
@@ -161,7 +162,7 @@ def main(_):
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     root_logdir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}_{FLAGS.seed}_ft")
-    ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    ckpt_dir = os.path.join(FLAGS.ckpt_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     env, dataset = make_env_and_dataset(
@@ -226,10 +227,10 @@ def main(_):
                 action = agent.sample_actions(observation)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
-                for j in range(action.shape[0]):
-                    if action[j][6] < 0:
-                        action[j] = np.array(action[j])
-                        action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
+                # for j in range(action.shape[0]):
+                #     if action[j][6] < 0:
+                #         action[j] = np.array(action[j])
+                #         action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
 
                 mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
                 for env_idx in range(FLAGS.num_envs):

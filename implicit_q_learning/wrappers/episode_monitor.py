@@ -25,6 +25,16 @@ class EpisodeMonitor(gym.ActionWrapper):
         # if self.check_skill:
         #     self.skill_complete = 0.0
 
+    def reset_env(self, idx):
+        obs = self.env.reset_env(idx)
+        self.refresh()
+
+        self.reward_sum[idx] = 0.0
+        self.episode_length[idx] = 0
+        self.start_time[idx] = time.time()
+
+        return obs
+ 
     def step(self, action: np.ndarray) -> TimeStep:
         observation, reward, done, info = self.env.step(action)
 
