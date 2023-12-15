@@ -223,7 +223,7 @@ def main(_):
     i = start_step
     with pbar:
         while i <= steps:
-            if i != start_step and i >= 0:
+            if i != start_step and i > 0:
                 action = agent.sample_actions(observation)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
@@ -244,8 +244,9 @@ def main(_):
 
                 for env_idx in range(FLAGS.num_envs):
                     if done[env_idx]:
+                        new_ob = env.reset_env(env_idx)
                         for key in observation:
-                            observation[key][env_idx] = env.reset_env(env_idx)[key]
+                            observation[key][env_idx] = new_ob[key]
                         done[env_idx] = False
                         for k, v in info[f"episode_{env_idx}"].items():
                             summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{env_idx}"])
@@ -288,6 +289,7 @@ def main(_):
 
                 eval_returns.append((i, eval_stats["return"]))
                 np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
+                observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
 
             i += done.shape[0]
             pbar.update(done.shape[0])

@@ -12,11 +12,6 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
     pbar = trange(num_episodes, desc="evaluation")
     observation, done = env.reset(), np.zeros((env._num_envs), dtype=bool)
     while ep < num_episodes:
-        # for ep in trange(num_episodes, desc='evaluation'):
-        # pbar = tqdm(total=env.furniture.max_env_steps, leave=False, desc=f"episode {ep + 1}")
-        # observation, done = env.reset(), False
-        # for env_idx in range(len(env._num_envs)):
-        # while not done:
         action = agent.sample_actions(observation, temperature=temperature)
         observation, _, done, info = env.step(action)
         total_step += min(env._num_envs, num_episodes)
@@ -31,8 +26,6 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
                     stats[k].append(info[f"episode_{env_idx}"][k])
                 ep += 1
                 pbar.update(1)
-        # if total_step % (env.max_env_steps * env.env.num_envs) == 0:
-        #     observation = env.reset()
         pbar.set_description(f"total_step: {total_step}")
 
     for k, v in stats.items():
