@@ -10,7 +10,7 @@ from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
-from common import MLP, ResNet18, Transformer, concat_multiple_image_emb, get_1d_sincos_pos_embed
+from common import MLP, concat_multiple_image_emb, get_1d_sincos_pos_embed
 from common import Params
 from common import PRNGKey
 from common import default_init
@@ -48,10 +48,16 @@ class NormalTanhPolicy(nn.Module):
             # else:
             #     state_embed = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(v)
         if self.use_encoder:
+            # for key, val in image_features.items():
+            #     print(f"[INFO] {key}: {val.shape}")
             image_features = jnp.array(list(image_features.values()))
             num_image, batch_size, num_timestep, _ = image_features.shape
             image_features = concat_multiple_image_emb(image_features)
             # Image features: (batch_size, num_timestep, num_images * embd_dim)
+            if observations["robot_state"].ndim == 2:
+                image_features = jnp.concatenate([image_features, observations["robot_state"][jnp.newaxis]], axis=-1)
+            else:
+                image_features = jnp.concatenate([image_features, observations["robot_state"]], axis=-1)
             image_features = MLP([self.emb_dim, self.emb_dim, self.emb_dim], dropout_rate=self.dropout_rate)(
                 image_features
             )

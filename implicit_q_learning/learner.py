@@ -15,11 +15,21 @@ from critic import update_q, update_v
 
 
 def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
-    new_target_params = jax.tree_map(
-        lambda p, tp: p * tau + tp * (1 - tau), critic.params, target_critic.params
-    )
+    new_target_params = jax.tree_map(lambda p, tp: p * tau + tp * (1 - tau), critic.params, target_critic.params)
 
     return target_critic.replace(params=new_target_params)
+
+
+def _share_encoder(source, target):
+    replacers = {}
+
+    for k, v in source.params.items():
+        if "encoder" in k:
+            replacers[k] = v
+
+    # Use critic conv layers in actor:
+    new_params = target.params.copy(add_or_replace=replacers)
+    return target.replace(params=new_params)
 
 
 @jax.jit
@@ -35,12 +45,9 @@ def _update_jit(
     expectile: float,
     temperature: float,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-
     new_value, value_info = update_v(target_critic, value, batch, expectile)
     key, rng = jax.random.split(rng)
-    new_actor, actor_info = awr_update_actor(
-        key, actor, target_critic, new_value, batch, temperature
-    )
+    new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, batch, temperature)
 
     new_critic, critic_info = update_q(critic, new_value, batch, discount)
 
@@ -76,7 +83,7 @@ class Learner(object):
         dropout_rate: Optional[float] = None,
         max_steps: Optional[int] = None,
         opt_decay_schedule: str = "cosine",
-        use_encoder: bool = False
+        use_encoder: bool = False,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -90,17 +97,21 @@ class Learner(object):
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
 
-        if len(observations['image1'].shape) == 3 or len(observations['image1'].shape) == 2:
-            observations['image1'] = observations['image1'][np.newaxis]
-            observations['image2'] = observations['image2'][np.newaxis]
-        if len(observations['robot_state'].shape) == 2:
-            observations['robot_state'] = observations['robot_state'][np.newaxis]
+        if len(observations["image1"].shape) == 3 or len(observations["image1"].shape) == 2:
+            observations["image1"] = observations["image1"][np.newaxis]
+            observations["image2"] = observations["image2"][np.newaxis]
+        if len(observations["robot_state"].shape) == 2:
+            observations["robot_state"] = observations["robot_state"][np.newaxis]
 
-        encoder = Transformer(
-            emb_dim=emb_dim,
-            att_drop=0.0 if dropout_rate is None else dropout_rate,
-            drop=0.0 if dropout_rate is None else dropout_rate,
-        ) if use_encoder else None
+        encoder = (
+            Transformer(
+                emb_dim=emb_dim,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+            )
+            if use_encoder
+            else None
+        )
 
         action_dim = actions.shape[-1]
         actor_def = policy.NormalTanhPolicy(
@@ -113,14 +124,12 @@ class Learner(object):
             state_dependent_std=False,
             tanh_squash_distribution=False,
             use_encoder=use_encoder,
-            encoder=encoder
+            encoder=encoder,
         )
 
         if opt_decay_schedule == "cosine":
             schedule_fn = optax.cosine_decay_schedule(-actor_lr, max_steps)
-            optimiser = optax.chain(
-                optax.scale_by_adam(), optax.scale_by_schedule(schedule_fn)
-            )
+            optimiser = optax.chain(optax.scale_by_adam(), optax.scale_by_schedule(schedule_fn))
         else:
             optimiser = optax.adam(learning_rate=actor_lr)
 
@@ -140,9 +149,7 @@ class Learner(object):
             tx=optax.adam(learning_rate=value_lr),
         )
 
-        target_critic = Model.create(
-            critic_def, inputs=[critic_key, observations, actions]
-        )
+        target_critic = Model.create(critic_def, inputs=[critic_key, observations, actions])
 
         self.actor = actor
         self.critic = critic
@@ -150,9 +157,7 @@ class Learner(object):
         self.target_critic = target_critic
         self.rng = rng
 
-    def sample_actions(
-        self, observations: np.ndarray, temperature: float = 1.0
-    ) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
         rng, actions = policy.sample_actions(
             self.rng, self.actor.apply_fn, self.actor.params, observations, temperature
         )
@@ -162,6 +167,13 @@ class Learner(object):
         return np.clip(actions, -1, 1)
 
     def update(self, batch: Batch) -> InfoDict:
+        new_target_critic = _share_encoder(source=self.critic, target=self.target_critic)
+        self.target_critic = new_target_critic
+        new_value = _share_encoder(source=self.critic, target=self.value)
+        self.value = new_value
+        new_actor = _share_encoder(source=self.critic, target=self.actor)
+        self.actor = new_actor
+
         (
             new_rng,
             new_actor,
@@ -188,7 +200,7 @@ class Learner(object):
         self.value = new_value
         self.target_critic = new_target_critic
 
-        info['mse'] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
 
         return info
 
