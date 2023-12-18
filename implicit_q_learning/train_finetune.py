@@ -224,7 +224,7 @@ def main(_):
     with pbar:
         while i <= steps:
             if i != start_step and i > 0:
-                action = agent.sample_actions(observation)
+                action = agent.sample_actions(observation, temperature=0.1)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
                 for j in range(action.shape[0]):
@@ -280,7 +280,7 @@ def main(_):
                 else:
                     agent.save(ft_ckpt_dir, i)
 
-            if i > 0 and i % FLAGS.eval_interval == 0:
+            if i % FLAGS.eval_interval == 0:
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():

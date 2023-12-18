@@ -105,6 +105,7 @@ class Learner(object):
 
         encoder = (
             Transformer(
+                name="encoder",
                 emb_dim=emb_dim,
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
@@ -171,8 +172,6 @@ class Learner(object):
         self.target_critic = new_target_critic
         new_value = _share_encoder(source=self.critic, target=self.value)
         self.value = new_value
-        new_actor = _share_encoder(source=self.critic, target=self.actor)
-        self.actor = new_actor
 
         (
             new_rng,
