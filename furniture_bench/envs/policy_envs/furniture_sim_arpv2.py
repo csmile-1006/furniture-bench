@@ -53,6 +53,8 @@ class FurnitureSimARPV2(FurnitureSimEnv):
         )
 
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._eta = 5
+        self._threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
         self._window_size = kwargs["window_size"]
         self._skip_frame = kwargs["skip_frame"]
         self.__frames = {
@@ -167,6 +169,7 @@ class FurnitureSimARPV2(FurnitureSimEnv):
     def reset(self):
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
         self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
         self._current_instruct = {
             env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
         }
@@ -228,8 +231,11 @@ class FurnitureSimARPV2(FurnitureSimEnv):
         reward = np.maximum(current_reward, next_reward) * self._lambda_mr
         for env_idx in range(self.num_envs):
             if next_reward[env_idx] > current_reward[env_idx]:
-                self._current_instruct[env_idx] = new_instruct[env_idx]
-                self.phase[env_idx] += 1
+                self._threshold[env_idx] += 1
+                if self._threshold[env_idx] >= self._eta:
+                    self._current_instruct[env_idx] = new_instruct[env_idx]
+                    self.phase[env_idx] += 1
+                    self._threshold[env_idx] = 0
         return reward
 
     def step(self, action):
