@@ -110,6 +110,7 @@ def main(_):
     if len_files == 0:
         raise ValueError(f"No pkl files found in {dir_path}")
 
+    cnt = 0
     for i, file_path in enumerate(files):
         if FLAGS.num_demos and i == FLAGS.num_demos:
             break
@@ -181,10 +182,12 @@ def main(_):
 
             for i in range(length - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
-                    image1 = img1_feature[stacked_timesteps[i]]
-                    next_image1 = img1_feature[stacked_timesteps[min(i + 1, length - 2)]]
-                    image2 = img2_feature[stacked_timesteps[i]]
-                    next_image2 = img2_feature[stacked_timesteps[min(i + 1, length - 2)]]
+                    image1 = img1_feature[i]
+                    next_image1 = img1_feature[min(i + 1, length - 2)]
+                    image2 = img2_feature[i]
+                    next_image2 = img1_feature[min(i + 1, length - 2)]
+                    timestep = cnt + stacked_timesteps[i]
+                    next_timestep = cnt + stacked_timesteps[min(i + 1, length - 2)]
                 else:
                     raise ValueError("You have to choose either use_r3m or use_vip or use_liv.")
 
@@ -193,9 +196,8 @@ def main(_):
                         # 'image_feature': feature1,
                         "image1": image1,
                         "image2": image2,
-                        "robot_state": np.stack(
-                            [x["observations"][idx]["robot_state"] for idx in stacked_timesteps[i]]
-                        ),
+                        "timestep": timestep,
+                        "robot_state": x["observations"][i]["robot_state"],
                     }
                 )
                 next_obs_.append(
@@ -203,9 +205,8 @@ def main(_):
                         # 'image_feature': next_feature1,
                         "image1": next_image1,
                         "image2": next_image2,
-                        "robot_state": np.stack(
-                            [x["observations"][idx]["robot_state"] for idx in stacked_timesteps[min(i + 1, length - 2)]]
-                        ),
+                        "timestep": next_timestep,
+                        "robot_state": x["observations"][min(i + 1, length - 2)]["robot_state"],
                     }
                 )
 
@@ -217,6 +218,7 @@ def main(_):
                     step_reward_.append(cumsum_skills[i])
                 multimodal_reward_.append(rewards[i])
                 done_.append(1 if i == length - 2 else 0)
+            cnt += length - 1
 
     dataset = {
         "observations": obs_,

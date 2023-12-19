@@ -17,6 +17,7 @@ from learner import Learner
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
+flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
 flags.DEFINE_string("save_dir", "./checkpoints/", "Tensorboard logging dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
 flags.DEFINE_integer("seed", 42, "Random seed.")
@@ -88,6 +89,7 @@ def make_env_and_dataset(
         env_id, furniture_name = env_name.split("/")
         env = gym.make(
             env_id,
+            num_envs=FLAGS.num_envs,
             furniture=furniture_name,
             data_path=data_path,
             use_encoder=use_encoder,
@@ -178,7 +180,7 @@ def main(_):
     agent = Learner(
         FLAGS.seed,
         env.observation_space.sample(),
-        env.action_space.sample()[np.newaxis],
+        env.action_space.sample()[:1],
         max_steps=FLAGS.max_steps,
         **kwargs,
         use_encoder=FLAGS.use_encoder,

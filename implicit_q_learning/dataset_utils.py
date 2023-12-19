@@ -68,91 +68,39 @@ class Dataset(object):
         dones_float: np.ndarray,
         next_observations: np.ndarray,
         size: int,
+        timesteps: np.ndarray,
+        next_timesteps: np.ndarray,
         use_encoder: bool = False,
     ):
         self.observations = observations
+        self.timesteps = timesteps
         self.actions = actions
         self.rewards = rewards
         self.masks = masks
         self.dones_float = dones_float
         self.next_observations = next_observations
+        self.next_timesteps = next_timesteps
         self.size = size
         self.use_encoder = use_encoder
 
     def sample(self, batch_size: int) -> Batch:
         indx = np.random.randint(self.size, size=batch_size)
 
-        obs_img1 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
-        obs_img2 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
-        next_obs_img1 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
-        next_obs_img2 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
-
-        if self.use_encoder:
-            # Preprocess the image.
-            for i in indx:
-                obs_img1 = obs_img1.at[i].set(jnp.array(self.observations[i]["image1"] / 255.0))
-                obs_img1 = obs_img1.at[i, :, :, 0].add(-0.485)
-                obs_img1 = obs_img1.at[i, :, :, 1].add(-0.456)
-                obs_img1 = obs_img1.at[i, :, :, 2].add(-0.406)
-                obs_img1 = obs_img1.at[i, :, :, 0].divide(0.229)
-                obs_img1 = obs_img1.at[i, :, :, 1].divide(0.224)
-                obs_img1 = obs_img1.at[i, :, :, 2].divide(0.225)
-
-                obs_img2 = obs_img2.at[i].set(jnp.array(self.observations[i]["image2"] / 255.0))
-                obs_img2 = obs_img2.at[i, :, :, 0].add(-0.485)
-                obs_img2 = obs_img2.at[i, :, :, 1].add(-0.456)
-                obs_img2 = obs_img2.at[i, :, :, 2].add(-0.406)
-                obs_img2 = obs_img2.at[i, :, :, 0].divide(0.229)
-                obs_img2 = obs_img2.at[i, :, :, 1].divide(0.224)
-                obs_img2 = obs_img2.at[i, :, :, 2].divide(0.225)
-
-                next_obs_img1 = next_obs_img1.at[i].set(jnp.array(self.next_observations[i]["image1"] / 255.0))
-                next_obs_img1 = next_obs_img1.at[i, :, :, 0].add(-0.485)
-                next_obs_img1 = next_obs_img1.at[i, :, :, 1].add(-0.456)
-                next_obs_img1 = next_obs_img1.at[i, :, :, 2].add(-0.406)
-                next_obs_img1 = next_obs_img1.at[i, :, :, 0].divide(0.229)
-                next_obs_img1 = next_obs_img1.at[i, :, :, 1].divide(0.224)
-                next_obs_img1 = next_obs_img1.at[i, :, :, 2].divide(0.225)
-
-                next_obs_img2 = next_obs_img2.at[i].set(jnp.array(self.next_observations[i]["image2"] / 255.0))
-                next_obs_img2 = next_obs_img2.at[i, :, :, 0].add(-0.485)
-                next_obs_img2 = next_obs_img2.at[i, :, :, 1].add(-0.456)
-                next_obs_img2 = next_obs_img2.at[i, :, :, 2].add(-0.406)
-                next_obs_img2 = next_obs_img2.at[i, :, :, 0].divide(0.229)
-                next_obs_img2 = next_obs_img2.at[i, :, :, 1].divide(0.224)
-                next_obs_img2 = next_obs_img2.at[i, :, :, 2].divide(0.225)
-
-                # self.next_observations[i][img] = self.next_observations[i][img] / 255.0
-                # self.next_observations[i][img][:, :, 0] = (self.next_observations[i][img][:, :, 0] - 0.485) / 0.229
-                # self.next_observations[i][img][:, :, 1] = (self.next_observations[i][img][:, :, 1] - 0.456) / 0.224
-                # self.next_observations[i][img][:, :, 2] = (self.next_observations[i][img][:, :, 2] - 0.406) / 0.225
-        if self.use_encoder:
-            return Batch(
-                observations={
-                    "image1": obs_img1,
-                    "image2": obs_img2,
-                    "robot_state": jnp.array([self.observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
-                },
-                actions=self.actions[indx],
-                rewards=self.rewards[indx],
-                masks=self.masks[indx],
-                next_observations={
-                    "image1": next_obs_img1,
-                    "image2": next_obs_img2,
-                    "robot_state": jnp.array(
-                        [self.next_observations[i]["robot_state"] for i in indx], dtype=jnp.float32
-                    ),
-                },
-            )
         return Batch(
             observations={
-                "image1": jnp.array([self.observations[i][..., : self.embedding_dim] for i in indx], dtype=jnp.float32),
+                "image1": jnp.array(
+                    [self.observations[self.timesteps[i]][..., : self.embedding_dim] for i in indx], dtype=jnp.float32
+                ),
                 "image2": jnp.array(
-                    [self.observations[i][..., self.embedding_dim : self.embedding_dim * 2] for i in indx],
+                    [
+                        self.observations[self.timesteps[i]][..., self.embedding_dim : self.embedding_dim * 2]
+                        for i in indx
+                    ],
                     dtype=jnp.float32,
                 ),
                 "robot_state": jnp.array(
-                    [self.observations[i][..., self.embedding_dim * 2 :] for i in indx], dtype=jnp.float32
+                    [self.observations[self.timesteps[i]][..., self.embedding_dim * 2 :] for i in indx],
+                    dtype=jnp.float32,
                 ),
             },
             actions=self.actions[indx],
@@ -160,14 +108,19 @@ class Dataset(object):
             masks=self.masks[indx],
             next_observations={
                 "image1": jnp.array(
-                    [self.next_observations[i][..., : self.embedding_dim] for i in indx], dtype=jnp.float32
+                    [self.next_observations[self.next_timesteps[i]][..., : self.embedding_dim] for i in indx],
+                    dtype=jnp.float32,
                 ),
                 "image2": jnp.array(
-                    [self.next_observations[i][..., self.embedding_dim : self.embedding_dim * 2] for i in indx],
+                    [
+                        self.next_observations[self.next_timesteps[i]][..., self.embedding_dim : self.embedding_dim * 2]
+                        for i in indx
+                    ],
                     dtype=jnp.float32,
                 ),
                 "robot_state": jnp.array(
-                    [self.next_observations[i][..., self.embedding_dim * 2 :] for i in indx], dtype=jnp.float32
+                    [self.next_observations[self.next_timesteps[i]][..., self.embedding_dim * 2 :] for i in indx],
+                    dtype=jnp.float32,
                 ),
             },
         )
@@ -219,23 +172,7 @@ class FurnitureDataset(Dataset):
         with open(data_path, "rb") as f:
             dataset = pickle.load(f)
 
-        # if clip_to_eps:
-        #     lim = 1 - eps
-        #     dataset["actions"] = np.clip(dataset["actions"], -lim, lim)
-
         dones_float = np.zeros_like(dataset["rewards"], dtype=np.float32)
-
-        # if use_encoder:
-        #     # Preprocess the image.
-        #     for i in range(len(dataset['observations'])):
-        #         # dataset['observations'][i]['image_feature'] = dataset['observations'][i]['image_feature'] / 255.0
-        #         # dataset['next_observations'][i]['image_feature'] = dataset['next_observations'][i]['image_feature'] / 255.0
-        #         for img in ['image1', 'image2']:
-        #             for obs in ['observations', 'next_observations']:
-        #                 dataset[obs][i][img] = dataset[obs][i][img] / 255.0
-        #                 dataset[obs][i][img][:, :, 0] = (dataset[obs][i][img][:, :, 0] - 0.485) / 0.229
-        #                 dataset[obs][i][img][:, :, 1] = (dataset[obs][i][img][:, :, 1] - 0.456) / 0.224
-        #                 dataset[obs][i][img][:, :, 2] = (dataset[obs][i][img][:, :, 2] - 0.406) / 0.225
 
         for i in range(len(dones_float) - 1):
             if (
@@ -250,22 +187,23 @@ class FurnitureDataset(Dataset):
                 dones_float[i] = 0
 
         self.embedding_dim = dataset["observations"][0]["image1"].shape[-1]
-        observations, next_observations = [], []
+        observations, next_observations, timesteps, next_timesteps = [], [], [], []
         for i in range(len(dataset["observations"])):
             observations.append(
                 np.concatenate(
                     [dataset["observations"][i][key] for key in ["image1", "image2", "robot_state"]], axis=-1
                 )
             )
+            timesteps.append(dataset["observations"][i]["timestep"])
             next_observations.append(
                 np.concatenate(
                     [dataset["next_observations"][i][key] for key in ["image1", "image2", "robot_state"]], axis=-1
                 )
             )
+            next_timesteps.append(dataset["next_observations"][i]["timestep"])
 
         dones_float[-1] = 1
         if use_arp:
-            # rewards = lambda_mr * dataset["multimodal_rewards"] + dataset["rewards"]
             rewards = lambda_mr * dataset["multimodal_rewards"]
         elif use_step:
             rewards = dataset["step_rewards"] / np.max(dataset["step_rewards"])
@@ -273,12 +211,14 @@ class FurnitureDataset(Dataset):
             rewards = dataset["rewards"]
 
         super().__init__(
-            np.asarray(observations),
+            observations=np.asarray(observations),
+            timesteps=timesteps,
             actions=dataset["actions"],
             rewards=rewards,
             masks=1.0 - dataset["terminals"],
             dones_float=dones_float,
             next_observations=np.asarray(next_observations),
+            next_timesteps=next_timesteps,
             size=len(dataset["observations"]),
             use_encoder=use_encoder,
         )
@@ -319,24 +259,25 @@ class FurnitureSequenceDataset(FurnitureDataset):
 
 
 class ReplayBuffer(Dataset):
-    def __init__(self, observation_space: gym.spaces.Box, action_dim: int, capacity: int):
-        obs_shape = (
-            observation_space["image1"].shape[0],
-            sum([observation_space[key].shape[-1] for key in observation_space]),
-        )
+    def __init__(self, observation_space: gym.spaces.Box, action_dim: int, capacity: int, window_size: int = 4):
+        obs_shape = (sum([observation_space[key].shape[-1] for key in observation_space]),)
         observations = np.zeros((capacity, *obs_shape), dtype=observation_space.dtype)
         actions = np.zeros((capacity, action_dim), dtype=np.float32)
         rewards = np.zeros((capacity,), dtype=np.float32)
         masks = np.zeros((capacity,), dtype=np.float32)
         dones_float = np.zeros((capacity,), dtype=np.float32)
         next_observations = np.zeros((capacity, *obs_shape), dtype=observation_space.dtype)
+        timesteps = np.zeros((capacity, window_size), dtype=np.int32)
+        next_timesteps = np.zeros((capacity, window_size), dtype=np.int32)
         super().__init__(
             observations=observations,
+            timesteps=timesteps,
             actions=actions,
             rewards=rewards,
             masks=masks,
             dones_float=dones_float,
             next_observations=next_observations,
+            next_timesteps=next_timesteps,
             size=0,
         )
 
@@ -364,11 +305,13 @@ class ReplayBuffer(Dataset):
             indices = np.arange(num_samples)
 
         self.observations[:num_samples] = dataset.observations[indices]
+        self.timesteps[:num_samples] = dataset.timesteps[indices]
         self.actions[:num_samples] = dataset.actions[indices]
         self.rewards[:num_samples] = dataset.rewards[indices]
         self.masks[:num_samples] = dataset.masks[indices]
         self.dones_float[:num_samples] = dataset.dones_float[indices]
         self.next_observations[:num_samples] = dataset.next_observations[indices]
+        self.next_timesteps[:num_samples] = dataset.next_timesteps[indices]
 
         self.insert_index = num_samples
         self.size = num_samples
@@ -376,11 +319,13 @@ class ReplayBuffer(Dataset):
     def insert(
         self,
         observation: np.ndarray,
+        timestep: np.ndarray,
         action: np.ndarray,
         reward: float,
         mask: float,
         done_float: float,
         next_observation: np.ndarray,
+        next_timestep: np.ndarray,
     ):
         observation = np.concatenate([observation[key] for key in ["image1", "image2", "robot_state"]], axis=-1)
         next_observation = np.concatenate(
@@ -388,11 +333,13 @@ class ReplayBuffer(Dataset):
         )
         insert_size = min(observation.shape[0], self.capacity - self.insert_index)
         self.observations[self.insert_index : self.insert_index + insert_size] = observation[:insert_size]
+        self.timesteps[self.insert_index : self.insert_index + insert_size] = timestep[:insert_size]
         self.actions[self.insert_index : self.insert_index + insert_size] = action[:insert_size]
         self.rewards[self.insert_index : self.insert_index + insert_size] = reward.squeeze()[:insert_size]
         self.masks[self.insert_index : self.insert_index + insert_size] = mask[:insert_size]
         self.dones_float[self.insert_index : self.insert_index + insert_size] = done_float.squeeze()[:insert_size]
         self.next_observations[self.insert_index : self.insert_index + insert_size] = next_observation[:insert_size]
+        self.next_timesteps[self.insert_index : self.insert_index + insert_size] = next_timestep[:insert_size]
 
         self.insert_index = (self.insert_index + insert_size) % self.capacity
         self.size = min(self.size + insert_size, self.capacity)
