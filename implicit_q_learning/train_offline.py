@@ -204,6 +204,7 @@ def main(_):
             agent.save(ckpt_dir, i)
 
         if i % FLAGS.eval_interval == 0:
+            os.makedirs(ckpt_dir, exist_ok=True)
             env.env.episode_cnts = np.zeros(env.env.num_envs, dtype=np.int32)
             eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
