@@ -275,7 +275,7 @@ def main(_):
                                 summary_writer.add_histogram(f"training/{k}", v, i)
 
             if i > 0 and i % FLAGS.ckpt_interval == 0:
-                if start_step < 0:
+                if start_step < 0 and i < 0:
                     agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
                 else:
                     agent.save(ft_ckpt_dir, i)
