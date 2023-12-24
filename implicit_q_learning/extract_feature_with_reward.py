@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torchvision.transforms as T
+import scipy
 from absl import app, flags
 from ml_collections import ConfigDict
 
@@ -28,6 +29,10 @@ flags.DEFINE_string("pvr_type", "liv", "pvr type.")
 
 
 device = torch.device("cuda")
+
+
+def gaussian_smoothe(rewards, sigma=3.0):
+    return scipy.ndimage.gaussian_filter1d(rewards, sigma=sigma, mode="nearest")
 
 
 def load_embedding(rep="vip"):
@@ -178,6 +183,7 @@ def main(_):
                 texts=None,
                 device=device,
             )
+            rewards = gaussian_smoothe(rewards)
             cumsum_skills = np.cumsum(x["skills"])
 
             for i in range(length - 1):
