@@ -30,7 +30,7 @@ flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
-flags.DEFINE_integer("replay_buffer_size", int(5e5), "Replay buffer size (=max_steps if unspecified).")
+flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_steps if unspecified).")
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_string("data_path", "", "Path to data.")
@@ -55,7 +55,7 @@ flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
 flags.DEFINE_string(
     "rm_ckpt_path",
-    "/mnt/changyeon/ICML2024/arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_none-liv-img2+1-legacy-withlogit100-demo1000/s0/best_model.pkl",
+    "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.1-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
     "reward model checkpoint path.",
 )
 
@@ -162,7 +162,7 @@ def main(_):
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     root_logdir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}_{FLAGS.seed}_ft")
-    ckpt_dir = os.path.join(FLAGS.ckpt_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     env, dataset = make_env_and_dataset(
@@ -221,6 +221,21 @@ def main(_):
     # Use negative indices for pretraining steps.
     pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm)
     i = start_step
+
+    trajectories = {
+        env_idx: {
+            key: []
+            for key in [
+                "observations",
+                "actions",
+                "rewards",
+                "masks",
+                "done_floats",
+                "next_observations",
+            ]
+        }
+        for env_idx in range(FLAGS.num_envs)
+    }
     with pbar:
         while i <= steps:
             if i != start_step and i > 0:
@@ -238,18 +253,39 @@ def main(_):
                         mask[env_idx] = 1.0
                     else:
                         mask[env_idx] = 0.0
+                    trajectories[env_idx]["observations"].append(
+                        {key: observation[key][env_idx][-1] for key in observation.keys()}
+                    )
+                    trajectories[env_idx]["next_observations"].append(
+                        {key: next_observation[key][env_idx][-1] for key in next_observation.keys()}
+                    )
+                    trajectories[env_idx]["actions"].append(action[env_idx])
+                    trajectories[env_idx]["rewards"].append(reward[env_idx])
+                    trajectories[env_idx]["masks"].append(mask[env_idx])
+                    trajectories[env_idx]["done_floats"].append(done[env_idx])
 
-                replay_buffer.insert(observation, action, reward, mask, done.astype(np.float32), next_observation)
                 observation = next_observation
 
                 for env_idx in range(FLAGS.num_envs):
                     if done[env_idx]:
+                        replay_buffer.insert_episode(trajectories[env_idx])
                         new_ob = env.reset_env(env_idx)
                         for key in observation:
                             observation[key][env_idx] = new_ob[key]
                         done[env_idx] = False
                         for k, v in info[f"episode_{env_idx}"].items():
                             summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{env_idx}"])
+                        trajectories[env_idx] = {
+                            key: []
+                            for key in [
+                                "observations",
+                                "actions",
+                                "rewards",
+                                "masks",
+                                "done_floats",
+                                "next_observations",
+                            ]
+                        }
             else:
                 info = {}
                 info["total"] = {"timesteps": i}
@@ -274,13 +310,13 @@ def main(_):
                             else:
                                 summary_writer.add_histogram(f"training/{k}", v, i)
 
-            if i > 0 and i % FLAGS.ckpt_interval == 0:
+            if i != start_step and i % FLAGS.ckpt_interval == 0:
                 if start_step < 0 and i < 0:
                     agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
                 else:
                     agent.save(ft_ckpt_dir, i)
 
-            if i % FLAGS.eval_interval == 0:
+            if i != start_step and i % FLAGS.eval_interval == 0:
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():

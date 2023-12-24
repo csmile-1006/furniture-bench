@@ -941,7 +941,7 @@ class FurnitureSimEnv(gym.Env):
 
         return P, V
 
-    def _get_observation(self):
+    def _get_observation(self, video=True):
         robot_state = self._read_robot_state()
         color_obs = {k: self._get_color_obs(v) for k, v in self.camera_obs.items() if "color" in k}
         depth_obs = {k: torch.stack(v) for k, v in self.camera_obs.items() if "depth" in k}
@@ -970,7 +970,12 @@ class FurnitureSimEnv(gym.Env):
         #     self.video_writer.write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
 
         for env_idx in range(self.num_envs):
-            if self.record and self.episode_cnts[env_idx] % self.record_every == 0:
+            if (
+                video
+                and self.record
+                and self.episode_cnts[env_idx]
+                and self.episode_cnts[env_idx] % self.record_every == 0
+            ):
                 record_images = []
                 for k in sorted(color_obs.keys()):
                     img = color_obs[k][env_idx]

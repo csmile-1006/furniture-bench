@@ -152,7 +152,7 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             }
             for frame in range(self._skip_frame)
         }
-        _obs = self._get_observation()
+        _obs = super()._get_observation(video=False)
         liv_feat = self._extract_liv_feature(_obs)
         stack = self.__frames[idx]
         for frame in range(self._skip_frame):
@@ -165,6 +165,7 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             stack[0][key].append(liv_feat[key][idx])
         stack[0]["timestep"].append(np.asarray(self.i[idx]).astype(np.int32))
         stack[0]["attn_mask"].append(np.asarray(1).astype(np.int32))
+        return self._extract_vip_feature(_obs)
 
     def reset(self):
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}

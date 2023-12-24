@@ -212,13 +212,13 @@ class FurnitureDataset(Dataset):
 
         super().__init__(
             observations=np.asarray(observations),
-            timesteps=timesteps,
+            timesteps=np.asarray(timesteps),
             actions=dataset["actions"],
             rewards=rewards,
             masks=1.0 - dataset["terminals"],
             dones_float=dones_float,
             next_observations=np.asarray(next_observations),
-            next_timesteps=next_timesteps,
+            next_timesteps=np.asarray(next_timesteps),
             size=len(dataset["observations"]),
             use_encoder=use_encoder,
         )
@@ -327,10 +327,6 @@ class ReplayBuffer(Dataset):
         next_observation: np.ndarray,
         next_timestep: np.ndarray,
     ):
-        observation = np.concatenate([observation[key] for key in ["image1", "image2", "robot_state"]], axis=-1)
-        next_observation = np.concatenate(
-            [next_observation[key] for key in ["image1", "image2", "robot_state"]], axis=-1
-        )
         insert_size = min(observation.shape[0], self.capacity - self.insert_index)
         self.observations[self.insert_index : self.insert_index + insert_size] = observation[:insert_size]
         self.timesteps[self.insert_index : self.insert_index + insert_size] = timestep[:insert_size]
@@ -343,3 +339,44 @@ class ReplayBuffer(Dataset):
 
         self.insert_index = (self.insert_index + insert_size) % self.capacity
         self.size = min(self.size + insert_size, self.capacity)
+
+    def insert_episode(self, trajectories: dict, window_size=4, skip_frame=16):
+        trajectories = {key: np.asarray(val) for key, val in trajectories.items()}
+        for key, val in trajectories.items():
+            if key == "next_observations" or key == "observations":
+                trajectories[key] = np.stack(
+                    [np.concatenate([v[key] for key in ["image1", "image2", "robot_state"]], axis=-1) for v in val]
+                )
+            else:
+                trajectories[key] = np.asarray(val)
+
+        len_episode = trajectories["actions"].shape[0]
+        stacked_timesteps = []
+        timestep_stacks = {key: collections.deque([], maxlen=window_size) for key in range(skip_frame)}
+
+        for _ in range(window_size):
+            for j in range(skip_frame):
+                timestep_stacks[j].append(0)
+
+        for i in range(len_episode):
+            mod = i % skip_frame
+            timestep_stack = timestep_stacks[mod]
+            timestep_stack.append(i)
+            stacked_timesteps.append(np.stack(timestep_stack))
+
+        next_stacked_timesteps = stacked_timesteps[1:].copy()
+        next_stacked_timesteps.append(stacked_timesteps[-1])
+
+        timesteps = np.asarray(stacked_timesteps) + self.size
+        next_timesteps = np.asarray(next_stacked_timesteps) + self.size
+
+        return self.insert(
+            observation=trajectories["observations"],
+            timestep=timesteps,
+            action=trajectories["actions"],
+            reward=trajectories["rewards"],
+            mask=trajectories["masks"],
+            done_float=trajectories["done_floats"],
+            next_observation=trajectories["next_observations"],
+            next_timestep=next_timesteps,
+        )
