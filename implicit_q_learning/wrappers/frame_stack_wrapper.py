@@ -31,7 +31,7 @@ class FrameStackWrapper(gym.Wrapper):
         return new_obs
 
     def reset_env(self, idx):
-        self.env.reset_env(idx)
+        _obs = self.env.reset_env(idx)
         self.env.refresh()
 
         self._i[idx] = 0
@@ -39,7 +39,8 @@ class FrameStackWrapper(gym.Wrapper):
             frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
             for frame in range(self._skip_frame)
         }
-        _obs = self.env.unwrapped._get_observation()
+        if _obs is None:
+            _obs = self.env.unwrapped._get_observation()
         for frame in range(self._skip_frame):
             for _ in range(self._num_frames):
                 for key in _obs:
