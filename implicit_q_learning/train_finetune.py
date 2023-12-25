@@ -50,7 +50,7 @@ flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
-flags.DEFINE_float("lambda_mr", 0.01, "lambda value for dataset.")
+flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
 flags.DEFINE_string(
@@ -146,9 +146,6 @@ def make_env_and_dataset(
         dataset.rewards -= 1.0
         # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
         # but I found no difference between (x - 0.5) * 4 and x - 1.0
-    # elif FLAGS.use_arp:
-    #     print("normalize dataset for arpv2 rewards.")
-    #     normalize(dataset)
     elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
         normalize(dataset)
 
@@ -213,7 +210,6 @@ def main(_):
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
         agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
-        # start_step, steps = FLAGS.ckpt_step, range(FLAGS.max_steps + 1)
         start_step, steps = FLAGS.ckpt_step, FLAGS.ckpt_step + FLAGS.max_steps
     else:
         start_step, steps = -1 * FLAGS.num_pretraining_steps, FLAGS.max_steps
@@ -239,7 +235,7 @@ def main(_):
     with pbar:
         while i <= steps:
             if i != start_step and i > 0:
-                action = agent.sample_actions(observation, temperature=0.1)
+                action = agent.sample_actions(observation, temperature=0.5)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
                 for j in range(action.shape[0]):

@@ -7,8 +7,13 @@ import gym
 import numpy as np
 import jax.numpy as jnp
 from tqdm import tqdm
+import scipy
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
+
+
+def gaussian_smoothe(rewards, sigma=3.0):
+    return scipy.ndimage.gaussian_filter1d(rewards, sigma=sigma, mode="nearest")
 
 
 def split_into_trajectories(observations, actions, rewards, masks, dones_float, next_observations):
@@ -369,12 +374,13 @@ class ReplayBuffer(Dataset):
 
         timesteps = np.asarray(stacked_timesteps) + self.size
         next_timesteps = np.asarray(next_stacked_timesteps) + self.size
+        rewards = gaussian_smoothe(trajectories["rewards"])
 
         return self.insert(
             observation=trajectories["observations"],
             timestep=timesteps,
             action=trajectories["actions"],
-            reward=trajectories["rewards"],
+            reward=rewards,
             mask=trajectories["masks"],
             done_float=trajectories["done_floats"],
             next_observation=trajectories["next_observations"],
