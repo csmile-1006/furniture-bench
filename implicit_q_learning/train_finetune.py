@@ -235,7 +235,7 @@ def main(_):
     with pbar:
         while i <= steps:
             if i != start_step and i > 0:
-                action = agent.sample_actions(observation, temperature=0.5)
+                action = agent.sample_actions(observation, temperature=0.2)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
                 for j in range(action.shape[0]):
