@@ -1,5 +1,6 @@
 import isaacgym  # noqa: F401
 import os
+import pickle
 
 import gym
 import numpy as np
@@ -51,6 +52,7 @@ flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
+flags.DEFINE_float("temperature", 0.05, "Temperature for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
 flags.DEFINE_string(
@@ -161,6 +163,8 @@ def main(_):
     root_logdir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}_{FLAGS.seed}_ft")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    buffer_dir = os.path.join(FLAGS.save_dir, "buffer", f"{FLAGS.run_name}.{FLAGS.seed}")
+    os.makedirs(buffer_dir, exist_ok=True)
 
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
@@ -235,7 +239,7 @@ def main(_):
     with pbar:
         while i <= steps:
             if i != start_step and i > 0:
-                action = agent.sample_actions(observation, temperature=0.2)
+                action = agent.sample_actions(observation, temperature=FLAGS.temperature)
                 action = np.clip(action, -1, 1)
                 next_observation, reward, done, info = env.step(action)
                 for j in range(action.shape[0]):
@@ -311,6 +315,11 @@ def main(_):
                     agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
                 else:
                     agent.save(ft_ckpt_dir, i)
+                    try:
+                        with open(os.path.join(buffer_dir, "buffer"), "wb") as f:
+                            pickle.dump(replay_buffer, f, pickle.HIGHEST_PROTOCOL)
+                    except:  # noqa: E722
+                        print("Could not save agent buffer.")
 
             if i != start_step and i % FLAGS.eval_interval == 0:
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
