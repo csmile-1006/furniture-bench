@@ -14,12 +14,8 @@ import numpy as np
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--furniture", default="square_table")
-    parser.add_argument(
-        "--file-path", help="Demo path to replay (data directory or pickle)"
-    )
-    parser.add_argument(
-        "--scripted", action="store_true", help="Execute hard-coded assembly script."
-    )
+    parser.add_argument("--file-path", help="Demo path to replay (data directory or pickle)")
+    parser.add_argument("--scripted", action="store_true", help="Execute hard-coded assembly script.")
     parser.add_argument("--no-action", action="store_true")
     parser.add_argument("--random-action", action="store_true")
     parser.add_argument(
@@ -38,9 +34,7 @@ def main():
         action="store_true",
         help="Save camera input of the simulator at the beginning of the episode.",
     )
-    parser.add_argument(
-        "--record", action="store_true", help="Record the video of the simulator."
-    )
+    parser.add_argument("--record", action="store_true", help="Record the video of the simulator.")
     parser.add_argument(
         "--high-res",
         action="store_true",
@@ -62,9 +56,7 @@ def main():
         default="FurnitureSim-v0",
         help="Environment id of FurnitureSim",
     )
-    parser.add_argument(
-        "--replay-path", type=str, help="Path to the saved data to replay action."
-    )
+    parser.add_argument("--replay-path", type=str, help="Path to the saved data to replay action.")
 
     parser.add_argument(
         "--act-rot-repr",
@@ -147,14 +139,17 @@ def main():
         steps = 300
         from cProfile import Profile
         from pstats import Stats, SortKey
+
         per_step_times = []
         import time
+
         # with Profile() as profile:
         import GPUtil
-        gpus = GPUtil.getGPUs()
-        gpu = gpus[0]
 
-        gpu_memories = [] # MB unit.
+        gpus = GPUtil.getGPUs()
+        gpu = gpus[args.compute_device_id]
+
+        gpu_memories = []  # MB unit.
         for epi in tqdm(range(int(episodes / args.num_envs))):
             env.reset()
             for i in range(steps):
@@ -163,15 +158,21 @@ def main():
                 ob, rew, done, _ = env.step(ac)
                 end = time.time()
                 per_step_times.append(end - start)
-                
+
                 if i % 50 == 0:
                     gpu_memories.append(gpu.memoryUsed)
 
             env.reset()
 
         from contextlib import redirect_stdout
-        from furniture_bench.envs.furniture_sim_env import observation_times, reward_times, control_times, control_refresh_times
-        with open(f'sim_speed_{args.num_envs}.txt', 'w') as f:
+        from furniture_bench.envs.furniture_sim_env import (
+            observation_times,
+            reward_times,
+            control_times,
+            control_refresh_times,
+        )
+
+        with open(f"sim_speed_{args.num_envs}.txt", "w") as f:
             with redirect_stdout(f):
                 print(f"Task: {args.furniture}", f"observation: parts_poses, color_image1, color_image2")
                 print("=======================================================")
@@ -186,9 +187,9 @@ def main():
                 print(f"Number of rewards: {len(reward_times) * args.num_envs}")
                 print(f"Number of controls: {len(control_times) * args.num_envs}")
                 print(f"Number of controls refresh: {len(control_refresh_times) * args.num_envs}")
-                
+
                 print("=======================================================")
-                
+
                 print(f"Average GPU memory (MB): {np.mean(gpu_memories)}")
 
     elif args.file_path is not None:
