@@ -9,6 +9,8 @@ from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 import wandb
 
+from furniture_bench.sim_config import sim_config
+
 import wrappers
 from dataset_utils import D4RLDataset, FurnitureDataset, split_into_trajectories
 from evaluation import evaluate
@@ -101,7 +103,7 @@ def make_env_and_dataset(
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
-            max_env_steps=600 if "Sim" in env_id else 3000,
+            max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
         )
     else:
         env = gym.make(env_name)
