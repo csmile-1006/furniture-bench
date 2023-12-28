@@ -1,6 +1,7 @@
 """Implementations of algorithms for continuous control."""
 
 from typing import Optional, Sequence, Tuple
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -32,7 +33,7 @@ def _share_encoder(source, target):
     return target.replace(params=new_params)
 
 
-@jax.jit
+@partial(jax.jit, static_argnames="utd_ratio")
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
@@ -44,12 +45,25 @@ def _update_jit(
     tau: float,
     expectile: float,
     temperature: float,
+    utd_ratio: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    new_value, value_info = update_v(target_critic, value, batch, expectile)
-    key, rng = jax.random.split(rng)
-    new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, batch, temperature)
+    def slice(x, i):
+        assert x.shape[0] % utd_ratio == 0
+        batch_size = x.shape[0] // utd_ratio
+        return x[batch_size * i : batch_size * (i + 1)]
 
-    new_critic, critic_info = update_q(critic, new_value, batch, discount)
+    for i in range(utd_ratio):
+        mini_batch = Batch(
+            observations={key: slice(batch.observations[key], i) for key in batch.observations},
+            actions=slice(batch.actions, i),
+            rewards=slice(batch.rewards, i),
+            masks=slice(batch.masks, i),
+            next_observations={key: slice(batch.next_observations[key], i) for key in batch.next_observations},
+        )
+        new_value, value_info = update_v(target_critic, value, mini_batch, expectile)
+        new_critic, critic_info = update_q(critic, new_value, mini_batch, discount)
+    key, rng = jax.random.split(rng)
+    new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, mini_batch, temperature)
 
     new_target_critic = target_update(new_critic, target_critic, tau)
 
@@ -84,6 +98,7 @@ class Learner(object):
         max_steps: Optional[int] = None,
         opt_decay_schedule: str = "cosine",
         use_encoder: bool = False,
+        critic_layer_norm: bool = False,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -136,14 +151,18 @@ class Learner(object):
 
         actor = Model.create(actor_def, inputs=[actor_key, observations], tx=optimiser)
 
-        critic_def = value_net.DoubleCritic(hidden_dims, emb_dim, use_encoder=use_encoder, encoder=encoder)
+        critic_def = value_net.DoubleCritic(
+            hidden_dims, emb_dim, use_encoder=use_encoder, encoder=encoder, critic_layer_norm=critic_layer_norm
+        )
         critic = Model.create(
             critic_def,
             inputs=[critic_key, observations, actions],
             tx=optax.adam(learning_rate=critic_lr),
         )
 
-        value_def = value_net.ValueCritic(hidden_dims, emb_dim, use_encoder=use_encoder, encoder=encoder)
+        value_def = value_net.ValueCritic(
+            hidden_dims, emb_dim, use_encoder=use_encoder, encoder=encoder, critic_layer_norm=critic_layer_norm
+        )
         value = Model.create(
             value_def,
             inputs=[value_key, observations],
@@ -167,7 +186,7 @@ class Learner(object):
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
 
-    def update(self, batch: Batch) -> InfoDict:
+    def update(self, batch: Batch, utd_ratio: int = 1) -> InfoDict:
         new_target_critic = _share_encoder(source=self.critic, target=self.target_critic)
         self.target_critic = new_target_critic
         new_value = _share_encoder(source=self.critic, target=self.value)
@@ -191,6 +210,7 @@ class Learner(object):
             self.tau,
             self.expectile,
             self.temperature,
+            utd_ratio,
         )
 
         self.rng = new_rng

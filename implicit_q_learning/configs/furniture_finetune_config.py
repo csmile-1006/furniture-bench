@@ -24,4 +24,7 @@ def get_config():
     config.depth = 2
     config.num_heads = 8
 
+    # layer norm for critic
+    config.critic_layer_norm = True
+
     return config

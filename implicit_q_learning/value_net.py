@@ -11,6 +11,7 @@ class ValueCritic(nn.Module):
     emb_dim: int
     use_encoder: bool = False
     encoder: nn.Module = None
+    critic_layer_norm: bool = False
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray]) -> jnp.ndarray:
@@ -44,7 +45,7 @@ class ValueCritic(nn.Module):
                 [batch_size, 1 * num_timestep, self.emb_dim],
             )
             obs = self.encoder(token_embed)[:, -1]
-        critic = MLP((*self.hidden_dims, 1))(obs)
+        critic = MLP((*self.hidden_dims, 1), use_layer_norm=self.critic_layer_norm)(obs)
         return jnp.squeeze(critic, -1)
 
 
@@ -55,6 +56,7 @@ class Critic(nn.Module):
     use_encoder: bool = False
     encoder: nn.Module = None
     training: bool = (False,)
+    critic_layer_norm: bool = False
 
     @nn.compact
     def __call__(
@@ -87,7 +89,9 @@ class Critic(nn.Module):
             actions = jnp.squeeze(actions, 1)
 
         inputs = jnp.concatenate([obs, actions], -1)
-        critic = MLP((*self.hidden_dims, 1), activations=self.activations)(inputs)
+        critic = MLP((*self.hidden_dims, 1), activations=self.activations, use_layer_norm=self.critic_layer_norm)(
+            inputs
+        )
         return jnp.squeeze(critic, -1)
 
 
@@ -97,6 +101,7 @@ class DoubleCritic(nn.Module):
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     use_encoder: bool = False
     encoder: nn.Module = None
+    critic_layer_norm: bool = False
 
     @nn.compact
     def __call__(self, observations: jnp.ndarray, actions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -106,6 +111,7 @@ class DoubleCritic(nn.Module):
             activations=self.activations,
             use_encoder=self.use_encoder,
             encoder=self.encoder,
+            critic_layer_norm=self.critic_layer_norm,
         )(observations, actions)
         critic2 = Critic(
             self.hidden_dims,
@@ -113,5 +119,6 @@ class DoubleCritic(nn.Module):
             activations=self.activations,
             use_encoder=self.use_encoder,
             encoder=self.encoder,
+            critic_layer_norm=self.critic_layer_norm,
         )(observations, actions)
         return critic1, critic2
