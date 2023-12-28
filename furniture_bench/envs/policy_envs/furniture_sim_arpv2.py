@@ -72,7 +72,7 @@ class FurnitureSimARPV2(FurnitureSimEnv):
         self._current_instruct = {
             env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
         }
-        self._lambda_mr = kwargs.get("lambda_mr", 0.01)
+        self._lambda_mr = kwargs.get("lambda_mr", 0.1)
 
         if not self._resize_img:
             self.resize = Resize((224, 224))
