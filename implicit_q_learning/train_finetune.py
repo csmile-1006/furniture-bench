@@ -10,6 +10,8 @@ from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 
+from furniture_bench.sim_config import sim_config
+
 import wrappers
 from dataset_utils import Batch, D4RLDataset, ReplayBuffer, split_into_trajectories, FurnitureDataset
 from evaluation import evaluate
@@ -29,6 +31,8 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
+flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
+flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
 flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_steps if unspecified).")
@@ -45,7 +49,7 @@ flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
 flags.DEFINE_integer("skip_frame", 16, "how often skip frame.")
-flags.DEFINE_integer("num_frames", 4, "Number of frames in context window.")
+flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
@@ -110,15 +114,16 @@ def make_env_and_dataset(
             use_encoder=use_encoder,
             encoder_type=encoder_type,
             headless=True,
-            record=True,
+            record=False,
             resize_img=True,
             randomness=randomness,
+            record_every=20,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
-            window_size=FLAGS.num_frames,
+            window_size=FLAGS.window_size,
             skip_frame=FLAGS.skip_frame,
-            max_env_steps=600 if "Sim" in env_id else 3000,
+            max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
             rm_type=FLAGS.rm_type,
             rm_ckpt_path=FLAGS.rm_ckpt_path,
             lambda_mr=FLAGS.lambda_mr,
@@ -127,7 +132,7 @@ def make_env_and_dataset(
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
-    env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
+    env = wrappers.FrameStackWrapper(env, num_frames=FLAGS.window_size, skip_frame=FLAGS.skip_frame)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
@@ -152,6 +157,55 @@ def make_env_and_dataset(
         normalize(dataset)
 
     return env, dataset
+
+
+def combine(one_dict, other_dict):
+    combined = {}
+    if isinstance(one_dict, Batch):
+        one_dict, other_dict = one_dict._asdict(), other_dict._asdict()
+    for k, v in one_dict.items():
+        if isinstance(v, dict):
+            combined[k] = combine(v, other_dict[k])
+        else:
+            tmp = np.empty((v.shape[0] + other_dict[k].shape[0], *other_dict[k].shape[1:]), dtype=v.dtype)
+            tmp[0::2] = np.expand_dims(v, axis=1) if tmp.ndim != v.ndim else v
+            tmp[1::2] = other_dict[k]
+            combined[k] = tmp
+
+    return combined
+
+
+def _initialize_traj_dict():
+    trajectories = {
+        env_idx: {
+            key: []
+            for key in [
+                "observations",
+                "actions",
+                "rewards",
+                "masks",
+                "done_floats",
+                "next_observations",
+            ]
+        }
+        for env_idx in range(FLAGS.num_envs)
+    }
+    return trajectories
+
+
+def _reset_traj_dict(traj_dict, env_idx):
+    traj_dict[env_idx] = {
+        key: []
+        for key in [
+            "observations",
+            "actions",
+            "rewards",
+            "masks",
+            "done_floats",
+            "next_observations",
+        ]
+    }
+    return traj_dict
 
 
 def main(_):
@@ -179,8 +233,13 @@ def main(_):
     )
 
     action_dim = env.action_space.shape[-1]
-    replay_buffer = ReplayBuffer(env.observation_space, action_dim, FLAGS.replay_buffer_size or FLAGS.max_steps)
-    replay_buffer.initialize_with_dataset(dataset, FLAGS.init_dataset_size)
+    replay_buffer = ReplayBuffer(
+        observation_space=env.observation_space,
+        action_dim=action_dim,
+        capacity=FLAGS.replay_buffer_size or FLAGS.max_steps,
+        window_size=FLAGS.window_size,
+        embedding_dim=1024,
+    )
 
     kwargs = dict(FLAGS.config)
     if FLAGS.wandb:
@@ -209,90 +268,89 @@ def main(_):
         use_encoder=FLAGS.use_encoder,
     )
 
-    eval_returns = []
-    observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
         agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
-        start_step, steps = FLAGS.ckpt_step, FLAGS.ckpt_step + FLAGS.max_steps
     else:
-        start_step, steps = -1 * FLAGS.num_pretraining_steps, FLAGS.max_steps
-
-    # Use negative indices for pretraining steps.
-    pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm)
-    i = start_step
-
-    trajectories = {
-        env_idx: {
-            key: []
-            for key in [
-                "observations",
-                "actions",
-                "rewards",
-                "masks",
-                "done_floats",
-                "next_observations",
-            ]
-        }
-        for env_idx in range(FLAGS.num_envs)
-    }
-    with pbar:
-        while i <= steps:
-            if i != start_step and i > 0:
-                action = agent.sample_actions(observation, temperature=FLAGS.temperature)
-                action = np.clip(action, -1, 1)
-                next_observation, reward, done, info = env.step(action)
-                for j in range(action.shape[0]):
-                    if action[j][6] < 0:
-                        action[j] = np.array(action[j])
-                        action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
-
-                mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
-                for env_idx in range(FLAGS.num_envs):
-                    if not done[env_idx] or "TimeLimit.truncated" in info:
-                        mask[env_idx] = 1.0
+        print("Start pre-training with offline dataset.")
+        start_step, steps = 1, FLAGS.num_pretraining_steps + 1
+        for i in tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm):
+            offline_batch = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
+            update_info = agent.update(offline_batch)
+            if i % FLAGS.log_interval == 0:
+                for k, v in update_info.items():
+                    if v.ndim == 0:
+                        summary_writer.add_scalar(f"offline-training/{k}", v, i)
                     else:
-                        mask[env_idx] = 0.0
-                    trajectories[env_idx]["observations"].append(
-                        {key: observation[key][env_idx][-1] for key in observation.keys()}
+                        summary_writer.add_histogram(f"offline-training/{k}", v, i)
+
+            if i % FLAGS.eval_interval == 0:
+                eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
+                for k, v in eval_info.items():
+                    summary_writer.add_scalar(f"offline-evaluation/{k}", v, i)
+                summary_writer.flush()
+
+            if i % FLAGS.ckpt_interval == 0:
+                agent.save(ckpt_dir, i)
+
+    start_step, steps = 0, FLAGS.max_steps + 1
+    online_pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm)
+    i = start_step
+    eval_returns = []
+    trajectories = _initialize_traj_dict()
+    observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
+    start_training = env.furniture.max_env_steps * FLAGS.num_envs
+
+    with online_pbar:
+        while i <= steps:
+            action = agent.sample_actions(observation, temperature=FLAGS.temperature)
+            action = np.clip(action, -1, 1)
+            next_observation, reward, done, info = env.step(action)
+            for j in range(action.shape[0]):
+                if action[j][6] < 0:
+                    action[j] = np.array(action[j])
+                    action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
+
+            mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
+            for env_idx in range(FLAGS.num_envs):
+                if not done[env_idx] or "TimeLimit.truncated" in info:
+                    mask[env_idx] = 1.0
+                else:
+                    mask[env_idx] = 0.0
+                trajectories[env_idx]["observations"].append(
+                    {key: observation[key][env_idx][-1] for key in observation.keys()}
+                )
+                trajectories[env_idx]["next_observations"].append(
+                    {key: next_observation[key][env_idx][-1] for key in next_observation.keys()}
+                )
+                trajectories[env_idx]["actions"].append(action[env_idx])
+                trajectories[env_idx]["rewards"].append(reward[env_idx])
+                trajectories[env_idx]["masks"].append(mask[env_idx])
+                trajectories[env_idx]["done_floats"].append(done[env_idx])
+
+                if done[env_idx]:
+                    replay_buffer.insert_episode(trajectories[env_idx])
+                    new_ob = env.reset_env(env_idx)
+                    for key in observation:
+                        observation[key][env_idx] = new_ob[key]
+                    done[env_idx] = False
+                    for k, v in info[f"episode_{env_idx}"].items():
+                        summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{env_idx}"])
+                    trajectories = _reset_traj_dict(trajectories, env_idx)
+
+                if i >= start_training:
+                    offline_batch = dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio))
+                    online_batch = replay_buffer.sample(
+                        int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio))
                     )
-                    trajectories[env_idx]["next_observations"].append(
-                        {key: next_observation[key][env_idx][-1] for key in next_observation.keys()}
+                    combined = combine(offline_batch, online_batch)
+                    batch = Batch(
+                        observations=combined["observations"],
+                        actions=combined["actions"],
+                        rewards=combined["rewards"],
+                        masks=combined["masks"],
+                        next_observations=combined["next_observations"],
                     )
-                    trajectories[env_idx]["actions"].append(action[env_idx])
-                    trajectories[env_idx]["rewards"].append(reward[env_idx])
-                    trajectories[env_idx]["masks"].append(mask[env_idx])
-                    trajectories[env_idx]["done_floats"].append(done[env_idx])
-
-                observation = next_observation
-
-                for env_idx in range(FLAGS.num_envs):
-                    if done[env_idx]:
-                        replay_buffer.insert_episode(trajectories[env_idx])
-                        new_ob = env.reset_env(env_idx)
-                        for key in observation:
-                            observation[key][env_idx] = new_ob[key]
-                        done[env_idx] = False
-                        for k, v in info[f"episode_{env_idx}"].items():
-                            summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{env_idx}"])
-                        trajectories[env_idx] = {
-                            key: []
-                            for key in [
-                                "observations",
-                                "actions",
-                                "rewards",
-                                "masks",
-                                "done_floats",
-                                "next_observations",
-                            ]
-                        }
-            else:
-                info = {}
-                info["total"] = {"timesteps": i}
-
-            if i != start_step:
-                for _ in range(FLAGS.num_envs):
-                    batch = replay_buffer.sample(FLAGS.batch_size)
                     if "antmaze" in FLAGS.env_name:
                         batch = Batch(
                             observations=batch.observations,
@@ -309,17 +367,15 @@ def main(_):
                                 summary_writer.add_scalar(f"training/{k}", v, i)
                             else:
                                 summary_writer.add_histogram(f"training/{k}", v, i)
+            observation = next_observation
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:
-                if start_step < 0 and i < 0:
-                    agent.save(ckpt_dir, i + FLAGS.num_pretraining_steps)
-                else:
-                    agent.save(ft_ckpt_dir, i)
-                    try:
-                        with open(os.path.join(buffer_dir, "buffer"), "wb") as f:
-                            pickle.dump(replay_buffer, f, pickle.HIGHEST_PROTOCOL)
-                    except:  # noqa: E722
-                        print("Could not save agent buffer.")
+                agent.save(ft_ckpt_dir, i)
+                try:
+                    with open(os.path.join(buffer_dir, "buffer"), "wb") as f:
+                        pickle.dump(replay_buffer, f, pickle.HIGHEST_PROTOCOL)
+                except:  # noqa: E722
+                    print("Could not save agent buffer.")
 
             if i != start_step and i % FLAGS.eval_interval == 0:
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
@@ -331,10 +387,11 @@ def main(_):
                 eval_returns.append((i, eval_stats["return"]))
                 np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
                 observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
+                trajectories = _initialize_traj_dict()
 
             i += done.shape[0]
-            pbar.update(done.shape[0])
-            pbar.set_description(f" current {i} / total step {steps}")
+            online_pbar.update(done.shape[0])
+            online_pbar.set_description(f" current {i} / total step {steps}")
 
     if FLAGS.wandb:
         wandb.finish()

@@ -90,44 +90,19 @@ class Dataset(object):
 
     def sample(self, batch_size: int) -> Batch:
         indx = np.random.randint(self.size, size=batch_size)
+        observations = self.observations[self.timesteps[indx]]
+        image1, image2, robot_state = np.split(observations, (self.embedding_dim, self.embedding_dim * 2), axis=-1)
+        next_observations = self.next_observations[self.next_timesteps[indx]]
+        next_image1, next_image2, next_robot_state = np.split(
+            next_observations, (self.embedding_dim, self.embedding_dim * 2), axis=-1
+        )
 
         return Batch(
-            observations={
-                "image1": jnp.array(
-                    [self.observations[self.timesteps[i]][..., : self.embedding_dim] for i in indx], dtype=jnp.float32
-                ),
-                "image2": jnp.array(
-                    [
-                        self.observations[self.timesteps[i]][..., self.embedding_dim : self.embedding_dim * 2]
-                        for i in indx
-                    ],
-                    dtype=jnp.float32,
-                ),
-                "robot_state": jnp.array(
-                    [self.observations[self.timesteps[i]][..., self.embedding_dim * 2 :] for i in indx],
-                    dtype=jnp.float32,
-                ),
-            },
+            observations=dict(image1=image1, image2=image2, robot_state=robot_state),
             actions=self.actions[indx],
             rewards=self.rewards[indx],
             masks=self.masks[indx],
-            next_observations={
-                "image1": jnp.array(
-                    [self.next_observations[self.next_timesteps[i]][..., : self.embedding_dim] for i in indx],
-                    dtype=jnp.float32,
-                ),
-                "image2": jnp.array(
-                    [
-                        self.next_observations[self.next_timesteps[i]][..., self.embedding_dim : self.embedding_dim * 2]
-                        for i in indx
-                    ],
-                    dtype=jnp.float32,
-                ),
-                "robot_state": jnp.array(
-                    [self.next_observations[self.next_timesteps[i]][..., self.embedding_dim * 2 :] for i in indx],
-                    dtype=jnp.float32,
-                ),
-            },
+            next_observations=dict(image1=next_image1, image2=next_image2, robot_state=next_robot_state),
         )
 
 
@@ -264,7 +239,14 @@ class FurnitureSequenceDataset(FurnitureDataset):
 
 
 class ReplayBuffer(Dataset):
-    def __init__(self, observation_space: gym.spaces.Box, action_dim: int, capacity: int, window_size: int = 4):
+    def __init__(
+        self,
+        observation_space: gym.spaces.Box,
+        action_dim: int,
+        capacity: int,
+        window_size: int = 4,
+        embedding_dim: int = 1024,
+    ):
         obs_shape = (sum([observation_space[key].shape[-1] for key in observation_space]),)
         observations = np.zeros((capacity, *obs_shape), dtype=observation_space.dtype)
         actions = np.zeros((capacity, action_dim), dtype=np.float32)
@@ -290,6 +272,7 @@ class ReplayBuffer(Dataset):
 
         self.insert_index = 0
         self.capacity = capacity
+        self.embedding_dim = embedding_dim
 
     def initialize_with_dataset(self, dataset: Dataset, num_samples: Optional[int]):
         assert self.insert_index == 0, "Can insert a batch online in an empty replay buffer."
@@ -332,6 +315,13 @@ class ReplayBuffer(Dataset):
         next_observation: np.ndarray,
         next_timestep: np.ndarray,
     ):
+        observation = np.stack(
+            [np.concatenate([v[key] for key in ["image1", "image2", "robot_state"]], axis=-1) for v in observation]
+        )
+        next_observation = np.stack(
+            [np.concatenate([v[key] for key in ["image1", "image2", "robot_state"]], axis=-1) for v in next_observation]
+        )
+
         insert_size = min(observation.shape[0], self.capacity - self.insert_index)
         self.observations[self.insert_index : self.insert_index + insert_size] = observation[:insert_size]
         self.timesteps[self.insert_index : self.insert_index + insert_size] = timestep[:insert_size]
@@ -347,14 +337,6 @@ class ReplayBuffer(Dataset):
 
     def insert_episode(self, trajectories: dict, window_size=4, skip_frame=16):
         trajectories = {key: np.asarray(val) for key, val in trajectories.items()}
-        for key, val in trajectories.items():
-            if key == "next_observations" or key == "observations":
-                trajectories[key] = np.stack(
-                    [np.concatenate([v[key] for key in ["image1", "image2", "robot_state"]], axis=-1) for v in val]
-                )
-            else:
-                trajectories[key] = np.asarray(val)
-
         len_episode = trajectories["actions"].shape[0]
         stacked_timesteps = []
         timestep_stacks = {key: collections.deque([], maxlen=window_size) for key in range(skip_frame)}
@@ -371,9 +353,10 @@ class ReplayBuffer(Dataset):
 
         next_stacked_timesteps = stacked_timesteps[1:].copy()
         next_stacked_timesteps.append(stacked_timesteps[-1])
-
         timesteps = np.asarray(stacked_timesteps) + self.size
         next_timesteps = np.asarray(next_stacked_timesteps) + self.size
+
+        # smooth reward for stabilizing training.
         rewards = gaussian_smoothe(trajectories["rewards"])
 
         return self.insert(
