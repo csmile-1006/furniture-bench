@@ -285,10 +285,12 @@ def main(_):
                         summary_writer.add_histogram(f"offline-training/{k}", v, i)
 
             if i % FLAGS.eval_interval == 0:
+                env.set_eval_flag()
                 eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
                 for k, v in eval_info.items():
                     summary_writer.add_scalar(f"offline-evaluation/{k}", v, i)
                 summary_writer.flush()
+                env.unset_eval_flag()
 
             if i % FLAGS.ckpt_interval == 0:
                 agent.save(ckpt_dir, i)
@@ -378,6 +380,7 @@ def main(_):
                     print("Could not save agent buffer.")
 
             if i != start_step and i % FLAGS.eval_interval == 0:
+                env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():
@@ -388,6 +391,7 @@ def main(_):
                 np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
                 observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
                 trajectories = _initialize_traj_dict()
+                env.unset_eval_flag()
 
             i += done.shape[0]
             online_pbar.update(done.shape[0])

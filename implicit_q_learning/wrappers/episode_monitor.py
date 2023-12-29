@@ -17,6 +17,7 @@ class EpisodeMonitor(gym.ActionWrapper):
         self.total_timesteps = {idx: 0 for idx in range(self._num_envs)}
         self.num_episodes = 0
         self.success_episodes = 0
+        self.do_eval = False
 
     def _reset_stats(self):
         self.reward_sum = {idx: 0.0 for idx in range(self._num_envs)}
@@ -32,6 +33,12 @@ class EpisodeMonitor(gym.ActionWrapper):
         self.start_time[idx] = time.time()
 
         return obs
+
+    def set_eval_flag(self):
+        self.do_eval = True
+
+    def unset_eval_flag(self):
+        self.do_eval = False
 
     def step(self, action: np.ndarray) -> TimeStep:
         observation, reward, done, info = self.env.step(action)
@@ -51,10 +58,11 @@ class EpisodeMonitor(gym.ActionWrapper):
                 info[f"episode_{i}"]["length"] = self.episode_length[i]
                 info[f"episode_{i}"]["duration"] = time.time() - self.start_time[i]
 
-                self.num_episodes += 1
-                info[f"episode_{i}"]["num_episodes"] = self.num_episodes
-                self.success_episodes += info[f"episode_{i}"]["success"]
-                info[f"episode_{i}"]["success_episodes"] = self.success_episodes
+                if not self.do_eval:
+                    self.num_episodes += 1
+                    info[f"episode_{i}"]["num_episodes"] = self.num_episodes
+                    self.success_episodes += info[f"episode_{i}"]["success"]
+                    info[f"episode_{i}"]["success_episodes"] = self.success_episodes
 
                 if hasattr(self, "get_normalized_score"):
                     info[f"episode_{i}"]["return"] = self.get_normalized_score(info[f"episode_{i}"]["return"]) * 100.0
