@@ -62,7 +62,7 @@ def make_env(
     device_id: int,
 ) -> gym.Env:
     if "Furniture" in env_name:
-        import furniture_bench
+        import furniture_bench  # noqa: F401
 
         env_id, furniture_name = env_name.split("/")
         record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -75,6 +75,7 @@ def make_env(
             record=record,
             record_every=1,
             record_dir=record_dir,
+            resize_img=True,
             disable_env_checker=True,
             from_skill=from_skill,
             skill=skill,
