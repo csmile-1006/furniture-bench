@@ -114,7 +114,7 @@ def make_env_and_dataset(
             use_encoder=use_encoder,
             encoder_type=encoder_type,
             headless=True,
-            record=False,
+            record=True,
             resize_img=True,
             randomness=randomness,
             record_every=20,
