@@ -331,6 +331,7 @@ def main(_):
                 trajectories[env_idx]["done_floats"].append(done[env_idx])
 
                 if done[env_idx]:
+                    print(f"episode {env_idx} done.")
                     replay_buffer.insert_episode(trajectories[env_idx])
                     new_ob = env.reset_env(env_idx)
                     for key in observation:
@@ -340,7 +341,7 @@ def main(_):
                         summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
                     trajectories = _reset_traj_dict(trajectories, env_idx)
 
-                if i >= start_training:
+                if i > start_training:
                     offline_batch = dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio))
                     online_batch = replay_buffer.sample(
                         int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio))
