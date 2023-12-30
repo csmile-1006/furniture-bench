@@ -10,6 +10,8 @@ from absl import app, flags
 from ml_collections import config_flags
 from furniture_bench.utils.checkpoint import download_ckpt_if_not_exists
 
+from furniture_bench.sim_config import sim_config
+
 import wrappers
 from evaluation import evaluate
 from learner import Learner
@@ -83,7 +85,7 @@ def make_env(
             randomness=randomness,
             encoder_type=encoder_type,
             headless=headless,
-            max_env_steps=600,
+            max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
             compute_device_id=device_id,
             graphics_device_id=device_id,
         )
