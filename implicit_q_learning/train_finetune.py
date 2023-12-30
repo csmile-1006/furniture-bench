@@ -56,12 +56,12 @@ flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
-flags.DEFINE_float("temperature", 0.05, "Temperature for stochastic actor.")
+flags.DEFINE_float("temperature", 0.03, "Temperature for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
 flags.DEFINE_string(
     "rm_ckpt_path",
-    "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.1-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
+    "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
     "reward model checkpoint path.",
 )
 
@@ -337,7 +337,7 @@ def main(_):
                         observation[key][env_idx] = new_ob[key]
                     done[env_idx] = False
                     for k, v in info[f"episode_{env_idx}"].items():
-                        summary_writer.add_scalar(f"training/{k}", v, info["total"][f"timesteps_{env_idx}"])
+                        summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
                     trajectories = _reset_traj_dict(trajectories, env_idx)
 
                 if i >= start_training:
@@ -366,9 +366,9 @@ def main(_):
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():
                             if v.ndim == 0:
-                                summary_writer.add_scalar(f"training/{k}", v, i)
+                                summary_writer.add_scalar(f"training/{k}", v, i + env_idx)
                             else:
-                                summary_writer.add_histogram(f"training/{k}", v, i)
+                                summary_writer.add_histogram(f"training/{k}", v, i + env_idx)
             observation = next_observation
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:

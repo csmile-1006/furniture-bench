@@ -14,7 +14,7 @@ class EpisodeMonitor(gym.ActionWrapper):
         super().__init__(env)
         self._num_envs = env.num_envs
         self._reset_stats()
-        self.total_timesteps = {idx: 0 for idx in range(self._num_envs)}
+        self.total_timesteps = 0
         self.num_episodes = 0
         self.success_episodes = 0
         self.do_eval = False
@@ -46,9 +46,9 @@ class EpisodeMonitor(gym.ActionWrapper):
         for i in range(self._num_envs):
             self.reward_sum[i] += reward[i]
             self.episode_length[i] += 1
-            self.total_timesteps[i] += 1
+            self.total_timesteps += 1
 
-        info["total"] = {f"timesteps_{i}": self.total_timesteps[i] for i in range(self._num_envs)}
+        info["total"] = {"timesteps": self.total_timesteps}
 
         for i in range(self._num_envs):
             if done[i]:
