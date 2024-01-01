@@ -139,6 +139,13 @@ def make_env_and_dataset(
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
 
+    import torch
+    import random
+
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
     print("Observation space", env.observation_space)
     print("Action space", env.action_space)
 
