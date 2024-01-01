@@ -84,7 +84,7 @@ def make_env_and_dataset(
     lambda_mr: float,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
-    record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
+    record_dir = os.path.join(FLAGS.save_dir, env_name, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
         import furniture_bench  # noqa: F401
 
@@ -152,8 +152,8 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-    tb_dir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
-    ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    tb_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
+    ckpt_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
