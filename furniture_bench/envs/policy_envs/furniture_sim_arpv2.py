@@ -251,8 +251,8 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             stack["timestep"].append(np.asarray(self.i[env_idx]).astype(np.int32))
             stack["attn_mask"].append(np.asarray(1).astype(np.int32))
 
-        reward = self._compute_reward()
-        return self._extract_vip_feature(obs), reward + task_reward, done, info
+        reward = self._compute_reward() + task_reward.squeeze()
+        return self._extract_vip_feature(obs), reward, done, info
 
 
 if __name__ == "__main__":
@@ -266,7 +266,7 @@ if __name__ == "__main__":
     use_arp_reward = True
     rm_type = "ARP-V2"
     rm_ckpt_path = Path(
-        "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.1-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl"
+        "/home/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.1-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl"
     ).expanduser()
 
     env = gym.make(
@@ -295,6 +295,6 @@ if __name__ == "__main__":
     for _ in range(630):
         res, rew, done, info = env.step(env.action_space.sample())
         timestep += 1
-        print(f"timestep {timestep} / stack step {env.i} / phase {env.phase}")
+        print(f"timestep {timestep} / stack step {env.i} / phase {env.phase} / rew: {rew}")
         if np.any(done):
             break

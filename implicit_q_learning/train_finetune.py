@@ -61,7 +61,7 @@ flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
 flags.DEFINE_string(
     "rm_ckpt_path",
-    "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
+    "/home/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
     "reward model checkpoint path.",
 )
 
