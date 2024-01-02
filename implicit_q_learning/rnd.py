@@ -38,12 +38,15 @@ class RND(nn.Module):
         return predict_feature, target_feature
 
 
-def update_rnd(key: PRNGKey, rnd: Model, batch: Batch) -> Tuple[Model, InfoDict]:
+def update_rnd(key: PRNGKey, rnd: Model, batch: Batch, update_proportion: float = 0.25) -> Tuple[Model, InfoDict]:
     predict_next_feature, target_next_feature = rnd(batch.next_observations)
 
     def rnd_loss_fn(rnd_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         rnd_loss = jnp.mean((predict_next_feature - target_next_feature) ** 2)
-        intrinsic_reward = jnp.sum((target_next_feature - predict_next_feature) ** 2, axis=1) / 2
+        mask = jax.random.normal(key, (len(predict_next_feature),))
+        mask = (mask < update_proportion).astype(jnp.float32)
+        rnd_loss = (rnd_loss * mask).sum() / jnp.maximum(mask.sum(), 1.0)
+        intrinsic_reward = jnp.mean((target_next_feature - predict_next_feature) ** 2, axis=1) / 2
         return rnd_loss, {"rnd_loss": rnd_loss, "expl_reward": intrinsic_reward}
 
     new_rnd, info = rnd.apply_gradient(rnd_loss_fn)
