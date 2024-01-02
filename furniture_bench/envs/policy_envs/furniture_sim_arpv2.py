@@ -240,7 +240,7 @@ class FurnitureSimARPV2(FurnitureSimEnv):
         return reward
 
     def step(self, action):
-        obs, reward, done, info = super().step(action)
+        obs, task_reward, done, info = super().step(action)
         liv_feat = self._extract_liv_feature(obs)
 
         for env_idx in range(self.num_envs):
@@ -252,7 +252,7 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             stack["attn_mask"].append(np.asarray(1).astype(np.int32))
 
         reward = self._compute_reward()
-        return self._extract_vip_feature(obs), reward, done, info
+        return self._extract_vip_feature(obs), reward + task_reward, done, info
 
 
 if __name__ == "__main__":
