@@ -283,7 +283,7 @@ def main(_):
         start_step, steps = 1, FLAGS.num_pretraining_steps + 1
         for i in tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm):
             offline_batch = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
-            update_info = agent.update(offline_batch)
+            update_info = agent.update(offline_batch, use_rnd=False)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     if v.ndim == 0:
@@ -369,7 +369,7 @@ def main(_):
                             masks=batch.masks,
                             next_observations=batch.next_observations,
                         )
-                    update_info = agent.update(batch)
+                    update_info = agent.update(batch, use_rnd=agent.use_rnd)
 
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():

@@ -13,6 +13,7 @@ import value_net
 from actor import update as awr_update_actor
 from common import Batch, InfoDict, Model, PRNGKey, Transformer
 from critic import update_q, update_v
+from rnd import RND, update_rnd
 
 
 def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
@@ -33,19 +34,22 @@ def _share_encoder(source, target):
     return target.replace(params=new_params)
 
 
-@partial(jax.jit, static_argnames="utd_ratio")
+@partial(jax.jit, static_argnames=("utd_ratio", "use_rnd"))
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
     critic: Model,
     value: Model,
     target_critic: Model,
+    rnd: Model,
     batch: Batch,
     discount: float,
     tau: float,
     expectile: float,
     temperature: float,
+    beta_rnd: float,
     utd_ratio: int,
+    use_rnd: bool,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
     # def slice(x, i):
     #     assert x.shape[0] % utd_ratio == 0
@@ -66,20 +70,28 @@ def _update_jit(
     # new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, mini_batch, temperature)
 
     # new_target_critic = target_update(new_critic, target_critic, tau)
+    if use_rnd:
+        key, rng = jax.random.split(rng)
+        new_rnd, rnd_info = update_rnd(key, rnd, batch)
+        batch = batch._replace(rewards=batch.rewards + beta_rnd * rnd_info["expl_reward"])
+        rnd_info["expl_reward"] = jnp.mean(rnd_info["expl_reward"])
+    else:
+        new_rnd, rnd_info = rnd, {}
+
     new_value, value_info = update_v(target_critic, value, batch, expectile)
     key, rng = jax.random.split(rng)
     new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, batch, temperature)
 
     new_critic, critic_info = update_q(critic, new_value, batch, discount)
     new_target_critic = target_update(new_critic, target_critic, tau)
-
     return (
         rng,
         new_actor,
         new_critic,
         new_value,
         new_target_critic,
-        {**critic_info, **value_info, **actor_info},
+        new_rnd,
+        {**critic_info, **value_info, **actor_info, **rnd_info},
     )
 
 
@@ -105,6 +117,8 @@ class Learner(object):
         opt_decay_schedule: str = "cosine",
         use_encoder: bool = False,
         critic_layer_norm: bool = False,
+        use_rnd: bool = False,
+        beta_rnd: float = 1.0,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -183,6 +197,14 @@ class Learner(object):
         self.target_critic = target_critic
         self.rng = rng
 
+        self.use_rnd = use_rnd
+        self.rnd = None
+        if self.use_rnd:
+            self.rng, rnd_key = jax.random.split(self.rng)
+            rnd_def = RND(hidden_dims=[512, 512])
+            self.rnd = Model.create(rnd_def, inputs=[rnd_key, observations], tx=optax.adam(learning_rate=value_lr))
+        self.beta_rnd = beta_rnd
+
     def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
         rng, actions = policy.sample_actions(
             self.rng, self.actor.apply_fn, self.actor.params, observations, temperature
@@ -192,9 +214,7 @@ class Learner(object):
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
 
-    def update(self, batch: Batch, utd_ratio: int = 1) -> InfoDict:
-        new_target_critic = _share_encoder(source=self.critic, target=self.target_critic)
-        self.target_critic = new_target_critic
+    def update(self, batch: Batch, utd_ratio: int = 1, use_rnd: bool = False) -> InfoDict:
         new_value = _share_encoder(source=self.critic, target=self.value)
         self.value = new_value
 
@@ -204,6 +224,7 @@ class Learner(object):
             new_critic,
             new_value,
             new_target_critic,
+            new_rnd,
             info,
         ) = _update_jit(
             self.rng,
@@ -211,12 +232,15 @@ class Learner(object):
             self.critic,
             self.value,
             self.target_critic,
+            self.rnd,
             batch,
             self.discount,
             self.tau,
             self.expectile,
             self.temperature,
+            self.beta_rnd,
             utd_ratio,
+            use_rnd,
         )
 
         self.rng = new_rng
@@ -224,6 +248,7 @@ class Learner(object):
         self.critic = new_critic
         self.value = new_value
         self.target_critic = new_target_critic
+        self.rnd = new_rnd
 
         info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
 
@@ -238,6 +263,8 @@ class Learner(object):
         self.target_critic.save(path)
         path = f"{ckpt_dir}/{step}_value"
         self.value.save(path)
+        path = f"{ckpt_dir}/{step}_rnd"
+        self.rnd.save(path)
 
     def load(self, ckpt_dir, step):
         path = f"{ckpt_dir}/{step}_actor"
@@ -248,3 +275,5 @@ class Learner(object):
         self.target_critic = self.target_critic.load(path)
         path = f"{ckpt_dir}/{step}_value"
         self.value = self.value.load(path)
+        path = f"{ckpt_dir}/{step}_rnd"
+        self.rnd = self.rnd.load(path)
