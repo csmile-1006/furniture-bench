@@ -30,7 +30,7 @@ class NormalTanhPolicy(nn.Module):
     log_std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
     use_encoder: bool = False
-    encoder: nn.Module = None
+    encoder_cls: nn.Module = None
 
     @nn.compact
     def __call__(
@@ -58,9 +58,9 @@ class NormalTanhPolicy(nn.Module):
                 image_features = jnp.concatenate([image_features, observations["robot_state"][jnp.newaxis]], axis=-1)
             else:
                 image_features = jnp.concatenate([image_features, observations["robot_state"]], axis=-1)
-            image_features = MLP([self.emb_dim, self.emb_dim, self.emb_dim], dropout_rate=self.dropout_rate)(
-                image_features
-            )
+            image_features = MLP(
+                [self.emb_dim, self.emb_dim, self.emb_dim], dropout_rate=self.dropout_rate, name="FeatureMLP"
+            )(image_features)
             image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
             token_embed = jnp.concatenate(
                 # [image_embed, state_embed], axis=-1
@@ -72,17 +72,21 @@ class NormalTanhPolicy(nn.Module):
                 # [batch_size, 2 * num_timestep, self.emb_dim],
                 [batch_size, 1 * num_timestep, self.emb_dim],
             )
-            obs = self.encoder(token_embed, deterministic=training)[:, -1]
+            obs = self.encoder_cls(name="encoder")(token_embed, deterministic=training)[:, -1]
         # obs = jnp.concatenate([image_feature1, image_feature2, observations['robot_state']], axis=-1)
         # obs = jnp.concatenate(features, axis=-1)
-        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate)(obs, training=training)
+        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
+            obs, training=training
+        )
 
-        means = nn.Dense(self.action_dim, kernel_init=default_init())(outputs)
+        means = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseMean")(outputs)
 
         if self.state_dependent_std:
-            log_stds = nn.Dense(self.action_dim, kernel_init=default_init(self.log_std_scale))(outputs)
+            log_stds = nn.Dense(
+                self.action_dim, kernel_init=default_init(self.log_std_scale), name="OutputDenseLogStd"
+            )(outputs)
         else:
-            log_stds = self.param("log_stds", nn.initializers.zeros, (self.action_dim,))
+            log_stds = self.param("OutputLogStd", nn.initializers.zeros, (self.action_dim,))
 
         log_std_min = self.log_std_min or LOG_STD_MIN
         log_std_max = self.log_std_max or LOG_STD_MAX

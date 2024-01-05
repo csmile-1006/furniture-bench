@@ -341,8 +341,8 @@ def main(_):
                     print(f"episode {env_idx} done.")
                     replay_buffer.insert_episode(trajectories[env_idx])
                     new_ob = env.reset_env(env_idx)
-                    for key in observation:
-                        observation[key][env_idx] = new_ob[key]
+                    for key in next_observation:
+                        next_observation[key][env_idx] = new_ob[key]
                     done[env_idx] = False
                     for k, v in info[f"episode_{env_idx}"].items():
                         summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])

@@ -9,6 +9,7 @@ import jax
 import jax.numpy as jnp
 import optax
 import einops
+import pickle
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
 
@@ -345,9 +346,11 @@ class Model:
     def save(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, "wb") as f:
-            f.write(flax.serialization.to_bytes(self.params))
+            pickle.dump(self.params)
+            # f.write(flax.serialization.to_bytes(self.params))
 
     def load(self, load_path: str) -> "Model":
         with open(load_path, "rb") as f:
-            params = flax.serialization.from_bytes(self.params, f.read())
+            params = pickle.load(f)
+            # params = flax.serialization.from_bytes(self.params, f.read())
         return self.replace(params=params)

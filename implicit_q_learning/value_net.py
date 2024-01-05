@@ -10,7 +10,7 @@ class ValueCritic(nn.Module):
     hidden_dims: Sequence[int]
     emb_dim: int
     use_encoder: bool = False
-    encoder: nn.Module = None
+    encoder_cls: nn.Module = None
     critic_layer_norm: bool = False
 
     @nn.compact
@@ -44,7 +44,7 @@ class ValueCritic(nn.Module):
                 # [batch_size, 2 * num_timestep, self.emb_dim],
                 [batch_size, 1 * num_timestep, self.emb_dim],
             )
-            obs = self.encoder(token_embed)[:, -1]
+            obs = self.encoder_cls(name="encoder")(token_embed)[:, -1]
         critic = MLP((*self.hidden_dims, 1), use_layer_norm=self.critic_layer_norm)(obs)
         return jnp.squeeze(critic, -1)
 
@@ -54,7 +54,7 @@ class Critic(nn.Module):
     emb_dim: int
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     use_encoder: bool = False
-    encoder: nn.Module = None
+    encoder_cls: nn.Module = None
     training: bool = (False,)
     critic_layer_norm: bool = False
 
@@ -83,7 +83,7 @@ class Critic(nn.Module):
                 # [batch_size, 2 * num_timestep, self.emb_dim],
                 [batch_size, 1 * num_timestep, self.emb_dim],
             )
-            obs = self.encoder(token_embed, deterministic=training)[:, -1]
+            obs = self.encoder_cls(name="encoder")(token_embed, deterministic=training)[:, -1]
         if len(actions.shape) == 3:
             # Reduce the redundant dimension
             actions = jnp.squeeze(actions, 1)
