@@ -263,8 +263,9 @@ class Learner(object):
         self.target_critic.save(path)
         path = f"{ckpt_dir}/{step}_value"
         self.value.save(path)
-        path = f"{ckpt_dir}/{step}_rnd"
-        self.rnd.save(path)
+        if self.use_rnd:
+            path = f"{ckpt_dir}/{step}_rnd"
+            self.rnd.save(path)
 
     def load(self, ckpt_dir, step):
         path = f"{ckpt_dir}/{step}_actor"
@@ -275,5 +276,6 @@ class Learner(object):
         self.target_critic = self.target_critic.load(path)
         path = f"{ckpt_dir}/{step}_value"
         self.value = self.value.load(path)
-        path = f"{ckpt_dir}/{step}_rnd"
-        self.rnd = self.rnd.load(path)
+        if self.use_rnd:
+            path = f"{ckpt_dir}/{step}_rnd"
+            self.rnd = self.rnd.load(path)
