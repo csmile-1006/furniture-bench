@@ -100,7 +100,7 @@ class DoubleCritic(nn.Module):
     emb_dim: int
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     use_encoder: bool = False
-    encoder: nn.Module = None
+    encoder_cls: nn.Module = None
     critic_layer_norm: bool = False
 
     @nn.compact
@@ -110,7 +110,7 @@ class DoubleCritic(nn.Module):
             self.emb_dim,
             activations=self.activations,
             use_encoder=self.use_encoder,
-            encoder=self.encoder,
+            encoder_cls=self.encoder_cls,
             critic_layer_norm=self.critic_layer_norm,
         )(observations, actions)
         critic2 = Critic(
@@ -118,7 +118,7 @@ class DoubleCritic(nn.Module):
             self.emb_dim,
             activations=self.activations,
             use_encoder=self.use_encoder,
-            encoder=self.encoder,
+            encoder_cls=self.encoder_cls,
             critic_layer_norm=self.critic_layer_norm,
         )(observations, actions)
         return critic1, critic2
