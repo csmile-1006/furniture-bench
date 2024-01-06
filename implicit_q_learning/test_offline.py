@@ -1,11 +1,8 @@
 import os
-import subprocess
-from typing import Tuple
 
 import gym
 import numpy as np
 
-import tqdm
 from absl import app, flags
 from ml_collections import config_flags
 from furniture_bench.utils.checkpoint import download_ckpt_if_not_exists
@@ -116,7 +113,7 @@ def main(_):
     eval_path = os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     if "Sim" in FLAGS.env_name:
-        import isaacgym
+        import isaacgym  # noqa: F401
 
     env = make_env(
         FLAGS.env_name,
