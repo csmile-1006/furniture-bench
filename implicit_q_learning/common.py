@@ -346,7 +346,7 @@ class Model:
     def save(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, "wb") as f:
-            pickle.dump(self.params)
+            pickle.dump(self.params, f)
             # f.write(flax.serialization.to_bytes(self.params))
 
     def load(self, load_path: str) -> "Model":
