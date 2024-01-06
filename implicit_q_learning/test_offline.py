@@ -67,7 +67,7 @@ def make_env(
         import furniture_bench  # noqa: F401
 
         env_id, furniture_name = env_name.split("/")
-        record_dir = os.path.join(FLAGS.save_dir, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
+        record_dir = os.path.join(FLAGS.save_dir, env_name, "sim_record_test", f"{FLAGS.run_name}.{FLAGS.seed}")
         env = gym.make(
             env_id,
             num_envs=FLAGS.num_envs,
@@ -112,8 +112,8 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-    os.makedirs(os.path.join(FLAGS.save_dir, "eval"), exist_ok=True)
-    eval_path = os.path.join(FLAGS.save_dir, "eval", f"{FLAGS.run_name}.{FLAGS.seed}")
+    os.makedirs(os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval"), exist_ok=True)
+    eval_path = os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     if "Sim" in FLAGS.env_name:
         import isaacgym
@@ -144,7 +144,7 @@ def main(_):
 
     download_ckpt_if_not_exists(os.path.join(FLAGS.ckpt_dir, "ckpt"), FLAGS.run_name, FLAGS.seed)
 
-    ckpt_dir = os.path.join(FLAGS.ckpt_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    ckpt_dir = os.path.join(FLAGS.ckpt_dir, FLAGS.env_name, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
 
     eval_stats = evaluate(agent, env, FLAGS.eval_episodes, FLAGS.temperature)
