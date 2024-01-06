@@ -26,7 +26,7 @@ def get_config():
 
     # layer norm for critic
     config.critic_layer_norm = True
-    config.use_rnd = True
+    config.use_rnd = False
     config.beta_rnd = 0.1
 
     return config
