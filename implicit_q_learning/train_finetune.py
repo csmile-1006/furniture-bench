@@ -225,7 +225,9 @@ def main(_):
     ckpt_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     buffer_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "buffer", f"{FLAGS.run_name}.{FLAGS.seed}")
+    eval_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval", f"{FLAGS.run_name}.{FLAGS.seed}")
     os.makedirs(buffer_dir, exist_ok=True)
+    os.makedirs(eval_dir, exist_ok=True)
 
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
@@ -396,7 +398,11 @@ def main(_):
                 summary_writer.flush()
 
                 eval_returns.append((i, eval_stats["return"]))
-                np.savetxt(os.path.join(FLAGS.save_dir, f"{FLAGS.seed}.txt"), eval_returns, fmt=["%d", "%.1f"])
+                np.savetxt(
+                    os.path.join(eval_dir, f"{FLAGS.seed}_{i}.txt"),
+                    eval_returns,
+                    fmt=["%d", "%.1f"],
+                )
                 observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
                 trajectories = _initialize_traj_dict()
                 env.unset_eval_flag()
