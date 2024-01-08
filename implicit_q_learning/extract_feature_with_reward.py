@@ -9,23 +9,155 @@ import scipy
 from absl import app, flags
 from ml_collections import ConfigDict
 
-sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
-from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn  # noqa: E402
+from pathlib import Path
+
+import hydra
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import yaml
+from omegaconf import OmegaConf
+
+from diffusion_reward.models.video_models.videogpt.transformer import VideoGPTTransformer
+import pickle
+from types import SimpleNamespace
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+import os
+from pathlib import Path
+
+#sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
+#from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn  # noqa: E402
+
+class CustomVIPER(nn.Module):
+    def __init__(self, cfg):
+        super(CustomVIPER, self).__init__()
+
+        # load video models
+        self.model_cfg = OmegaConf.load(cfg.cfg_path)
+        self.model = VideoGPTTransformer(self.model_cfg)
+        self.model.load_state_dict(torch.load(cfg.ckpt_path))
+        self.model.eval()
+        for param in self.model.parameters(): 
+            param.requires_grad = False
+
+        # set attribute
+        for attr_name, attr_value in vars(cfg).items():
+            setattr(self, attr_name, attr_value)
+        
+    def imgs_to_batch(self, x, reward_type='likelihood'):
+        '''
+        input:
+            imgs: B * T * H * W * C
+            (mostly): 1 * T * ...
+        '''
+        seq_len = x.shape[1]
+        num_frames = self.model_cfg.num_frames + 1
+        n_skip = self.model_cfg.frame_skip
+        subseq_len = num_frames * n_skip
+
+        x = x.permute(0, 1, 4, 2 ,3) # B * T * C * H * W
+        embs, indices = self.model.encode_to_z(x) 
+        indices = indices.reshape(indices.shape[0], seq_len, -1)
+        embs = embs.reshape(embs.shape[0], seq_len, indices.shape[-1], -1)
+        
+        if reward_type == 'likelihood':
+            post_idxes = list(range(seq_len - subseq_len + 1))
+            batch_indices = [indices[:, idx:idx+subseq_len:n_skip] for idx in post_idxes]
+            batch_indices = torch.stack(batch_indices, dim=0)
+            batch_indices = batch_indices.squeeze(1).reshape(batch_indices.shape[0], -1)
+            batch_embs = [embs[:, idx:idx+subseq_len:n_skip] for idx in post_idxes]
+            batch_embs = torch.stack(batch_embs, dim=0)
+            batch_embs = batch_embs.squeeze(1).reshape(batch_embs.shape[0], -1, batch_embs.shape[-1])
+
+            pre_batch_indices = [indices[:, idx].tile((1, num_frames)) for idx in range(subseq_len-1)]
+            pre_batch_indices = torch.concat(pre_batch_indices, dim=0)
+            batch_indices = torch.concat([pre_batch_indices, batch_indices], dim=0)
+
+            pre_batch_embs = [embs[:, idx].tile((1, num_frames, 1)) for idx in range(subseq_len-1)]
+            pre_batch_embs = torch.concat(pre_batch_embs, dim=0)
+            batch_embs = torch.concat([pre_batch_embs, batch_embs], dim=0)
+        elif reward_type == 'entropy':
+            post_idxes = list(range(seq_len - subseq_len + 2))
+            batch_indices = [indices[:, idx:idx+subseq_len-n_skip:n_skip] for idx in post_idxes]
+            batch_indices = torch.stack(batch_indices, dim=0)
+            batch_indices = batch_indices.squeeze(1).reshape(batch_indices.shape[0], -1)
+            batch_embs = [embs[:, idx:idx+subseq_len-n_skip:n_skip] for idx in post_idxes]
+            batch_embs = torch.stack(batch_embs, dim=0)
+            batch_embs = batch_embs.squeeze(1).reshape(batch_embs.shape[0], -1, batch_embs.shape[-1])
+
+            pre_batch_indices = [indices[:, idx].tile((1, num_frames-1)) for idx in range(subseq_len-2)]
+            pre_batch_indices = torch.concat(pre_batch_indices, dim=0)
+            batch_indices = torch.concat([pre_batch_indices, batch_indices], dim=0)
+
+            pre_batch_embs = [embs[:, idx].tile((1, num_frames-1, 1)) for idx in range(subseq_len-2)]
+            pre_batch_embs = torch.concat(pre_batch_embs, dim=0)
+            batch_embs = torch.concat([pre_batch_embs, batch_embs], dim=0)
+        else:
+            raise NotImplementedError
+
+        return batch_embs, batch_indices
+    
+    @torch.no_grad()
+    def calc_reward(self, imgs):
+        batch_embs, batch_indices = self.imgs_to_batch(imgs, self.reward_type)
+        sos_tokens = self.model.calc_sos_tokens(imgs, batch_embs).tile((batch_embs.shape[0], 1, 1))
+
+        rewards = self.cal_log_prob(batch_embs, batch_indices, sos_tokens, target_indices=batch_indices, reward_type=self.reward_type)
+        return rewards  
+    
+    @torch.no_grad()
+    def cal_log_prob(self, embs, x, c, target_indices=None, reward_type='likelihood'):
+        self.model.eval()
+        if not self.model.use_vqemb:
+            x = torch.cat((c, x), dim=1) if x is not None else c   
+        else:
+            x = torch.cat((c, embs), dim=1) if x is not None else c
+
+        logits, _ = self.model.transformer(x[:, :-1])
+        probs = F.log_softmax(logits, dim=-1)
+
+        if reward_type == 'likelihood':
+            target = F.one_hot(target_indices, num_classes=self.model_cfg.codec.num_codebook_vectors)
+            if self.compute_joint:
+                rewards = (probs * target).sum(-1).sum(-1, keepdim=True)
+            else:
+                num_valid_logits = int(logits.shape[1] // (self.model_cfg.num_frames + 1))
+                rewards = (probs * target).sum(-1)[:, -num_valid_logits:].sum(-1, keepdim=True)
+        elif reward_type == 'entropy':
+            num_valid_logits = int(logits.shape[1] // (self.model_cfg.num_frames))
+            entropy = (- probs * probs.exp()).sum(-1)[:, -num_valid_logits:].sum(-1, keepdim=True)
+            rewards = - entropy
+        else:
+            raise NotImplementedError
+
+        # if self.use_std:
+        #     rewards_std = (rewards - self.stat[0]) / self.stat[1]
+        # scaled_rewards = (1 - self.expl_scale) * rewards_std
+        return rewards
+
+    def update(self, batch):
+        metrics = dict()
+
+        if self.use_expl_reward:
+            metrics.update(self.expl_reward.update(batch))
+        return metrics
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("furniture", None, "Furniture name.")
-flags.DEFINE_string("demo_dir", "square_table_parts_state", "Demonstration dir.")
-flags.DEFINE_string("out_file_path", None, "Path to save converted data.")
+flags.DEFINE_string("demo_dir", "/home/dongyoon/FB_dataset/raw/low/one_leg/train", "Demonstration dir.")
+flags.DEFINE_string("out_file_path", '/home/dongyoon/diffusion_reward/dongyoon', "Path to save converted data.")
 flags.DEFINE_boolean("use_r3m", False, "Use r3m to encode images.")
-flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
+flags.DEFINE_boolean("use_vip", True, "Use vip to encode images.")
 flags.DEFINE_boolean("use_liv", False, "Use liv to encode images.")
 flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
 flags.DEFINE_integer("num_demos", None, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
 flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
 flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
-flags.DEFINE_string("pvr_type", "liv", "pvr type.")
+flags.DEFINE_string("pvr_type", "vip", "pvr type.")
 
 
 device = torch.device("cuda")
@@ -69,10 +201,10 @@ def main(_):
     demo_dir = FLAGS.demo_dir
 
     # load reward model.
-    ckpt_path = Path(FLAGS.ckpt_path).expanduser()
-    reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
-    reward_fn = load_reward_fn(rm_type=FLAGS.rm_type, reward_model=reward_model)
-    pvr_model, pvr_transform, feature_dim = load_embedding(rep=FLAGS.pvr_type)
+    #ckpt_path = Path(FLAGS.ckpt_path).expanduser()
+    #reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
+    #reward_fn = load_reward_fn(rm_type=FLAGS.rm_type, reward_model=reward_model)
+    #pvr_model, pvr_transform, feature_dim = load_embedding(rep=FLAGS.pvr_type)
 
     dir_path = Path(demo_dir)
 
@@ -170,19 +302,48 @@ def main(_):
             args.window_size = 4
             args.skip_frame = 16
             args.return_images = True
+            
+            # rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(
+            #     images=images,
+            #     actions=actions,
+            #     skills=skills,
+            #     args=args,
+            #     pvr_model=pvr_model,
+            #     pvr_transform=pvr_transform,
+            #     model_type=FLAGS.pvr_type,
+            #     feature_dim=feature_dim,
+            #     texts=None,
+            #     device=device,
+            # )
+            
+            with open('/home/dongyoon/diffusion_reward/dongyoon/config/viper.yaml', 'r') as file:
+                config = yaml.safe_load(file)
+                config = SimpleNamespace(**config)
+            reward_model = CustomVIPER(config)
+            if torch.cuda.is_available():
+                reward_model = reward_model.to('cuda')
 
-            rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(
-                images=images,
-                actions=actions,
-                skills=skills,
-                args=args,
-                pvr_model=pvr_model,
-                pvr_transform=pvr_transform,
-                model_type=FLAGS.pvr_type,
-                feature_dim=feature_dim,
-                texts=None,
-                device=device,
-            )
+            frames_dy = []
+            for ts in range(len(x['observations'])):
+                frame = x['observations'][i]['color_image2']
+                frame = np.transpose(frame, (1, 2, 0)) # chw -> hwc
+                img = Image.fromarray(frame)
+                resized_img = img.resize((64, 64))
+                frame = np.array(resized_img)
+                frames_dy.append(frame)
+            frames_dy = np.array(frames_dy)
+            frames_dy = np.expand_dims(frames_dy, axis=0) # dim 0 for batch
+            frames_dy = frames_dy.astype(np.float32)
+            frames_dy = frames_dy / 127.5 - 1 # normalize to [-1, 1]
+            frames_dy = torch.from_numpy(frames_dy).float().to('cuda')
+            rewards = reward_model.calc_reward(frames_dy)
+            
+            stacked_timesteps = []
+            for ts in range(len(x['observations'])):
+                timesteps = np.array((np.max(0, ts-2), np.max(0, ts-1)))
+                stacked_timesteps.append(timesteps)
+            stacked_timesteps = np.array(stacked_timesteps)
+                  
             rewards = gaussian_smoothe(rewards)
             cumsum_skills = np.cumsum(x["skills"])
 
