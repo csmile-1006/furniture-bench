@@ -340,7 +340,7 @@ def main(_):
             
             stacked_timesteps = []
             for ts in range(len(x['observations'])):
-                timesteps = np.array((np.max(0, ts-2), np.max(0, ts-1)))
+                timesteps = np.array((np.max(0, ts-16), np.max(0, ts-12), np.max(0, ts-8), np.max(0, ts-4)))
                 stacked_timesteps.append(timesteps)
             stacked_timesteps = np.array(stacked_timesteps)
                   
