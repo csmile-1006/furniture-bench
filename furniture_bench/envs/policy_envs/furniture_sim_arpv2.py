@@ -52,9 +52,14 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             rm_type=kwargs["rm_type"], ckpt_path=Path(kwargs["rm_ckpt_path"]).expanduser()
         )
 
+        self.alpha = 1.0
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._eta = 5
-        self._threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._eta = 10
+        self._negative_trend_eta = 1e-2
+
+        self._prev_reward = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._task_pass_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._task_fail_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
         self._window_size = kwargs["window_size"]
         self._skip_frame = kwargs["skip_frame"]
         self.__frames = {
@@ -141,10 +146,31 @@ class FurnitureSimARPV2(FurnitureSimEnv):
         tokens = clip.tokenize(instruct).to(self._device)
         return self.liv_layer(input=tokens, modality="text").detach().cpu().numpy()
 
+    def _check_reward_condition(self, env_idx, current_reward, next_reward):
+        if (
+            current_reward < self._prev_reward[env_idx]
+            and abs(current_reward - self._prev_reward[env_idx]) > self._negative_trend_eta
+        ):
+            return True, False
+        if next_reward > current_reward:
+            return False, True
+        return False, False
+
+    def _save_prev_reward(self, reward):
+        for env_idx in range(reward.shape[0]):
+            self._prev_reward[env_idx] = (
+                (1 - self.alpha) * self._prev_reward[env_idx] + self.alpha * reward[env_idx]
+            ) / self._lambda_mr
+
     def reset_env(self, idx):
         super().reset_env(idx)
         super().refresh()
         self.i[idx] = 0
+        self.phase[idx] = 0
+        self._prev_reward[idx] = 0
+        self._task_pass_threshold[idx] = 0
+        self._task_fail_threshold[idx] = 0
+
         self.__frames[idx] = {
             frame: {
                 key: deque([], maxlen=self._window_size)
@@ -170,7 +196,10 @@ class FurnitureSimARPV2(FurnitureSimEnv):
     def reset(self):
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
         self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._prev_reward = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._task_pass_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
+        self._task_fail_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
+
         self._current_instruct = {
             env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
         }
@@ -229,15 +258,25 @@ class FurnitureSimARPV2(FurnitureSimEnv):
         current_reward = np.asarray(self._reward_model.get_reward(batch))
         batch.update(instruct=new_instruct)
         next_reward = np.asarray(self._reward_model.get_reward(batch))
-        reward = np.maximum(current_reward, next_reward) * self._lambda_mr
+        # reward = np.maximum(current_reward, next_reward) * self._lambda_mr
+
+        reward = current_reward.copy()
         for env_idx in range(self.num_envs):
-            if next_reward[env_idx] > current_reward[env_idx]:
-                self._threshold[env_idx] += 1
-                if self._threshold[env_idx] >= self._eta:
+            task_fail_flag, task_pass_flag = self._check_reward_condition(
+                env_idx, current_reward[env_idx], next_reward[env_idx]
+            )
+            if self._task_fail_threshold[env_idx] < self._eta and task_pass_flag:
+                self._task_pass_threshold[env_idx] += 1
+                if self._task_pass_threshold[env_idx] >= self._eta:
                     self._current_instruct[env_idx] = new_instruct[env_idx]
                     self.phase[env_idx] += 1
-                    self._threshold[env_idx] = 0
-        return reward
+                    self._task_pass_threshold[env_idx] = 0
+                    self._task_fail_threshold[env_idx] = 0
+                    reward[env_idx] = next_reward[env_idx]
+            if task_fail_flag:
+                self._task_fail_threshold[env_idx] += 1
+
+        return reward * self._lambda_mr
 
     def step(self, action):
         obs, task_reward, done, info = super().step(action)
@@ -251,7 +290,8 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             stack["timestep"].append(np.asarray(self.i[env_idx]).astype(np.int32))
             stack["attn_mask"].append(np.asarray(1).astype(np.int32))
 
-        reward = self._compute_reward() + task_reward.squeeze()
+        reward = self._compute_reward()
+        self._save_prev_reward(reward)
         return self._extract_vip_feature(obs), reward, done, info
 
 
@@ -295,6 +335,8 @@ if __name__ == "__main__":
     for _ in range(630):
         res, rew, done, info = env.step(env.action_space.sample())
         timestep += 1
-        print(f"timestep {timestep} / stack step {env.i} / phase {env.phase} / rew: {rew}")
+        print(
+            f"timestep {timestep} / stack step {env.i} / phase {env.phase} / rew: {rew} / success_thr: {env.env._task_pass_threshold} / fail_thr: {env.env._task_fail_threshold}"
+        )
         if np.any(done):
             break
