@@ -28,6 +28,8 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 5000000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
+flags.DEFINE_integer("window_size", 4, "Window size.")
+flags.DEFINE_integer("skip_frame", 16, "Skipping frame.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_string("data_path", "", "Path to data.")
@@ -40,6 +42,8 @@ config_flags.DEFINE_config_file(
 flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
+flags.DEFINE_boolean("use_viper", False, "Use VIPER rewards.")
+flags.DEFINE_boolean("use_diffusion_reward", False, "Use Diffusion Rewards.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
@@ -81,6 +85,8 @@ def make_env_and_dataset(
     encoder_type: str,
     use_arp: bool,
     use_step: bool,
+    use_viper: bool,
+    use_diffusion_reward: bool,
     lambda_mr: float,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
@@ -109,7 +115,7 @@ def make_env_and_dataset(
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
-    env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
+    env = wrappers.FrameStackWrapper(env, num_frames=FLAGS.window_size, skip_frame=FLAGS.skip_frame)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
@@ -128,7 +134,13 @@ def make_env_and_dataset(
 
     if "Furniture" in env_name:
         dataset = FurnitureDataset(
-            data_path, use_encoder=False, use_arp=use_arp, use_step=use_step, lambda_mr=lambda_mr
+            data_path,
+            use_encoder=False,
+            use_arp=use_arp,
+            use_step=use_step,
+            lambda_mr=lambda_mr,
+            use_viper=use_viper,
+            use_diffusion_reward=use_diffusion_reward,
         )
     else:
         dataset = D4RLDataset(env)
@@ -164,6 +176,8 @@ def main(_):
         FLAGS.encoder_type,
         FLAGS.use_arp,
         FLAGS.use_step,
+        FLAGS.use_viper,
+        FLAGS.use_diffusion_reward,
         FLAGS.lambda_mr,
     )
 

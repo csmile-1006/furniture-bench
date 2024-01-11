@@ -147,6 +147,8 @@ class FurnitureDataset(Dataset):
         use_encoder: bool = False,
         use_arp: bool = False,
         use_step: bool = False,
+        use_viper: bool = False,
+        use_diffusion_reward: bool = False,
         lambda_mr: float = 1e-1,
     ):
         with open(data_path, "rb") as f:
@@ -187,6 +189,10 @@ class FurnitureDataset(Dataset):
             rewards = lambda_mr * dataset["multimodal_rewards"]
         elif use_step:
             rewards = lambda_mr * dataset["step_rewards"] / np.max(dataset["step_rewards"])
+        elif use_viper:
+            rewards = lambda_mr * dataset["viper_rewards"]
+        elif use_diffusion_reward:
+            rewards = lambda_mr * dataset["diffusion_rewards"]
         else:
             rewards = dataset["rewards"]
 
