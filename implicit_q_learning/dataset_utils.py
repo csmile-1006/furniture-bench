@@ -190,9 +190,9 @@ class FurnitureDataset(Dataset):
         elif use_step:
             rewards = lambda_mr * dataset["step_rewards"] / np.max(dataset["step_rewards"])
         elif use_viper:
-            rewards = lambda_mr * dataset["viper_rewards"]
+            rewards = lambda_mr * dataset["viper_reward"]
         elif use_diffusion_reward:
-            rewards = lambda_mr * dataset["diffusion_rewards"]
+            rewards = lambda_mr * dataset["diffusion_reward"]
         else:
             rewards = dataset["rewards"]
 
