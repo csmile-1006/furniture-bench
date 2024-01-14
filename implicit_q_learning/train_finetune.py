@@ -1,6 +1,9 @@
 import isaacgym  # noqa: F401
 import os
 import pickle
+import sys
+from collections import deque
+from pathlib import Path
 
 import gym
 import numpy as np
@@ -9,6 +12,9 @@ import wandb
 from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
+from ml_collections import ConfigDict
+from tqdm import trange
+from scipy.ndimage import gaussian_filter1d
 
 from furniture_bench.sim_config import sim_config
 
@@ -17,9 +23,14 @@ from dataset_utils import Batch, D4RLDataset, ReplayBuffer, split_into_trajector
 from evaluation import evaluate
 from learner import Learner
 
+sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
+from bpref_v2.data.instruct import get_furniturebench_instruct  # noqa: E402
+from bpref_v2.data.label_reward_furniturebench import load_reward_model  # noqa: E402
+
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
+flags.DEFINE_string("env_name", "FurnitureSimImageFeature-V0/one_leg", "Environment name.")
+flags.DEFINE_integer("num_phases", 5, "number of phases to solve.")
 flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
 flags.DEFINE_string("ckpt_dir", "./tmp/", "Checkpoint dir.")
@@ -59,11 +70,117 @@ flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
 flags.DEFINE_float("temperature", 0.03, "Temperature for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
+flags.DEFINE_string("rm_type", "color_image2|color_image1", "image keys used for computing rewards.")
 flags.DEFINE_string(
     "rm_ckpt_path",
     "/home/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
     "reward model checkpoint path.",
 )
+
+
+def gaussian_smooth(reward_raw, sigma=0.3):
+    reward_smooth = gaussian_filter1d(reward_raw, sigma, mode="nearest")
+    return reward_smooth
+
+
+def compute_multimodal_reward(reward_model, **kwargs):
+    trajectories, args = kwargs["trajectories"], kwargs["args"]
+    images, actions = trajectories["images"], trajectories["actions"]
+    task_name, image_keys, window_size, skip_frame, total_phases = (
+        args.task_name,
+        args.image_keys.split("|"),
+        args.window_size,
+        args.skip_frame,
+        args.total_phases,
+    )
+    get_video_feature = kwargs.get("get_video_feature", False)
+    img_features, text_features = {}, []
+
+    for ik in image_keys:
+        img_features[ik] = np.stack([images[ik] for _ in range(len(trajectories["actions"]))])
+    text_features = [
+        np.stack(get_furniturebench_instruct(task_name, step, output_type="all") * len(actions))
+        for step in range(total_phases)
+    ]
+    feature_dim, action_dim = 1024, 8
+
+    def _get_reward(img_features, text_features, actions):
+        stacked_images = {ik: [] for ik in image_keys}
+        stacked_timesteps, stacked_attn_masks, stacked_texts, stacked_actions = [], [], [], []
+        image_stacks = {key: {ik: deque([], maxlen=window_size) for ik in image_keys} for key in range(skip_frame)}
+        timestep_stacks = {key: deque([], maxlen=window_size) for key in range(skip_frame)}
+        attn_mask_stacks = {key: deque([], maxlen=window_size) for key in range(skip_frame)}
+        action_stacks = {key: deque([], maxlen=window_size) for key in range(skip_frame)}
+        for _ in range(window_size):
+            for j in range(skip_frame):
+                for ik in image_keys:
+                    image_stacks[j][ik].append(np.zeros((feature_dim,), dtype=np.float32))
+                timestep_stacks[j].append(0)
+                attn_mask_stacks[j].append(0)
+                action_stacks[j].append(np.zeros((action_dim,), dtype=np.float32))
+
+        for i in range(len(actions)):
+            mod = i % skip_frame
+            image_stack, timestep_stack, attn_mask_stack, action_stack = (
+                image_stacks[mod],
+                timestep_stacks[mod],
+                attn_mask_stacks[mod],
+                action_stacks[mod],
+            )
+            for ik in image_keys:
+                image_stack[ik].append(img_features[ik][i])
+                stacked_images[ik].append(np.stack(image_stack[ik]))
+
+            timestep_stack.append(i)
+            mask = 1.0 if i != len(actions) - 1 else 0.0
+            attn_mask_stack.append(mask)
+            action_stack.append(actions[i])
+
+            stacked_timesteps.append(np.stack(timestep_stack))
+            stacked_attn_masks.append(np.stack(attn_mask_stack))
+            stacked_texts.append(text_features[i])
+            stacked_actions.append(np.stack(action_stack))
+
+        stacked_images = {ik: np.asarray(val) for ik, val in stacked_images.items()}
+        stacked_timesteps = np.asarray(stacked_timesteps)
+        stacked_attn_masks = np.asarray(stacked_attn_masks)
+        stacked_texts = np.asarray(stacked_texts)
+        stacked_actions = np.asarray(stacked_actions)
+
+        rewards, video_features = [], []
+        batch_size = 64
+        for i in trange(0, len(actions), batch_size, leave=False, ncols=0, desc="reward compute per batch"):
+            _range = range(i, min(i + batch_size, len(actions)))
+            batch = {
+                "instruct": stacked_texts[_range],
+                "image": {ik: stacked_images[ik][_range] for ik in image_keys},
+                "timestep": stacked_timesteps[_range],
+                "attn_mask": stacked_attn_masks[_range],
+                "action": stacked_actions[_range],
+            }
+            output = reward_model.get_reward(batch, get_video_feature=get_video_feature)
+            if get_video_feature:
+                reward, video_feature = output
+                reward, video_feature = list(np.asarray(reward)), list(np.asarray(video_feature))
+                rewards.extend(reward)
+                video_features.extend(video_feature)
+            else:
+                reward = list(np.asarray(output))
+                rewards.extend(reward)
+            return np.asarray(rewards)
+
+    multimodal_rewards = []
+    for phase in range(total_phases):
+        multimodal_rewards.append(
+            _get_reward(img_features=img_features, text_features=text_features[phase], actions=actions)
+        )
+
+    def _extract_text_instruction(rewards):
+        return rewards[0]
+
+    final_rewards = _extract_text_instruction(multimodal_rewards)
+    final_rewards = gaussian_smooth(final_rewards)
+    return final_rewards
 
 
 def normalize(dataset):
@@ -276,6 +393,18 @@ def main(_):
         **kwargs,
         use_encoder=FLAGS.use_encoder,
     )
+    if FLAGS.use_arp and FLAGS.rm_ckpt_path != "":
+        # load reward model.
+        ckpt_path = Path(FLAGS.rm_ckpt_path).expanduser()
+        reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
+
+        args = ConfigDict()
+        args.task_name = FLAGS.env_name.split("/")[-1]
+        args.image_keys = "color_image2|color_image1"
+        args.window_size = FLAGS.window_size
+        args.skip_frame = FLAGS.skip_frame
+        args.return_images = True
+        args.num_phases = FLAGS.num_phases
 
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
@@ -341,7 +470,16 @@ def main(_):
 
                 if done[env_idx]:
                     print(f"episode {env_idx} done.")
-                    replay_buffer.insert_episode(trajectories[env_idx])
+                    if FLAGS.use_arp and FLAGS.rm_ckpt_path != "":
+                        rewards = compute_multimodal_reward(
+                            trajectories=trajectories, reward_model=reward_model, args=args
+                        )
+                        trajectories[env_idx]["multimodal_rewards"] = rewards
+                    replay_buffer.insert_episode(
+                        trajectories[env_idx],
+                        window_size=FLAGS.window_size,
+                        skip_frame=FLAGS.skip_frame,
+                    )
                     new_ob = env.reset_env(env_idx)
                     for key in next_observation:
                         next_observation[key][env_idx] = new_ob[key]
