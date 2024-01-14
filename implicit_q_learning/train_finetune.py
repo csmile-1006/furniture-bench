@@ -70,7 +70,7 @@ flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
 flags.DEFINE_float("temperature", 0.03, "Temperature for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
-flags.DEFINE_string("rm_type", "color_image2|color_image1", "image keys used for computing rewards.")
+flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
 flags.DEFINE_string(
     "rm_ckpt_path",
     "/home/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
