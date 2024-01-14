@@ -54,6 +54,8 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
     @property
     def observation_space(self):
         robot_state_dim = 14
+        img_size = reversed(self.img_size)
+        img_shape = (3, *img_size) if self.channel_first else (*img_size, 3)
 
         return spaces.Dict(
             dict(
@@ -72,6 +74,8 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
                     np.inf,
                     (self.embedding_dim,),
                 ),
+                color_image1=spaces.Box(0, 255, img_shape),
+                color_image2=spaces.Box(0, 255, img_shape),
             )
         )
 

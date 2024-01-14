@@ -89,7 +89,7 @@ if __name__ == "__main__":
     sys.path.append("/home/changyeon/ICML2024/furniture-bench/implicit_q_learning")
     from wrappers.episode_monitor import EpisodeMonitor
 
-    env_name = "FurnitureSimImageFeature-v0/one_leg"
+    env_name = "FurnitureSimImageWithFeature-v0/one_leg"
     # env_name = "FurnitureSim-v0/one_leg"
     env_id, furniture_name = env_name.split("/")
     env = gym.make(
