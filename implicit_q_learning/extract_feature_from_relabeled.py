@@ -243,7 +243,7 @@ def main(_):
         "next_observations": next_obs_,
         "rewards": np.array(reward_),
         #"multimodal_rewards": np.array(multimodal_reward_),
-        "diffusion_reward": np.array(multimodal_reward_),
+        "viper_reward": np.array(multimodal_reward_),
         "step_rewards": np.array(step_reward_),
         "terminals": np.array(done_),
     }
