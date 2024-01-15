@@ -105,6 +105,6 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
             robot_state=robot_state,
             image1=image1,
             image2=image2,
-            color_image1=obs["color_image1"],
-            color_image2=obs["color_image2"],
+            color_image1=obs["color_image1"].transpose(0, 2, 3, 1),
+            color_image2=obs["color_image2"].transpose(0, 2, 3, 1),
         )
