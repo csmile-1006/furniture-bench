@@ -44,8 +44,8 @@ flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
 flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
 flags.DEFINE_string("pvr_type", "vip", "pvr type.")
 
-
-device = torch.device("cuda:5")
+torch.cuda.set_device('cuda:6')
+device = torch.device("cuda:6")
 
 
 def gaussian_smoothe(rewards, sigma=3.0):
@@ -84,7 +84,7 @@ def main(_):
     env_type = "Image"
     furniture = FLAGS.furniture
     demo_dir = FLAGS.demo_dir
-
+    
     # load reward model.
     #ckpt_path = Path(FLAGS.ckpt_path).expanduser()
     #reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
@@ -123,10 +123,10 @@ def main(_):
         encoder.eval()
         for param in encoder.parameters():
             param.requires_grad = False
-        encoder.to("cuda")
-        device = torch.device("cuda")
+        encoder.to("cuda:6")
+        device = torch.device("cuda:6")
 
-    files = list(dir_path.glob(r"[0-9]*.pkl"))
+    files = list(dir_path.glob(r"[0-9]*success.pkl"))
     len_files = len(files)
 
     if len_files == 0:
@@ -189,11 +189,12 @@ def main(_):
             args.return_images = True
             
             
-
-            rewards = x['viper_reward']
-            stacked_timesteps = x['viper_stacked_timesteps']
-                  
-            rewards = gaussian_smoothe(rewards) # 이미 스무딩 해놓음
+            rewards = x['viper_reward_16']
+            stacked_timesteps = x['viper_stacked_timesteps_16']
+            print(stacked_timesteps[16])
+            print(stacked_timesteps[20])
+            print(stacked_timesteps[103])
+            # rewards = gaussian_smoothe(rewards) # 이미 스무딩 해놓음
             cumsum_skills = np.cumsum(x["skills"])
 
             for i in range(length - 1):
@@ -241,7 +242,8 @@ def main(_):
         "actions": np.array(action_),
         "next_observations": next_obs_,
         "rewards": np.array(reward_),
-        "multimodal_rewards": np.array(multimodal_reward_),
+        #"multimodal_rewards": np.array(multimodal_reward_),
+        "diffusion_reward": np.array(multimodal_reward_),
         "step_rewards": np.array(step_reward_),
         "terminals": np.array(done_),
     }
