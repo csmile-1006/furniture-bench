@@ -253,7 +253,7 @@ class ReplayBuffer(Dataset):
         window_size: int = 4,
         embedding_dim: int = 1024,
     ):
-        obs_shape = (sum([observation_space[key].shape[-1] for key in observation_space]),)
+        obs_shape = (sum([observation_space[key].shape[-1] for key in ["image1", "image2", "robot_state"]]),)
         observations = np.zeros((capacity, *obs_shape), dtype=observation_space.dtype)
         actions = np.zeros((capacity, action_dim), dtype=np.float32)
         rewards = np.zeros((capacity,), dtype=np.float32)
