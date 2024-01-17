@@ -134,6 +134,7 @@ def main(_):
             rewards = gaussian_smoothe(rewards)
             multimodal_reward_.extend(rewards)
 
+    multimodal_rewards = np.array(multimodal_reward_).astype(np.float32)
     out_file_path = Path(FLAGS.out_file_path).expanduser()
     if not FLAGS.out_file_path and not out_file_path.exists():
         raise ValueError(f"{FLAGS.out_file_path} doesn't exist.")
@@ -144,10 +145,13 @@ def main(_):
     with Path(out_file_path).open("rb") as f:
         dst_dataset = pickle.load(f)
 
-    dst_dataset["multimodal_rewards"] = np.array(multimodal_reward_).astype(np.float32)
-    dst_dataset["timestep"] = datetime.datetime.now().timestep
+    assert len(dst_dataset["observations"]) == len(
+        multimodal_rewards
+    ), f"dst_dataset {len(dst_dataset['observations'])} != multimodal_rewards {len(multimodal_rewards)}"
+    dst_dataset["multimodal_rewards"] = multimodal_rewards
+    dst_dataset["timestep"] = datetime.datetime.now().timestamp()
 
-    with Path(out_file_path).open("rb") as f:
+    with Path(out_file_path).open("wb") as f:
         pickle.dump(dst_dataset, f)
         print(f"Re-saved at {out_file_path}")
 
