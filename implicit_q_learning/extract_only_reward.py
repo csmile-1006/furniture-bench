@@ -132,15 +132,15 @@ def main(_):
                 device=device,
             )
             rewards = gaussian_smoothe(rewards)
+            # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
+            rewards = rewards[1:].tolist()
+            rewards = np.asarray(rewards + rewards[-1:]).astype(np.float32)
             multimodal_reward_.extend(rewards)
 
     multimodal_rewards = np.array(multimodal_reward_).astype(np.float32)
     out_file_path = Path(FLAGS.out_file_path).expanduser()
     if not FLAGS.out_file_path and not out_file_path.exists():
         raise ValueError(f"{FLAGS.out_file_path} doesn't exist.")
-    # path = f"data/{env_type}/{furniture}.pkl" if FLAGS.out_file_path is None else FLAGS.out_file_path
-    # path = Path(path)
-    # path.parent.mkdir(exist_ok=True, parents=True)
 
     with Path(out_file_path).open("rb") as f:
         dst_dataset = pickle.load(f)
