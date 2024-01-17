@@ -1,8 +1,8 @@
 import sys
 import pickle
+import itertools
 import datetime
 from pathlib import Path
-from itertools import chain
 
 import numpy as np
 import torch
@@ -83,9 +83,9 @@ def main(_):
     if len(demo_type) == 1:
         files = sorted(list(dir_path.glob(f"*{demo_type[0]}.pkl")))
     else:
-        total_files = [[sorted(list(dir_path.glob(f"*{_demo_type}.pkl")))] for _demo_type in demo_type]
-        file_per_demo = FLAGS.num_demos // len(files)
-        files = chain([elem[:file_per_demo] for elem in total_files])
+        total_files = [sorted(list(dir_path.glob(f"*{_demo_type}.pkl"))) for _demo_type in demo_type]
+        file_per_demo = FLAGS.num_demos // len(total_files)
+        files = [elem[i] for elem in total_files for i in range(file_per_demo)]
 
     len_files = len(files)
 
