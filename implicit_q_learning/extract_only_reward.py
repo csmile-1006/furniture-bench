@@ -1,6 +1,5 @@
 import sys
 import pickle
-import itertools
 import datetime
 from pathlib import Path
 
