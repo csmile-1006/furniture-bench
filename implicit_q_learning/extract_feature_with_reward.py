@@ -1,6 +1,7 @@
 import sys
 import pickle
 from pathlib import Path
+from itertools import chain
 
 import numpy as np
 import torch
@@ -24,6 +25,7 @@ flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
 flags.DEFINE_integer("num_demos", None, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
 flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
+flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
 flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
 flags.DEFINE_string("pvr_type", "liv", "pvr type.")
 
@@ -82,6 +84,8 @@ def main(_):
     reward_ = []
     step_reward_ = []
     multimodal_reward_ = []
+    viper_reward_ = []
+    diffusion_reward_ = []
     done_ = []
 
     if FLAGS.use_r3m:
@@ -109,28 +113,37 @@ def main(_):
         encoder.to("cuda")
         device = torch.device("cuda")
 
-    files = list(dir_path.glob(r"[0-9]*.pkl"))
+    demo_type = [f"_{elem}" for elem in FLAGS.demo_type.split("|")]
+    if len(demo_type) == 1:
+        files = sorted(list(dir_path.glob(f"*{demo_type[0]}.pkl")))
+    else:
+        total_files = [[sorted(list(dir_path.glob(f"*{_demo_type}.pkl")))] for _demo_type in demo_type]
+        file_per_demo = FLAGS.num_demos // len(files)
+        files = chain([elem[:file_per_demo] for elem in total_files])
+
     len_files = len(files)
 
     if len_files == 0:
         raise ValueError(f"No pkl files found in {dir_path}")
 
     cnt = 0
-    for i, file_path in enumerate(files):
-        if FLAGS.num_demos and i == FLAGS.num_demos:
+    for idx, file_path in enumerate(files):
+        if FLAGS.num_demos and idx == FLAGS.num_demos:
             break
-        print(f"Loading [{i+1}/{len_files}] {file_path}...")
+        print(f"Loading [{idx+1}/{len_files}] {file_path}...")
         with open(file_path, "rb") as f:
             x = pickle.load(f)
 
+            enable_viper = x.get("viper_reward_16", None) is not None
+            enable_diffusion = x.get("diffusion_reward_16", None) is not None
             if len(x["observations"]) == len(x["actions"]):
                 # Dummy
                 x["observations"].append(x["observations"][-1])
             length = len(x["observations"])
 
             if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
-                img1 = [x["observations"][i]["color_image1"] for i in range(length)]
-                img2 = [x["observations"][i]["color_image2"] for i in range(length)]
+                img1 = [x["observations"][_l]["color_image1"] for _l in range(length)]
+                img2 = [x["observations"][_l]["color_image2"] for _l in range(length)]
                 img1 = torch.from_numpy(np.stack(img1))
                 img2 = torch.from_numpy(np.stack(img2))
 
@@ -143,15 +156,15 @@ def main(_):
 
                 with torch.no_grad():
                     # Use batch size.
-                    for i in range(0, length, FLAGS.batch_size):
-                        img1_feature[i : i + FLAGS.batch_size] = (
-                            encoder(img1[i : i + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224))
+                    for _l in range(0, length, FLAGS.batch_size):
+                        img1_feature[_l : _l + FLAGS.batch_size] = (
+                            encoder(img1[_l : _l + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224))
                             .cpu()
                             .detach()
                             .numpy()
                         )
-                        img2_feature[i : i + FLAGS.batch_size] = (
-                            encoder(img2[i : i + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224))
+                        img2_feature[_l : _l + FLAGS.batch_size] = (
+                            encoder(img2[_l : _l + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224))
                             .cpu()
                             .detach()
                             .numpy()
@@ -186,14 +199,14 @@ def main(_):
             rewards = gaussian_smoothe(rewards)
             cumsum_skills = np.cumsum(x["skills"])
 
-            for i in range(length - 1):
+            for _len in range(length - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
-                    image1 = img1_feature[i]
-                    next_image1 = img1_feature[min(i + 1, length - 2)]
-                    image2 = img2_feature[i]
-                    next_image2 = img1_feature[min(i + 1, length - 2)]
-                    timestep = cnt + stacked_timesteps[i]
-                    next_timestep = cnt + stacked_timesteps[min(i + 1, length - 2)]
+                    image1 = img1_feature[_len]
+                    next_image1 = img1_feature[min(_len + 1, length - 2)]
+                    image2 = img2_feature[_len]
+                    next_image2 = img1_feature[min(_len + 1, length - 2)]
+                    timestep = cnt + stacked_timesteps[_len]
+                    next_timestep = cnt + stacked_timesteps[min(_len + 1, length - 2)]
                 else:
                     raise ValueError("You have to choose either use_r3m or use_vip or use_liv.")
 
@@ -203,7 +216,7 @@ def main(_):
                         "image1": image1,
                         "image2": image2,
                         "timestep": timestep,
-                        "robot_state": x["observations"][i]["robot_state"],
+                        "robot_state": x["observations"][_len]["robot_state"],
                     }
                 )
                 next_obs_.append(
@@ -212,27 +225,30 @@ def main(_):
                         "image1": next_image1,
                         "image2": next_image2,
                         "timestep": next_timestep,
-                        "robot_state": x["observations"][min(i + 1, length - 2)]["robot_state"],
+                        "robot_state": x["observations"][min(_len + 1, length - 2)]["robot_state"],
                     }
                 )
 
-                action_.append(x["actions"][i])
-                reward_.append(x["rewards"][i])
-                if i == length - 2:
-                    step_reward_.append(cumsum_skills[i] + 1)
-                else:
-                    step_reward_.append(cumsum_skills[i])
-                multimodal_reward_.append(rewards[i])
-                done_.append(1 if i == length - 2 else 0)
+                action_.append(x["actions"][_len])
+                reward_.append(x["rewards"][_len])
+                if enable_viper:
+                    viper_reward_.append(x["viper_reward_16"][_len])
+                if enable_diffusion:
+                    diffusion_reward_.append(x["diffusion_reward_16"][_len])
+                step_reward_.append(cumsum_skills[_len] + 1 if _len == length - 2 else cumsum_skills[_len])
+                multimodal_reward_.append(rewards[_len])
+                done_.append(1 if _len == length - 2 else 0)
             cnt += length - 1
 
     dataset = {
         "observations": obs_,
-        "actions": np.array(action_),
+        "actions": np.array(action_).astype(np.float32),
         "next_observations": next_obs_,
-        "rewards": np.array(reward_),
-        "multimodal_rewards": np.array(multimodal_reward_),
-        "step_rewards": np.array(step_reward_),
+        "rewards": np.array(reward_).astype(np.float32),
+        "multimodal_rewards": np.array(multimodal_reward_).astype(np.float32),
+        "viper_rewards": np.array(viper_reward_).astype(np.float32),
+        "diffusion_rewards": np.array(diffusion_reward_).astype(np.float32),
+        "step_rewards": np.array(step_reward_).astype(np.float32),
         "terminals": np.array(done_),
     }
 
