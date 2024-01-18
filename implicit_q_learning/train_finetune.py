@@ -73,39 +73,36 @@ flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
 flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
 flags.DEFINE_string(
     "rm_ckpt_path",
-    "/home/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.0-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl",
+    "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/w4-s16-nfp1.0-c1.0@0.5-supc1.0-ep0.5-demo200-total-phase/s0/best_model.pkl",
     "reward model checkpoint path.",
 )
 
 
 def compute_multimodal_reward(reward_model, **kwargs):
     trajectories, args = kwargs["trajectories"], kwargs["args"]
-    images, actions = trajectories["observations"], trajectories["actions"]
-    task_name, image_keys, window_size, skip_frame, num_phases, lambda_mr = (
+    images = trajectories["observations"]
+    task_name, image_keys, window_size, skip_frame, lambda_mr = (
         args.task_name,
         args.image_keys.split("|"),
         args.window_size,
         args.skip_frame,
-        args.num_phases,
         args.lambda_mr,
     )
     get_video_feature = kwargs.get("get_video_feature", False)
-    img_features, text_features = {}, []
+    img_features = {}
+    insts = [
+        clip.tokenize(get_furniturebench_instruct(task_name, phase, output_type="all")).detach().cpu().numpy()
+        for phase in range(FLAGS.num_phases)
+    ]
 
     for ik in image_keys:
         img_features[ik] = np.stack([images[idx][ik] for idx in range(len(trajectories["actions"]))])
-    text_features = [
-        np.stack(
-            [clip.tokenize(get_furniturebench_instruct(task_name, step, output_type="all")).detach().cpu().numpy()]
-            * len(actions)
-        )
-        for step in range(num_phases)
-    ]
     image_shape, action_dim = img_features[image_keys[0]][0].shape, 8
 
-    def _get_reward(img_features, text_features, actions):
+    def _get_reward(img_features):
+        len_demos = len(img_features[image_keys[0]])
         stacked_images = {ik: [] for ik in image_keys}
-        stacked_timesteps, stacked_attn_masks, stacked_texts, stacked_actions = [], [], [], []
+        stacked_timesteps, stacked_attn_masks = [], []
         image_stacks = {key: {ik: deque([], maxlen=window_size) for ik in image_keys} for key in range(skip_frame)}
         timestep_stacks = {key: deque([], maxlen=window_size) for key in range(skip_frame)}
         attn_mask_stacks = {key: deque([], maxlen=window_size) for key in range(skip_frame)}
@@ -118,45 +115,40 @@ def compute_multimodal_reward(reward_model, **kwargs):
                 attn_mask_stacks[j].append(0)
                 action_stacks[j].append(np.zeros((action_dim,), dtype=np.float32))
 
-        for i in range(len(actions)):
+        for i in range(len_demos):
             mod = i % skip_frame
-            image_stack, timestep_stack, attn_mask_stack, action_stack = (
+            image_stack, timestep_stack, attn_mask_stack = (
                 image_stacks[mod],
                 timestep_stacks[mod],
                 attn_mask_stacks[mod],
-                action_stacks[mod],
             )
             for ik in image_keys:
                 image_stack[ik].append(img_features[ik][i])
                 stacked_images[ik].append(np.stack(image_stack[ik]))
 
             timestep_stack.append(i)
-            mask = 1.0 if i != len(actions) - 1 else 0.0
+            mask = 1.0 if i != len_demos - 1 else 0.0
             attn_mask_stack.append(mask)
-            action_stack.append(actions[i])
 
             stacked_timesteps.append(np.stack(timestep_stack))
             stacked_attn_masks.append(np.stack(attn_mask_stack))
-            stacked_texts.append(text_features[i])
-            stacked_actions.append(np.stack(action_stack))
 
         stacked_images = {ik: np.asarray(val) for ik, val in stacked_images.items()}
         stacked_timesteps = np.asarray(stacked_timesteps)
         stacked_attn_masks = np.asarray(stacked_attn_masks)
-        stacked_texts = np.asarray(stacked_texts)
-        stacked_actions = np.asarray(stacked_actions)
 
         rewards, video_features = [], []
         batch_size = 32
-        for i in trange(0, len(actions), batch_size, leave=False, ncols=0, desc="reward compute per batch"):
-            _range = range(i, min(i + batch_size, len(actions)))
+        for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
+            _range = range(i, min(i + batch_size, len_demos))
             batch = {
-                "instruct": stacked_texts[_range],
                 "image": {ik: stacked_images[ik][_range] for ik in image_keys},
                 "timestep": stacked_timesteps[_range],
                 "attn_mask": stacked_attn_masks[_range],
-                "action": stacked_actions[_range],
             }
+            phases = reward_model.get_phase(batch)
+            batch["instruct"] = np.stack([insts[phase] for phase in phases])
+            # batch["instruct"] = tokens.reshape(phases.shape + tokens.shape[-2:])
             output = reward_model.get_reward(batch, get_video_feature=get_video_feature)
             if get_video_feature:
                 reward, video_feature = output
@@ -168,50 +160,8 @@ def compute_multimodal_reward(reward_model, **kwargs):
                 rewards.extend(reward)
         return np.asarray(rewards)
 
-    multimodal_rewards = []
-    for phase in trange(num_phases, ncols=0, desc="compute reward per phase", leave=False):
-        multimodal_rewards.append(
-            _get_reward(img_features=img_features, text_features=text_features[phase], actions=actions)
-        )
-    multimodal_rewards = np.asarray(multimodal_rewards)
-
-    def _check_reward_condition(prev_reward, current_reward, next_reward, neg_trend_eta=1e-2):
-        if current_reward < prev_reward and abs(current_reward - prev_reward) > neg_trend_eta:
-            return True, False
-        if next_reward > current_reward:
-            return False, True
-        return False, False
-
-    def _extract_phase(
-        rewards,
-        alpha=0.25,
-        eta=10,
-        neg_trend_eta=1e-2,
-    ):
-        phases = []
-        current_phase, task_pass_threshold, task_fail_threshold, prev_reward = 0, 0, 0, rewards[0, 0]
-        for i in range(rewards.shape[1]):
-            task_fail_flag, task_pass_flag = _check_reward_condition(
-                prev_reward,
-                rewards[current_phase][i],
-                rewards[min(current_phase + 1, rewards.shape[0] - 1)][i],
-                neg_trend_eta=neg_trend_eta,
-            )
-            if task_fail_threshold < eta and task_pass_flag:
-                task_pass_threshold += 1
-                if task_pass_threshold >= eta:
-                    task_pass_threshold, task_fail_threshold = 0, 0
-                    current_phase = min(current_phase + 1, rewards.shape[0] - 1)
-            if task_fail_flag:
-                task_fail_flag += 1
-            phases.append(current_phase)
-            prev_reward = (1 - alpha) * prev_reward + alpha * rewards[current_phase, i]
-
-        return [np.asarray(phases), np.arange(rewards.shape[-1])]
-
-    row, col = _extract_phase(multimodal_rewards)
-    final_rewards = multimodal_rewards[row, col]
-    final_rewards = final_rewards * lambda_mr
+    multimodal_rewards = _get_reward(img_features=img_features)
+    final_rewards = multimodal_rewards * lambda_mr
     return final_rewards
 
 
@@ -435,7 +385,6 @@ def main(_):
         args.image_keys = "color_image2|color_image1"
         args.window_size = FLAGS.window_size
         args.skip_frame = FLAGS.skip_frame
-        args.num_phases = FLAGS.num_phases
         args.lambda_mr = FLAGS.lambda_mr
 
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
@@ -444,7 +393,7 @@ def main(_):
     else:
         print("Start pre-training with offline dataset.")
         start_step, steps = 1, FLAGS.num_pretraining_steps + 1
-        for i in tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0):
+        for i in tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="pre-training"):
             offline_batch = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
             update_info = agent.update(offline_batch, use_rnd=False)
             if i % FLAGS.log_interval == 0:
@@ -466,7 +415,7 @@ def main(_):
                 agent.save(ckpt_dir, i)
 
     start_step, steps = 0, FLAGS.max_steps + 1
-    online_pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0)
+    online_pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="online-training")
     i = start_step
     eval_returns = []
     trajectories = _initialize_traj_dict()
