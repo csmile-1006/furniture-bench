@@ -5,6 +5,7 @@ import gym
 import numpy as np
 
 from wrappers.common import TimeStep
+from dataset_utils import SHORTEST_PATHS
 
 
 class EpisodeMonitor(gym.ActionWrapper):
@@ -23,6 +24,7 @@ class EpisodeMonitor(gym.ActionWrapper):
         self.reward_sum = {idx: 0.0 for idx in range(self._num_envs)}
         self.episode_length = {idx: 0 for idx in range(self._num_envs)}
         self.start_time = {idx: time.time() for idx in range(self._num_envs)}
+        self.spl = SHORTEST_PATHS[self.env.furniture_name]
 
     def reset_env(self, idx):
         obs = self.env.reset_env(idx)
@@ -54,6 +56,9 @@ class EpisodeMonitor(gym.ActionWrapper):
             if done[i]:
                 info[f"episode_{i}"] = {}
                 info[f"episode_{i}"]["success"] = float(self.episode_length[i] < self.env.max_env_steps)
+                info[f"episode_{i}"]["spl"] = (
+                    self.spl * self.reward_sum[i].item() / max(self.episode_length[i], self.spl)
+                )
                 info[f"episode_{i}"]["return"] = self.reward_sum[i].item()
                 info[f"episode_{i}"]["length"] = self.episode_length[i]
                 info[f"episode_{i}"]["duration"] = time.time() - self.start_time[i]

@@ -7,7 +7,7 @@ from tqdm import trange
 
 
 def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: float = 0.00) -> Dict[str, float]:
-    stats = {"return": [], "length": [], "success": []}
+    stats = {"return": [], "length": [], "success": [], "spl": []}
     ep, total_step = 0, 0
     pbar = trange(num_episodes, desc="evaluation")
     observation, done = env.reset(), np.zeros((env._num_envs), dtype=bool)

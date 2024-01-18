@@ -10,6 +10,7 @@ from tqdm import tqdm
 import scipy
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
+SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 784}
 
 
 def gaussian_smoothe(rewards, sigma=3.0):
