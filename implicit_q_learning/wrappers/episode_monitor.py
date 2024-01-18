@@ -1,6 +1,5 @@
 import time
 
-import os
 import gym
 import numpy as np
 
