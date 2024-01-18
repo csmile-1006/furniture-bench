@@ -49,7 +49,7 @@ flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
-flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
+flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 
 
