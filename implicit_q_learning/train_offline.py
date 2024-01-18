@@ -41,7 +41,7 @@ config_flags.DEFINE_config_file(
 )
 flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
-flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
+flags.DEFINE_boolean("use_ours", False, "Use ARP rewards.")
 flags.DEFINE_boolean("use_viper", False, "Use VIPER rewards.")
 flags.DEFINE_boolean("use_diffusion_reward", False, "Use Diffusion Rewards.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
@@ -83,7 +83,7 @@ def make_env_and_dataset(
     data_path: str,
     use_encoder: bool,
     encoder_type: str,
-    use_arp: bool,
+    use_ours: bool,
     use_step: bool,
     use_viper: bool,
     use_diffusion_reward: bool,
@@ -137,7 +137,7 @@ def make_env_and_dataset(
         dataset = FurnitureDataset(
             data_path,
             use_encoder=False,
-            use_arp=use_arp,
+            use_ours=use_ours,
             use_step=use_step,
             lambda_mr=lambda_mr,
             use_viper=use_viper,
@@ -150,7 +150,7 @@ def make_env_and_dataset(
         dataset.rewards -= 1.0
         # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
         # but I found no difference between (x - 0.5) * 4 and x - 1.0
-    # elif FLAGS.use_arp:
+    # elif FLAGS.use_ours:
     #     print("normalize dataset for arpv2 rewards.")
     #     normalize(dataset)
     elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
@@ -175,7 +175,7 @@ def main(_):
         FLAGS.data_path,
         FLAGS.use_encoder,
         FLAGS.encoder_type,
-        FLAGS.use_arp,
+        FLAGS.use_ours,
         FLAGS.use_step,
         FLAGS.use_viper,
         FLAGS.use_diffusion_reward,

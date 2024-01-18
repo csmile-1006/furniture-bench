@@ -58,7 +58,7 @@ config_flags.DEFINE_config_file(
 )
 flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
-flags.DEFINE_boolean("use_arp", False, "Use ARP rewards.")
+flags.DEFINE_boolean("use_ours", False, "Use ARP rewards.")
 flags.DEFINE_integer("skip_frame", 16, "how often skip frame.")
 flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
@@ -245,7 +245,7 @@ def make_env_and_dataset(
     data_path: str,
     use_encoder: bool,
     encoder_type: str,
-    use_arp: bool,
+    use_ours: bool,
     use_step: bool,
     lambda_mr: float,
 ):
@@ -300,7 +300,7 @@ def make_env_and_dataset(
 
     if "Furniture" in env_name:
         dataset = FurnitureDataset(
-            data_path, use_encoder=False, use_arp=use_arp, use_step=use_step, lambda_mr=lambda_mr
+            data_path, use_encoder=False, use_ours=use_ours, use_step=use_step, lambda_mr=lambda_mr
         )
     else:
         dataset = D4RLDataset(env)
@@ -385,7 +385,7 @@ def main(_):
         FLAGS.data_path,
         FLAGS.use_encoder,
         FLAGS.encoder_type,
-        FLAGS.use_arp,
+        FLAGS.use_ours,
         FLAGS.use_step,
         FLAGS.lambda_mr,
     )
@@ -425,7 +425,7 @@ def main(_):
         **kwargs,
         use_encoder=FLAGS.use_encoder,
     )
-    if FLAGS.use_arp and FLAGS.rm_ckpt_path != "":
+    if FLAGS.use_ours and FLAGS.rm_ckpt_path != "":
         # load reward model.
         ckpt_path = Path(FLAGS.rm_ckpt_path).expanduser()
         reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
@@ -500,7 +500,7 @@ def main(_):
                 trajectories[env_idx]["masks"].append(mask[env_idx])
                 trajectories[env_idx]["done_floats"].append(done[env_idx])
 
-            if np.any(done) and FLAGS.use_arp and FLAGS.rm_ckpt_path != "":
+            if np.any(done) and FLAGS.use_ours and FLAGS.rm_ckpt_path != "":
                 for env_idx in range(FLAGS.num_envs):
                     if done[env_idx]:
                         print(f"episode {env_idx} done.")

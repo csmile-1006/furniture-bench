@@ -303,7 +303,7 @@ if __name__ == "__main__":
     # env_name = "FurnitureSim-v0/one_leg"
     env_id, furniture_name = env_name.split("/")
     num_frames, skip_frame, target_keys = 4, 16, ["image1", "image2"]
-    use_arp_reward = True
+    use_ours_reward = True
     rm_type = "ARP-V2"
     rm_ckpt_path = Path(
         "/home/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.1-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl"

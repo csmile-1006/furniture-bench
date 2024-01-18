@@ -146,7 +146,7 @@ class FurnitureDataset(Dataset):
         clip_to_eps: bool = True,
         eps: float = 1e-5,
         use_encoder: bool = False,
-        use_arp: bool = False,
+        use_ours: bool = False,
         use_step: bool = False,
         use_viper: bool = False,
         use_diffusion_reward: bool = False,
@@ -186,7 +186,7 @@ class FurnitureDataset(Dataset):
             next_timesteps.append(dataset["next_observations"][i]["timestep"])
 
         dones_float[-1] = 1
-        if use_arp:
+        if use_ours:
             rewards = lambda_mr * dataset["multimodal_rewards"]
         elif use_step:
             rewards = lambda_mr * dataset["step_rewards"] / np.max(dataset["step_rewards"])
