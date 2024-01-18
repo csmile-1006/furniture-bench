@@ -90,7 +90,7 @@ def make_env_and_dataset(
     lambda_mr: float,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
-    record_dir = os.path.join(FLAGS.save_dir, env_name, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
+    record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
         import furniture_bench  # noqa: F401
 
@@ -105,6 +105,7 @@ def make_env_and_dataset(
             headless=True,
             record=True,
             resize_img=True,
+            record_every=FLAGS.num_envs,
             randomness=randomness,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
@@ -164,8 +165,8 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-    tb_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
-    ckpt_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    tb_dir = os.path.join(FLAGS.save_dir, "tb", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
+    ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
 
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,

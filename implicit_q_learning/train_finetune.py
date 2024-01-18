@@ -250,7 +250,7 @@ def make_env_and_dataset(
     lambda_mr: float,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
-    record_dir = os.path.join(FLAGS.save_dir, env_name, "sim_record", f"{FLAGS.run_name}.{FLAGS.seed}")
+    record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
         import furniture_bench  # noqa: F401
 
@@ -370,11 +370,11 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-    root_logdir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "tb", f"{FLAGS.run_name}_{FLAGS.seed}_ft")
-    ckpt_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
-    ft_ckpt_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "ft_ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
-    buffer_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "buffer", f"{FLAGS.run_name}.{FLAGS.seed}")
-    eval_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval", f"{FLAGS.run_name}.{FLAGS.seed}")
+    root_logdir = os.path.join(FLAGS.save_dir, "tb", FLAGS.env_name, f"{FLAGS.run_name}_{FLAGS.seed}_ft")
+    ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
+    ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
+    buffer_dir = os.path.join(FLAGS.save_dir, "buffer", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
+    eval_dir = os.path.join(FLAGS.save_dir, "eval", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     os.makedirs(buffer_dir, exist_ok=True)
     os.makedirs(eval_dir, exist_ok=True)
 
