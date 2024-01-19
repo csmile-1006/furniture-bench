@@ -82,14 +82,13 @@ class FrameStackWrapper(gym.Wrapper):
 
 
 if __name__ == "__main__":
-    import isaacgym
     import furniture_bench
     import sys
 
     sys.path.append("/home/changyeon/ICML2024/furniture-bench/implicit_q_learning")
     from wrappers.episode_monitor import EpisodeMonitor
 
-    env_name = "FurnitureSimImageWithFeature-v0/one_leg"
+    env_name = "FurnitureSimImageFeature-v0/one_leg"
     # env_name = "FurnitureSim-v0/one_leg"
     env_id, furniture_name = env_name.split("/")
     env = gym.make(
@@ -99,8 +98,8 @@ if __name__ == "__main__":
         data_path="",
         use_encoder=False,
         encoder_type="vip",
-        compute_device_id=1,
-        graphics_device_id=1,
+        compute_device_id=5,
+        graphics_device_id=5,
         headless=True,
         record=False,
         resize_img=True,

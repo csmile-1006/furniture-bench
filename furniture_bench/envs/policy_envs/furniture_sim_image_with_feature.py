@@ -86,6 +86,14 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
             )
         )
 
+    def _reward(self):
+        rewards = super()._reward()
+        return rewards.cpu().numpy()
+
+    def _done(self):
+        dones = super()._done()
+        return dones.cpu().numpy().astype(bool)
+
     def _get_observation(self):
         obs = super()._get_observation()
 
@@ -100,7 +108,7 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
             image1 = self.resize(image1.float())
             image2 = self.resize_crop(image2.float())
 
-        image1, image2 = self._extract_vip_feature(image1), self._extract_vip_feature(image2)
+        vip_image1, vip_image2 = self._extract_vip_feature(image1), self._extract_vip_feature(image2)
         liv_image1, liv_image2 = self._extract_liv_feature(image1), self._extract_liv_feature(image2)
 
         # with torch.no_grad():
@@ -115,31 +123,19 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
         #     image2 = self.vip_layer(image2).detach().cpu().numpy()
 
         return dict(
-            robot_state=robot_state,
-            image1=image1.detach().cpu().numpy(),
-            image2=image2.detach().cpu().numpy(),
+            robot_state=robot_state.detach().cpu().numpy(),
+            image1=vip_image1.detach().cpu().numpy(),
+            image2=vip_image2.detach().cpu().numpy(),
             color_image1=liv_image1.detach().cpu().numpy(),
             color_image2=liv_image2.detach().cpu().numpy(),
         )
 
-    def _extract_vip_feature(self, obs):
-        image1, image2, robot_state = obs["color_image1"], obs["color_image2"], obs["robot_state"]
+    def _extract_vip_feature(self, image):
         with torch.no_grad():
-            image1 = torch.tensor(image1).to(self._device)
-            image2 = torch.tensor(image2).to(self._device)
+            vip_image = self.vip_layer(image)
+        return vip_image
 
-            image1 = self.vip_layer(image1).detach().cpu().numpy()
-            image2 = self.vip_layer(image2).detach().cpu().numpy()
-
-        return dict(robot_state=robot_state, image1=image1, image2=image2)
-
-    def _extract_liv_feature(self, obs):
-        image1, image2, robot_state = obs["color_image1"], obs["color_image2"], obs["robot_state"]
+    def _extract_liv_feature(self, image):
         with torch.no_grad():
-            image1 = torch.tensor(image1).to(self._device)
-            image2 = torch.tensor(image2).to(self._device)
-
-            image1 = self.liv_layer(image1).detach().cpu().numpy()
-            image2 = self.liv_layer(image2).detach().cpu().numpy()
-
-        return dict(robot_state=robot_state, color_image1=image1, color_image2=image2)
+            liv_image = self.liv_layer(image)
+        return liv_image
