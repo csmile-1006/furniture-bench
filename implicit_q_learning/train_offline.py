@@ -105,7 +105,7 @@ def make_env_and_dataset(
             headless=True,
             record=True,
             resize_img=True,
-            record_every=FLAGS.num_envs,
+            record_every=2,
             randomness=randomness,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
