@@ -512,7 +512,7 @@ def main(_):
                 except:  # noqa: E722
                     print("Could not save agent buffer.")
 
-            if False and i % FLAGS.eval_interval == 0:
+            if i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
