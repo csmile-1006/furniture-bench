@@ -211,7 +211,9 @@ def main(_):
     )
 
     eval_returns = []
-    for i in tqdm.tqdm(range(1, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm):
+    for i in tqdm.tqdm(
+        range(1, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="offline training"
+    ):
         batch = dataset.sample(FLAGS.batch_size)
 
         update_info = agent.update(batch)
