@@ -26,7 +26,7 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
                     stats[k].append(info[f"episode_{env_idx}"][k])
                 ep += 1
                 pbar.update(1)
-        pbar.set_postfix(f"total_step: {total_step}")
+        pbar.set_postfix({"total_step": f"{total_step}"})
 
     for k, v in stats.items():
         stats[k] = np.mean(v)
