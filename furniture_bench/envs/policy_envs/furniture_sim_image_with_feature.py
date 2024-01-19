@@ -61,8 +61,6 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
     @property
     def observation_space(self):
         robot_state_dim = 14
-        img_size = reversed(self.img_size)
-        img_shape = (3, *img_size) if self.channel_first else (*img_size, 3)
 
         return spaces.Dict(
             dict(
@@ -81,8 +79,16 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
                     np.inf,
                     (self.embedding_dim,),
                 ),
-                color_image1=spaces.Box(0, 255, img_shape),
-                color_image2=spaces.Box(0, 255, img_shape),
+                color_image1=spaces.Box(
+                    -np.inf,
+                    np.inf,
+                    (self.embedding_dim,),
+                ),
+                color_image2=spaces.Box(
+                    -np.inf,
+                    np.inf,
+                    (self.embedding_dim,),
+                ),
             )
         )
 
@@ -110,17 +116,6 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
 
         vip_image1, vip_image2 = self._extract_vip_feature(image1), self._extract_vip_feature(image2)
         liv_image1, liv_image2 = self._extract_liv_feature(image1), self._extract_liv_feature(image2)
-
-        # with torch.no_grad():
-        #     image1 = torch.tensor(image1).cuda()
-        #     image2 = torch.tensor(image2).cuda()
-
-        #     if not self._resize_img:
-        #         image1 = self.resize(image1.float())
-        #         image2 = self.resize_crop(image2.float())
-
-        #     image1 = self.vip_layer(image1).detach().cpu().numpy()
-        #     image2 = self.vip_layer(image2).detach().cpu().numpy()
 
         return dict(
             robot_state=robot_state.detach().cpu().numpy(),
