@@ -1,4 +1,3 @@
-import os
 import gym
 import numpy as np
 from gym import spaces
@@ -83,6 +82,7 @@ class FrameStackWrapper(gym.Wrapper):
 
 
 if __name__ == "__main__":
+    import isaacgym
     import furniture_bench
     import sys
 
@@ -99,8 +99,8 @@ if __name__ == "__main__":
         data_path="",
         use_encoder=False,
         encoder_type="vip",
-        compute_device_id=0,
-        graphics_device_id=0,
+        compute_device_id=1,
+        graphics_device_id=1,
         headless=True,
         record=False,
         resize_img=True,

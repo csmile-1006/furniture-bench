@@ -15,7 +15,7 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
     def __init__(self, **kwargs):
         super().__init__(
             concat_robot_state=True,
-            np_step_out=True,
+            np_step_out=False,
             channel_first=True,
             **kwargs,
         )
@@ -27,21 +27,28 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
 
-            self.layer = load_r3m("resnet50").module
+            self.vip_layer = load_r3m("resnet50").module
             self.embedding_dim = 2048
         elif kwargs["encoder_type"] == "vip":
             from vip import load_vip
 
-            self.layer = load_vip().module
+            self.vip_layer = load_vip().module
             self.embedding_dim = 1024
         elif kwargs["encoder_type"] == "liv":
             from liv import load_liv
 
-            self.layer = load_liv().module
+            self.vip_layer = load_liv().module
             self.embedding_dim = 1024
-        self.layer.requires_grad_(False)
-        self.layer.eval()
-        self.layer = self.layer.to(self._device)
+        self.vip_layer.requires_grad_(False)
+        self.vip_layer.eval()
+        self.vip_layer = self.vip_layer.to(self._device)
+
+        from liv import load_liv
+
+        self.liv_layer = load_liv().module
+        self.liv_layer.requires_grad_(False)
+        self.liv_layer.eval()
+        self.liv_layer = self.liv_layer.to(self._device)
 
         # Data Augmentation
         if not self._resize_img:
@@ -89,22 +96,50 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
         robot_state = obs["robot_state"]
         image1 = obs["color_image1"]
         image2 = obs["color_image2"]
+        if not self._resize_img:
+            image1 = self.resize(image1.float())
+            image2 = self.resize_crop(image2.float())
 
-        with torch.no_grad():
-            image1 = torch.tensor(image1).cuda()
-            image2 = torch.tensor(image2).cuda()
+        image1, image2 = self._extract_vip_feature(image1), self._extract_vip_feature(image2)
+        liv_image1, liv_image2 = self._extract_liv_feature(image1), self._extract_liv_feature(image2)
 
-            if not self._resize_img:
-                image1 = self.resize(image1.float())
-                image2 = self.resize_crop(image2.float())
+        # with torch.no_grad():
+        #     image1 = torch.tensor(image1).cuda()
+        #     image2 = torch.tensor(image2).cuda()
 
-            image1 = self.layer(image1).detach().cpu().numpy()
-            image2 = self.layer(image2).detach().cpu().numpy()
+        #     if not self._resize_img:
+        #         image1 = self.resize(image1.float())
+        #         image2 = self.resize_crop(image2.float())
+
+        #     image1 = self.vip_layer(image1).detach().cpu().numpy()
+        #     image2 = self.vip_layer(image2).detach().cpu().numpy()
 
         return dict(
             robot_state=robot_state,
-            image1=image1,
-            image2=image2,
-            color_image1=obs["color_image1"].transpose(0, 2, 3, 1),
-            color_image2=obs["color_image2"].transpose(0, 2, 3, 1),
+            image1=image1.detach().cpu().numpy(),
+            image2=image2.detach().cpu().numpy(),
+            color_image1=liv_image1.detach().cpu().numpy(),
+            color_image2=liv_image2.detach().cpu().numpy(),
         )
+
+    def _extract_vip_feature(self, obs):
+        image1, image2, robot_state = obs["color_image1"], obs["color_image2"], obs["robot_state"]
+        with torch.no_grad():
+            image1 = torch.tensor(image1).to(self._device)
+            image2 = torch.tensor(image2).to(self._device)
+
+            image1 = self.vip_layer(image1).detach().cpu().numpy()
+            image2 = self.vip_layer(image2).detach().cpu().numpy()
+
+        return dict(robot_state=robot_state, image1=image1, image2=image2)
+
+    def _extract_liv_feature(self, obs):
+        image1, image2, robot_state = obs["color_image1"], obs["color_image2"], obs["robot_state"]
+        with torch.no_grad():
+            image1 = torch.tensor(image1).to(self._device)
+            image2 = torch.tensor(image2).to(self._device)
+
+            image1 = self.liv_layer(image1).detach().cpu().numpy()
+            image2 = self.liv_layer(image2).detach().cpu().numpy()
+
+        return dict(robot_state=robot_state, color_image1=image1, color_image2=image2)
