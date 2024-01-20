@@ -17,7 +17,6 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
         total_step += min(env._num_envs, num_episodes)
         for env_idx in range(min(env._num_envs, num_episodes)):
             if done[env_idx].item() is True:
-                print(f"total_step {total_step} / env_idx: {env_idx} / done: {done[env_idx]}")
                 new_ob = env.reset_env(env_idx)
                 for key in observation:
                     observation[key][env_idx] = new_ob[key]
@@ -26,7 +25,7 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
                     stats[k].append(info[f"episode_{env_idx}"][k])
                 ep += 1
                 pbar.update(1)
-        pbar.set_postfix({"total_step": f"{total_step}"})
+        pbar.set_postfix({"total_step": f"{total_step}", "num_success": f"{np.sum(stats['success'])}"})
 
     for k, v in stats.items():
         stats[k] = np.mean(v)
