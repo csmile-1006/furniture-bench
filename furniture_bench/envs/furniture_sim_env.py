@@ -1010,10 +1010,7 @@ class FurnitureSimEnv(gym.Env):
                     if not self.np_step_out:
                         img = img.cpu().numpy().copy()
                     if self.channel_first:
-                        if not self.np_step_out:
-                            img = img.transpose(0, 2, 3, 1)
-                        else:
-                            img = img.transpose(1, 2, 0)
+                        img = img.transpose(1, 2, 0)
                     record_images.append(img.squeeze())
                 stacked_img = np.vstack(record_images)
                 self.video_writer[env_idx].write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
