@@ -233,9 +233,13 @@ def main(_):
                 action_.append(x["actions"][_len])
                 reward_.append(x["rewards"][_len])
                 if enable_viper:
-                    viper_reward_.append(x["viper_reward_16"][_len])
+                    viper_reward_.append(
+                        x["viper_reward"][_len] if FLAGS.skip_frame == 4 else x["viper_reward_16"][_len]
+                    )
                 if enable_diffusion:
-                    diffusion_reward_.append(x["diffusion_reward_16"][_len])
+                    diffusion_reward_.append(
+                        x["diffusion_reward"][_len] if FLAGS.skip_frame == 1 else x["diffusion_reward_16"][_len]
+                    )
                 step_reward_.append(cumsum_skills[_len] + 1 if _len == length - 2 else cumsum_skills[_len])
                 multimodal_reward_.append(rewards[_len])
                 done_.append(1 if _len == length - 2 else 0)
