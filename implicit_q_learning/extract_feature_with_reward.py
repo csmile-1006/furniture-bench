@@ -27,6 +27,8 @@ flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
 flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
 flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
 flags.DEFINE_string("pvr_type", "liv", "pvr type.")
+flags.DEFINE_integer("window_size", 4, "window size")
+flags.DEFINE_integer("skip_frame", 16, "skip frame")
 
 
 device = torch.device("cuda")
@@ -179,8 +181,8 @@ def main(_):
             args = ConfigDict()
             args.task_name = FLAGS.furniture
             args.image_keys = "color_image2|color_image1"
-            args.window_size = 4
-            args.skip_frame = 16
+            args.window_size = FLAGS.window_size
+            args.skip_frame = FLAGS.skip_frame
             args.return_images = True
 
             rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(
