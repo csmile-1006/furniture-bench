@@ -32,16 +32,14 @@ class ValueCritic(nn.Module):
                 image_features = jnp.concatenate([image_features, observations["robot_state"][jnp.newaxis]], axis=-1)
             else:
                 image_features = jnp.concatenate([image_features, observations["robot_state"]], axis=-1)
-            image_features = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(image_features)
+            image_features = MLP([self.emb_dim])(image_features)
             image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
             token_embed = jnp.concatenate(
-                # [image_embed, state_embed], axis=-1
                 [image_embed],
                 axis=-1,
             )
             token_embed = jnp.reshape(
                 token_embed,
-                # [batch_size, 2 * num_timestep, self.emb_dim],
                 [batch_size, 1 * num_timestep, self.emb_dim],
             )
             obs = self.encoder_cls(name="encoder")(token_embed)[:, -1]
@@ -66,21 +64,18 @@ class Critic(nn.Module):
         for k, v in observations.items():
             if self.use_encoder and (k == "image1" or k == "image2"):
                 image_features[k] = v
-            # else:
-            #     state_embed = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(v)
         if self.use_encoder:
             image_features = jnp.array(list(image_features.values()))
             num_image, batch_size, num_timestep, _ = image_features.shape
             image_features = concat_multiple_image_emb(image_features)
             image_features = jnp.concatenate([image_features, observations["robot_state"]], axis=-1)
             # Image features: (batch_size, num_timestep, num_images * embd_dim)
-            image_features = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(image_features)
+            image_features = MLP([self.emb_dim])(image_features)
             image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
             # token_embed = jnp.concatenate([image_embed, state_embed], axis=-1)
             token_embed = jnp.concatenate([image_embed], axis=-1)
             token_embed = jnp.reshape(
                 token_embed,
-                # [batch_size, 2 * num_timestep, self.emb_dim],
                 [batch_size, 1 * num_timestep, self.emb_dim],
             )
             obs = self.encoder_cls(name="encoder")(token_embed, deterministic=training)[:, -1]
