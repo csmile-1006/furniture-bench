@@ -59,22 +59,22 @@ config_flags.DEFINE_config_file(
 flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_ours", False, "Use ARP rewards.")
-flags.DEFINE_integer("skip_frame", 16, "how often skip frame.")
+flags.DEFINE_integer("skip_frame", 4, "how often skip frame.")
 flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
-flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
-flags.DEFINE_float("temperature", 0.03, "Temperature for stochastic actor.")
+flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
+flags.DEFINE_float("temperature", 0.1, "Temperature for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
 flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
 flags.DEFINE_string(
     "rm_ckpt_path",
-    "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/w4-s16-nfp1.0-c1.0@0.5-supc1.0-ep0.5-demo200-total-phase/s0/best_model.pkl",
-    "reward model checkpoint path.",
+    "/home/changyeon/ICML2024/reward_models",
+    "reward model checkpoint base path.",
 )
 
 
@@ -223,9 +223,6 @@ def make_env_and_dataset(
             window_size=FLAGS.window_size,
             skip_frame=FLAGS.skip_frame,
             max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
-            rm_type=FLAGS.rm_type,
-            rm_ckpt_path=FLAGS.rm_ckpt_path,
-            lambda_mr=FLAGS.lambda_mr,
         )
     else:
         env = gym.make(env_name)
@@ -377,8 +374,14 @@ def main(_):
     )
     if FLAGS.use_ours and FLAGS.rm_ckpt_path != "":
         # load reward model.
-        ckpt_path = Path(FLAGS.rm_ckpt_path).expanduser()
-        reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
+        rm_ckpt_path = (
+            Path(FLAGS.rm_ckpt_path).expanduser()
+            / FLAGS.env_name.split("/")[-1]
+            / f"w{FLAGS.window_size}-s{FLAGS.skip_frame}-nfp1.0-c1.0@0.5-supc1.0-ep0.5-demo100-total-phase"
+            / "s0"
+            / "best_model.pkl"
+        )
+        reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=rm_ckpt_path)
 
         args = ConfigDict()
         args.task_name = FLAGS.env_name.split("/")[-1]
