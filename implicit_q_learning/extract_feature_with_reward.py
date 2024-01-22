@@ -135,8 +135,8 @@ def main(_):
         with open(file_path, "rb") as f:
             x = pickle.load(f)
 
-            enable_viper = x.get("viper_reward_16", None) is not None
-            enable_diffusion = x.get("diffusion_reward_16", None) is not None
+            enable_viper = x.get("viper_reward", None) is not None
+            enable_diffusion = x.get("diffusion_reward", None) is not None
             if len(x["observations"]) == len(x["actions"]):
                 # Dummy
                 x["observations"].append(x["observations"][-1])
