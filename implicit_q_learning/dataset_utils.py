@@ -77,6 +77,7 @@ class Dataset(object):
         timesteps: np.ndarray,
         next_timesteps: np.ndarray,
         use_encoder: bool = False,
+        n_step: int = 1,
     ):
         self.observations = observations
         self.timesteps = timesteps
@@ -88,21 +89,37 @@ class Dataset(object):
         self.next_timesteps = next_timesteps
         self.size = size
         self.use_encoder = use_encoder
+        self._n_step = n_step
 
-    def sample(self, batch_size: int) -> Batch:
+    def sample(self, batch_size: int, gamma: float = 0.99) -> Batch:
         indx = np.random.randint(self.size, size=batch_size)
         observations = self.observations[self.timesteps[indx]]
         image1, image2, robot_state = np.split(observations, (self.embedding_dim, self.embedding_dim * 2), axis=-1)
-        next_observations = self.next_observations[self.next_timesteps[indx]]
+
+        masks = self.masks[indx].copy()
+        n_step_rewards = np.zeros(batch_size)
+        next_observations = self.next_observations[self.next_timesteps[indx]].copy()
+        for i in range(batch_size):
+            _indx = indx[i]
+            cumulative_reward = 0.0
+            for j in range(self._n_step):
+                cumulative_reward += gamma**j * self.rewards[_indx + j]
+                masks[i] *= self.masks[_indx + j] * gamma
+                if self.masks[_indx + j] == 0.0:
+                    print(f"Warning: trajectory ended at {_indx} + {j}.")
+                    break
+            masks[i] /= gamma  # gamma must be divided because it is multiplied in the update_q again.
+            n_step_rewards[i] = cumulative_reward
+            next_observations[i] = self.next_observations[self.next_timesteps[_indx + j]]
+
         next_image1, next_image2, next_robot_state = np.split(
             next_observations, (self.embedding_dim, self.embedding_dim * 2), axis=-1
         )
-
         return Batch(
             observations=dict(image1=image1, image2=image2, robot_state=robot_state),
             actions=self.actions[indx],
-            rewards=self.rewards[indx],
-            masks=self.masks[indx],
+            rewards=n_step_rewards,
+            masks=masks,
             next_observations=dict(image1=next_image1, image2=next_image2, robot_state=next_robot_state),
         )
 
@@ -151,6 +168,7 @@ class FurnitureDataset(Dataset):
         use_viper: bool = False,
         use_diffusion_reward: bool = False,
         lambda_mr: float = 1e-1,
+        n_step: int = 1,
     ):
         with open(data_path, "rb") as f:
             dataset = pickle.load(f)
@@ -208,6 +226,7 @@ class FurnitureDataset(Dataset):
             next_timesteps=np.asarray(next_timesteps),
             size=len(dataset["observations"]),
             use_encoder=use_encoder,
+            n_step=n_step,
         )
 
 
@@ -253,6 +272,7 @@ class ReplayBuffer(Dataset):
         capacity: int,
         window_size: int = 4,
         embedding_dim: int = 1024,
+        n_step: int = 1,
     ):
         obs_shape = (sum([observation_space[key].shape[-1] for key in ["image1", "image2", "robot_state"]]),)
         observations = np.zeros((capacity, *obs_shape), dtype=observation_space.dtype)
@@ -273,6 +293,7 @@ class ReplayBuffer(Dataset):
             next_observations=next_observations,
             next_timesteps=next_timesteps,
             size=0,
+            n_step=n_step,
         )
 
         self.size = 0

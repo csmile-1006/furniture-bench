@@ -29,7 +29,7 @@ flags.DEFINE_integer("eval_interval", 5000000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("window_size", 4, "Window size.")
-flags.DEFINE_integer("skip_frame", 16, "Skipping frame.")
+flags.DEFINE_integer("skip_frame", 4, "Skipping frame.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_string("data_path", "", "Path to data.")
@@ -39,6 +39,7 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
+flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
 flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_ours", False, "Use ARP rewards.")
@@ -49,7 +50,7 @@ flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
-flags.DEFINE_float("lambda_mr", 0.1, "lambda value for dataset.")
+flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 
 
@@ -142,6 +143,7 @@ def make_env_and_dataset(
             lambda_mr=lambda_mr,
             use_viper=use_viper,
             use_diffusion_reward=use_diffusion_reward,
+            n_step=FLAGS.n_step,
         )
     else:
         dataset = D4RLDataset(env)
