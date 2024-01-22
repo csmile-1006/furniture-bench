@@ -44,6 +44,11 @@ def main():
         action="store_true",
         help="Save failure trajectories.",
     )
+    parser.add_argument(
+        "--save-only-failure",
+        action="store_true",
+        help="Save only failure trajectories.",
+    )
     parser.add_argument("--headless", help="With front camera view", action="store_true")
     parser.add_argument("--draw-marker", action="store_true", help="Draw AprilTag marker")
     parser.add_argument(
@@ -97,6 +102,7 @@ def main():
         graphics_device_id=args.graphics_device_id,
         pkl_only=args.pkl_only,
         save_failure=args.save_failure,
+        save_only_failure=args.save_only_failure,
         num_demos=args.num_demos,
         env_option=args.env_option,
         resize_sim_img=args.resize_sim_img,

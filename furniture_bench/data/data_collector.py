@@ -37,6 +37,7 @@ class DataCollector:
         graphics_device_id: int,
         pkl_only: bool = False,
         save_failure: bool = False,
+        save_only_failure: bool = False,
         num_demos: int = 100,
         env_option: str = "legacy",
         resize_sim_img: bool = False,
@@ -68,9 +69,7 @@ class DataCollector:
             self.env = gym.make(
                 env_id,
                 furniture=furniture,
-                max_env_steps=sim_config["scripted_timeout"][furniture]
-                if scripted
-                else 3000,
+                max_env_steps=sim_config["scripted_timeout"][furniture] if scripted else 3000,
                 headless=headless,
                 num_envs=1,  # Only support 1 for now.
                 manual_done=False if scripted else True,
@@ -112,6 +111,7 @@ class DataCollector:
 
         self.pkl_only = pkl_only
         self.save_failure = save_failure
+        self.save_only_failure = save_only_failure
         self.resize_sim_img = resize_sim_img
 
         self._reset_collector_buffer()
@@ -121,8 +121,8 @@ class DataCollector:
 
         obs = self.reset()
         done = False
-
-        while self.num_success < self.num_demos:
+        while True:
+            # while self.num_success < self.num_demos:
             # Get an action.
             if self.scripted:
                 action, skill_complete = self.env.get_assembly_action()
@@ -177,6 +177,14 @@ class DataCollector:
                 self.traj_counter += 1
                 print(f"Success: {self.num_success}, Fail: {self.num_fail}")
                 done = False
+                if self.save_only_failure:
+                    if self.num_fail >= self.num_demos:
+                        print(f"We collect {self.num_fail} failure trajectories, terminate the program.")
+                        break
+                else:
+                    if self.num_success >= self.num_demos:
+                        print(f"We collect {self.num_fail} success trajectories, terminate the program.")
+                        break
                 continue
 
             # Execute action.
