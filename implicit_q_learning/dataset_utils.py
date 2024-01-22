@@ -106,7 +106,6 @@ class Dataset(object):
                 cumulative_reward += gamma**j * self.rewards[_indx + j]
                 masks[i] *= self.masks[_indx + j] * gamma
                 if self.masks[_indx + j] == 0.0:
-                    print(f"Warning: trajectory ended at {_indx} + {j}.")
                     break
             masks[i] /= gamma  # gamma must be divided because it is multiplied in the update_q again.
             n_step_rewards[i] = cumulative_reward
