@@ -70,6 +70,8 @@ def _update_jit(
     # new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, mini_batch, temperature)
 
     # new_target_critic = target_update(new_critic, target_critic, tau)
+    actor = _share_encoder(source=critic, target=actor)
+    value = _share_encoder(source=critic, target=value)
     if use_rnd:
         key, rng = jax.random.split(rng)
         new_rnd, rnd_info = update_rnd(key, rnd, batch)
@@ -215,9 +217,6 @@ class Learner(object):
         return np.clip(actions, -1, 1)
 
     def update(self, batch: Batch, utd_ratio: int = 1, use_rnd: bool = False) -> InfoDict:
-        new_value = _share_encoder(source=self.critic, target=self.value)
-        self.value = new_value
-
         (
             new_rng,
             new_actor,
@@ -251,7 +250,6 @@ class Learner(object):
         self.rnd = new_rnd
 
         info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
-
         return info
 
     def save(self, ckpt_dir, step):
