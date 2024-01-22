@@ -159,7 +159,7 @@ class DataCollector:
                 self.obs.append(n_ob)
 
                 if done and not self.env.furnitures[0].all_assembled():
-                    if self.save_failure:
+                    if self.save_failure or self.save_only_failure:
                         print("Saving failure trajectory.")
                         collect_enum = CollectEnum.FAIL
                         obs = self.save_and_reset(collect_enum, {}, "failure")
@@ -171,8 +171,10 @@ class DataCollector:
                 else:
                     if done:
                         collect_enum = CollectEnum.SUCCESS
-
-                    obs = self.save_and_reset(collect_enum, {}, "success")
+                    if not self.save_only_failure:
+                        obs = self.save_and_reset(collect_enum, {}, "success")
+                    else:
+                        obs = self.reset()
                     self.num_success += 1
                 self.traj_counter += 1
                 print(f"Success: {self.num_success}, Fail: {self.num_fail}")
