@@ -58,6 +58,7 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
+flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
 flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
 flags.DEFINE_boolean("use_step", False, "Use step rewards.")
 flags.DEFINE_boolean("use_ours", False, "Use ARP rewards.")
@@ -252,7 +253,12 @@ def make_env_and_dataset(
 
     if "Furniture" in env_name:
         dataset = FurnitureDataset(
-            data_path, use_encoder=False, use_ours=use_ours, use_step=use_step, lambda_mr=lambda_mr
+            data_path,
+            use_encoder=False,
+            use_ours=use_ours,
+            use_step=use_step,
+            lambda_mr=lambda_mr,
+            n_step=FLAGS.n_step,
         )
     else:
         dataset = D4RLDataset(env)
