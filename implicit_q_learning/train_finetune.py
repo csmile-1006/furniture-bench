@@ -15,7 +15,7 @@ from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 from ml_collections import ConfigDict
 from tqdm import trange
-from rich import Console
+from rich.console import Console
 
 from furniture_bench.sim_config import sim_config
 
