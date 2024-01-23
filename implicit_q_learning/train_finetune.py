@@ -15,6 +15,7 @@ from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 from ml_collections import ConfigDict
 from tqdm import trange
+from rich import Console
 
 from furniture_bench.sim_config import sim_config
 
@@ -23,6 +24,7 @@ from dataset_utils import Batch, D4RLDataset, ReplayBuffer, split_into_trajector
 from evaluation import evaluate
 from learner import Learner
 
+console = Console()
 sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
 from bpref_v2.data.instruct import get_furniturebench_instruct  # noqa: E402
 from bpref_v2.data.label_reward_furniturebench import load_reward_model  # noqa: E402
@@ -161,6 +163,9 @@ def compute_multimodal_reward(reward_model, **kwargs):
         return np.asarray(rewards)
 
     multimodal_rewards = _get_reward(img_features=img_features)
+    # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
+    multimodal_rewards = multimodal_rewards[1:].tolist()
+    multimodal_rewards = np.asarray(multimodal_rewards + multimodal_rewards[-1:]).astype(np.float32)
     final_rewards = multimodal_rewards * lambda_mr
     return final_rewards
 
@@ -242,8 +247,8 @@ def make_env_and_dataset(
     random.seed(seed)
     np.random.seed(seed)
 
-    print("Observation space", env.observation_space)
-    print("Action space", env.action_space)
+    console.print("Observation space", env.observation_space)
+    console.print("Action space", env.action_space)
 
     if "Furniture" in env_name:
         dataset = FurnitureDataset(
@@ -391,10 +396,10 @@ def main(_):
         args.lambda_mr = FLAGS.lambda_mr
 
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
-        print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
+        console.print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
         agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
     else:
-        print("Start pre-training with offline dataset.")
+        console.print("Start pre-training with offline dataset.")
         start_step, steps = 1, FLAGS.num_pretraining_steps + 1
         for i in tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="pre-training"):
             offline_batch = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
@@ -455,7 +460,6 @@ def main(_):
             if np.any(done) and FLAGS.use_ours and FLAGS.rm_ckpt_path != "":
                 for env_idx in range(FLAGS.num_envs):
                     if done[env_idx]:
-                        print(f"episode {env_idx} done.")
                         rewards = compute_multimodal_reward(
                             trajectories=trajectories[env_idx], reward_model=reward_model, args=args
                         )
@@ -512,8 +516,8 @@ def main(_):
                 try:
                     with open(os.path.join(buffer_dir, "buffer"), "wb") as f:
                         pickle.dump(replay_buffer, f, pickle.HIGHEST_PROTOCOL)
-                except:  # noqa: E722
-                    print("Could not save agent buffer.")
+                except Exception as e:  # noqa: E722
+                    console.print(f"Could not save agent buffer:{e}")
 
             if i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
