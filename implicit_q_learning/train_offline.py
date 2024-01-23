@@ -216,7 +216,7 @@ def main(_):
     for i in tqdm.tqdm(
         range(1, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="offline training"
     ):
-        batch = dataset.sample(FLAGS.batch_size)
+        batch = dataset.sample(FLAGS.batch_size, gamma=FLAGS.config.discount)
 
         update_info = agent.update(batch)
 
