@@ -1,6 +1,5 @@
 import isaacgym  # noqa: F401
 import os
-import sys
 from collections import deque
 from pathlib import Path
 
@@ -20,15 +19,14 @@ from furniture_bench.sim_config import sim_config
 
 import wrappers
 from replay_buffer import make_replay_loader, ReplayBufferStorage
-from dataset_utils import Batch
+from dataset_utils import Batch, gaussian_smoothe
 from evaluation import evaluate
 from learner import Learner
 
-console = Console()
-sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
-from bpref_v2.data.instruct import get_furniturebench_instruct  # noqa: E402
-from bpref_v2.data.label_reward_furniturebench import load_reward_model  # noqa: E402
+from bpref_v2.data.instruct import get_furniturebench_instruct
+from bpref_v2.data.label_reward_furniturebench import load_reward_model
 
+console = Console()
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "FurnitureSimImageFeature-V0/one_leg", "Environment name.")
@@ -94,6 +92,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
         args.lambda_mr,
     )
     get_video_feature = kwargs.get("get_video_feature", False)
+    get_text_feature = kwargs.get("get_text_feature", False)
     img_features = {}
     insts = [
         clip.tokenize(get_furniturebench_instruct(task_name, phase, output_type="all")).detach().cpu().numpy()
@@ -142,7 +141,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
         stacked_timesteps = np.asarray(stacked_timesteps)
         stacked_attn_masks = np.asarray(stacked_attn_masks)
 
-        rewards, video_features = [], []
+        rewards, video_features, text_features = [], [], []
         batch_size = 32
         for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
             _range = range(i, min(i + batch_size, len_demos))
@@ -153,17 +152,23 @@ def compute_multimodal_reward(reward_model, **kwargs):
             }
             phases = reward_model.get_phase(batch)
             batch["instruct"] = np.stack([insts[phase] for phase in phases])
-            # batch["instruct"] = tokens.reshape(phases.shape + tokens.shape[-2:])
-            output = reward_model.get_reward(batch, get_video_feature=get_video_feature)
+            output = reward_model.get_reward(
+                batch, get_video_feature=get_video_feature, get_text_feature=get_text_feature
+            )
+            rewards.extend(output["rewards"])
             if get_video_feature:
-                reward, video_feature = output
-                reward, video_feature = list(np.asarray(reward)), list(np.asarray(video_feature))
-                rewards.extend(reward)
-                video_features.extend(video_feature)
-            else:
-                reward = list(np.asarray(output))
-                rewards.extend(reward)
-        return np.asarray(rewards)
+                video_features.extend(output["video_features"])
+            if get_text_feature:
+                text_features.extend(output["text_features"])
+
+        output = {
+            "rewards": gaussian_smoothe(np.asarray(rewards)),
+        }
+        if get_video_feature:
+            output["video_features"] = np.asarray(video_features)
+        if get_text_feature:
+            output["text_features"] = np.asarray(text_features)
+        return output
 
     multimodal_rewards = _get_reward(img_features=img_features)
     # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
@@ -449,10 +454,15 @@ def main(_):
             for env_idx in range(FLAGS.num_envs):
                 if done[env_idx]:
                     if np.any(done) and FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
-                        rewards = compute_multimodal_reward(
+                        output = compute_multimodal_reward(
                             trajectories=trajectories[env_idx], reward_model=reward_model, args=args
                         )
-                        trajectories[env_idx]["multimodal_rewards"] = rewards
+                        trajectories[env_idx]["multimodal_rewards"] = output["rewards"]
+                        for idx in range(output["rewards"]):
+                            trajectories[env_idx]["observations"][idx]["text_feature"] = output["text_features"][idx]
+                            trajectories[env_idx]["next_observations"][idx]["text_feature"] = output["text_features"][
+                                min(idx + 1, len(output["rewards"]) - 1)
+                            ]
                     replay_storage.add_episode(trajectories[env_idx])
                     new_ob = env.reset_env(env_idx)
                     for key in next_observation:
