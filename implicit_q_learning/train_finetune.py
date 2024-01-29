@@ -1,6 +1,5 @@
 import isaacgym  # noqa: F401
 import os
-import pickle
 import sys
 from collections import deque
 from pathlib import Path
@@ -20,7 +19,8 @@ from rich.console import Console
 from furniture_bench.sim_config import sim_config
 
 import wrappers
-from dataset_utils import Batch, D4RLDataset, ReplayBuffer, split_into_trajectories, FurnitureDataset
+from replay_buffer import make_replay_loader, ReplayBufferStorage
+from dataset_utils import Batch
 from evaluation import evaluate
 from learner import Learner
 
@@ -52,6 +52,9 @@ flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_s
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_string("data_path", "", "Path to data.")
+flags.DEFINE_integer("num_success_demos", 100, "Number of success demonstrations.")
+flags.DEFINE_integer("num_failure_demos", 0, "Number of failure demonstrations.")
+flags.DEFINE_integer("num_workers", 1, "num_workers must be <= num_envs.")
 config_flags.DEFINE_config_file(
     "config",
     "default.py",
@@ -59,12 +62,11 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
-flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
-flags.DEFINE_boolean("use_step", False, "Use step rewards.")
-flags.DEFINE_boolean("use_ours", False, "Use ARP rewards.")
+flags.DEFINE_boolean("use_encoder", True, "Use Transformer for the image encoder.")
 flags.DEFINE_integer("skip_frame", 4, "how often skip frame.")
 flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
+flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
@@ -171,39 +173,8 @@ def compute_multimodal_reward(reward_model, **kwargs):
     return final_rewards
 
 
-def normalize(dataset):
-    trajs = split_into_trajectories(
-        dataset.observations,
-        dataset.actions,
-        dataset.rewards,
-        dataset.masks,
-        dataset.dones_float,
-        dataset.next_observations,
-    )
-
-    def compute_returns(traj):
-        episode_return = 0
-        for _, _, rew, _, _, _ in traj:
-            episode_return += rew
-
-        return episode_return
-
-    trajs.sort(key=compute_returns)
-
-    dataset.rewards /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
-    dataset.rewards *= 1000.0
-
-
 def make_env_and_dataset(
-    env_name: str,
-    seed: int,
-    randomness: str,
-    data_path: str,
-    use_encoder: bool,
-    encoder_type: str,
-    use_ours: bool,
-    use_step: bool,
-    lambda_mr: float,
+    env_name: str, seed: int, randomness: str, data_path: str, use_encoder: bool, encoder_type: str, lambda_mr: float
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -251,26 +222,23 @@ def make_env_and_dataset(
     console.print("Observation space", env.observation_space)
     console.print("Action space", env.action_space)
 
-    if "Furniture" in env_name:
-        dataset = FurnitureDataset(
-            data_path,
-            use_encoder=False,
-            use_ours=use_ours,
-            use_step=use_step,
-            lambda_mr=lambda_mr,
-            n_step=FLAGS.n_step,
-        )
-    else:
-        dataset = D4RLDataset(env)
+    dataloader = make_replay_loader(
+        replay_dir=Path(data_path).expanduser(),
+        max_size=1e6,
+        batch_size=int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio),
+        num_workers=FLAGS.num_workers,
+        save_snapshot=True,
+        nstep=FLAGS.n_step,
+        discount=FLAGS.config.discount,
+        buffer_type="offline",
+        reward_type=FLAGS.reward_type,
+        num_demos={
+            "success": FLAGS.num_success_demos,
+            "failure": FLAGS.num_failure_demos,
+        },
+    )
 
-    if "antmaze" in env_name:
-        dataset.rewards -= 1.0
-        # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
-        # but I found no difference between (x - 0.5) * 4 and x - 1.0
-    elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
-        normalize(dataset)
-
-    return env, dataset
+    return env, dataloader
 
 
 def combine(one_dict, other_dict):
@@ -336,25 +304,30 @@ def main(_):
     os.makedirs(buffer_dir, exist_ok=True)
     os.makedirs(eval_dir, exist_ok=True)
 
-    env, dataset = make_env_and_dataset(
+    env, offline_loader = make_env_and_dataset(
         FLAGS.env_name,
         FLAGS.seed,
         FLAGS.randomness,
         FLAGS.data_path,
         FLAGS.use_encoder,
         FLAGS.encoder_type,
-        FLAGS.use_ours,
-        FLAGS.use_step,
         FLAGS.lambda_mr,
     )
 
-    action_dim = env.action_space.shape[-1]
-    replay_buffer = ReplayBuffer(
-        observation_space=env.observation_space,
-        action_dim=action_dim,
-        capacity=FLAGS.replay_buffer_size or FLAGS.max_steps,
-        window_size=FLAGS.window_size,
-        embedding_dim=1024,
+    replay_storage = ReplayBufferStorage(
+        replay_dir=Path(buffer_dir).expanduser(),
+        max_env_steps=env.furniture.max_env_steps,
+    )
+    online_loader = make_replay_loader(
+        replay_dir=Path(buffer_dir).expanduser(),
+        max_size=FLAGS.replay_buffer_size,
+        batch_size=int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio)),
+        num_workers=FLAGS.num_workers,
+        save_snapshot=False,
+        nstep=FLAGS.n_step,
+        discount=FLAGS.config.discount,
+        buffer_type="online",
+        reward_type=FLAGS.reward_type,
     )
 
     kwargs = dict(FLAGS.config)
@@ -383,7 +356,7 @@ def main(_):
         **kwargs,
         use_encoder=FLAGS.use_encoder,
     )
-    if FLAGS.use_ours and FLAGS.rm_ckpt_path != "":
+    if FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
         # load reward model.
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
@@ -401,15 +374,25 @@ def main(_):
         args.skip_frame = FLAGS.skip_frame
         args.lambda_mr = FLAGS.lambda_mr
 
+    def batch_to_jax(y):
+        return jax.tree_util.tree_map(lambda x: x.numpy(), y)
+
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         console.print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
         agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
     else:
         console.print("Start pre-training with offline dataset.")
         start_step, steps = 1, FLAGS.num_pretraining_steps + 1
-        for i in tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="pre-training"):
-            offline_batch = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
-            update_info = agent.update(offline_batch, use_rnd=False)
+        for i, offline_batch in tqdm.tqdm(
+            zip(range(start_step, steps), offline_loader),
+            smoothing=0.1,
+            disable=not FLAGS.tqdm,
+            ncols=0,
+            desc="pre-training",
+            total=FLAGS.num_pretraining_steps,
+        ):
+            offline_batch = batch_to_jax(offline_batch)
+            update_info = agent.update(offline_batch)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     if v.ndim == 0:
@@ -463,20 +446,14 @@ def main(_):
                 trajectories[env_idx]["masks"].append(mask[env_idx])
                 trajectories[env_idx]["done_floats"].append(done[env_idx])
 
-            if np.any(done) and FLAGS.use_ours and FLAGS.rm_ckpt_path != "":
-                for env_idx in range(FLAGS.num_envs):
-                    if done[env_idx]:
+            for env_idx in range(FLAGS.num_envs):
+                if done[env_idx]:
+                    if np.any(done) and FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
                         rewards = compute_multimodal_reward(
                             trajectories=trajectories[env_idx], reward_model=reward_model, args=args
                         )
-                        trajectories[env_idx]["rewards"] = rewards
-            for env_idx in range(FLAGS.num_envs):
-                if done[env_idx]:
-                    replay_buffer.insert_episode(
-                        trajectories[env_idx],
-                        window_size=FLAGS.window_size,
-                        skip_frame=FLAGS.skip_frame,
-                    )
+                        trajectories[env_idx]["multimodal_rewards"] = rewards
+                    replay_storage.add_episode(trajectories[env_idx])
                     new_ob = env.reset_env(env_idx)
                     for key in next_observation:
                         next_observation[key][env_idx] = new_ob[key]
@@ -485,12 +462,9 @@ def main(_):
                         summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
                     trajectories = _reset_traj_dict(trajectories, env_idx)
 
-            for env_idx in range(FLAGS.num_envs):
-                if i > start_training:
-                    offline_batch = dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio))
-                    online_batch = replay_buffer.sample(
-                        int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio))
-                    )
+            if i > start_training:
+                for env_idx, offline_batch, online_batch in zip(range(FLAGS.num_envs), offline_loader, online_loader):
+                    offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                     combined = combine(offline_batch, online_batch)
                     batch = Batch(
                         observations=combined["observations"],
@@ -507,7 +481,7 @@ def main(_):
                             masks=batch.masks,
                             next_observations=batch.next_observations,
                         )
-                    update_info = agent.update(batch, use_rnd=agent.use_rnd)
+                    update_info = agent.update(batch)
 
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():
@@ -519,13 +493,8 @@ def main(_):
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
-                try:
-                    with open(os.path.join(buffer_dir, "buffer"), "wb") as f:
-                        pickle.dump(replay_buffer, f, pickle.HIGHEST_PROTOCOL)
-                except Exception as e:  # noqa: E722
-                    console.print(f"Could not save agent buffer:{e}")
 
-            if i % FLAGS.eval_interval == 0:
+            if False and i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 

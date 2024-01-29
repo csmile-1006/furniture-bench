@@ -1,5 +1,6 @@
 import isaacgym  # noqa: F401
 import os
+from pathlib import Path
 
 import gym
 import numpy as np
@@ -12,7 +13,7 @@ import wandb
 from furniture_bench.sim_config import sim_config
 
 import wrappers
-from dataset_utils import D4RLDataset, FurnitureDataset, split_into_trajectories
+from replay_buffer import make_replay_loader
 from evaluation import evaluate
 from learner import Learner
 
@@ -33,6 +34,9 @@ flags.DEFINE_integer("skip_frame", 4, "Skipping frame.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_string("data_path", "", "Path to data.")
+flags.DEFINE_integer("num_success_demos", 100, "Number of success demonstrations.")
+flags.DEFINE_integer("num_failure_demos", 0, "Number of failure demonstrations.")
+flags.DEFINE_integer("num_workers", 4, "num_workers must be <= num_envs.")
 config_flags.DEFINE_config_file(
     "config",
     "default.py",
@@ -40,41 +44,15 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
-flags.DEFINE_boolean("use_encoder", True, "Use ResNet18 for the image encoder.")
-flags.DEFINE_boolean("use_step", False, "Use step rewards.")
-flags.DEFINE_boolean("use_ours", False, "Use ARP rewards.")
-flags.DEFINE_boolean("use_viper", False, "Use VIPER rewards.")
-flags.DEFINE_boolean("use_diffusion_reward", False, "Use Diffusion Rewards.")
+flags.DEFINE_boolean("use_encoder", True, "Use Transformer for the image encoder.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
+flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
-
-
-def normalize(dataset):
-    trajs = split_into_trajectories(
-        dataset.observations,
-        dataset.actions,
-        dataset.rewards,
-        dataset.masks,
-        dataset.dones_float,
-        dataset.next_observations,
-    )
-
-    def compute_returns(traj):
-        episode_return = 0
-        for _, _, rew, _, _, _ in traj:
-            episode_return += rew
-
-        return episode_return
-
-    trajs.sort(key=compute_returns)
-
-    dataset.rewards /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
-    dataset.rewards *= 1000.0
 
 
 def make_env_and_dataset(
@@ -84,10 +62,7 @@ def make_env_and_dataset(
     data_path: str,
     use_encoder: bool,
     encoder_type: str,
-    use_ours: bool,
-    use_step: bool,
-    use_viper: bool,
-    use_diffusion_reward: bool,
+    reward_type: str,
     lambda_mr: float,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
@@ -134,31 +109,22 @@ def make_env_and_dataset(
     print("Observation space", env.observation_space)
     print("Action space", env.action_space)
 
-    if "Furniture" in env_name:
-        dataset = FurnitureDataset(
-            data_path,
-            use_encoder=False,
-            use_ours=use_ours,
-            use_step=use_step,
-            lambda_mr=lambda_mr,
-            use_viper=use_viper,
-            use_diffusion_reward=use_diffusion_reward,
-            n_step=FLAGS.n_step,
-        )
-    else:
-        dataset = D4RLDataset(env)
-
-    if "antmaze" in env_name:
-        dataset.rewards -= 1.0
-        # See https://github.com/aviralkumar2907/CQL/blob/master/d4rl/examples/cql_antmaze_new.py#L22
-        # but I found no difference between (x - 0.5) * 4 and x - 1.0
-    # elif FLAGS.use_ours:
-    #     print("normalize dataset for arpv2 rewards.")
-    #     normalize(dataset)
-    elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
-        normalize(dataset)
-
-    return env, dataset
+    dataloader = make_replay_loader(
+        replay_dir=Path(data_path).expanduser(),
+        max_size=1e6,
+        batch_size=FLAGS.batch_size,
+        num_workers=FLAGS.num_workers,
+        save_snapshot=True,
+        nstep=FLAGS.n_step,
+        discount=FLAGS.config.discount,
+        buffer_type="offline",
+        reward_type=FLAGS.reward_type,
+        num_demos={
+            "success": FLAGS.num_success_demos,
+            "failure": FLAGS.num_failure_demos,
+        },
+    )
+    return env, dataloader
 
 
 def main(_):
@@ -177,10 +143,7 @@ def main(_):
         FLAGS.data_path,
         FLAGS.use_encoder,
         FLAGS.encoder_type,
-        FLAGS.use_ours,
-        FLAGS.use_step,
-        FLAGS.use_viper,
-        FLAGS.use_diffusion_reward,
+        FLAGS.reward_type,
         FLAGS.lambda_mr,
     )
 
@@ -213,10 +176,16 @@ def main(_):
     )
 
     eval_returns = []
-    for i in tqdm.tqdm(
-        range(1, FLAGS.max_steps + 1), smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="offline training"
+    for i, batch in tqdm.tqdm(
+        zip(range(1, FLAGS.max_steps + 1), dataset),
+        smoothing=0.1,
+        disable=not FLAGS.tqdm,
+        total=FLAGS.max_steps,
+        ncols=0,
+        desc="offline training",
     ):
-        batch = dataset.sample(FLAGS.batch_size, gamma=FLAGS.config.discount)
+        # batch = dataset.sample(FLAGS.batch_size, gamma=FLAGS.config.discount)
+        batch = jax.tree_util.tree_map(lambda x: x.numpy(), batch)
 
         update_info = agent.update(batch)
 
