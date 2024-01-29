@@ -1,3 +1,4 @@
+import io
 import sys
 import pickle
 import datetime
@@ -15,14 +16,14 @@ from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_re
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("furniture", None, "Furniture name.")
 flags.DEFINE_string("demo_dir", "square_table_parts_state", "Demonstration dir.")
-flags.DEFINE_string("out_file_path", None, "Path to save converted data.")
+flags.DEFINE_string("out_dir", None, "Path to save converted data.")
 flags.DEFINE_boolean("use_r3m", False, "Use r3m to encode images.")
 flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
 flags.DEFINE_boolean("use_liv", False, "Use liv to encode images.")
 flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
-flags.DEFINE_integer("num_demos", None, "Number of demos to convert")
+flags.DEFINE_integer("num_success_demos", -1, "Number of demos to convert")
+flags.DEFINE_integer("num_failure_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
 flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
 flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
@@ -37,6 +38,14 @@ device = torch.device("cuda")
 
 def gaussian_smoothe(rewards, sigma=3.0):
     return scipy.ndimage.gaussian_filter1d(rewards, sigma=sigma, mode="nearest")
+
+
+def save_episode(episode, fn):
+    with io.BytesIO() as bs:
+        np.savez_compressed(bs, **episode)
+        bs.seek(0)
+        with fn.open("wb") as f:
+            f.write(bs.read())
 
 
 def load_embedding(rep="vip"):
@@ -78,20 +87,26 @@ def main(_):
 
     dir_path = Path(demo_dir)
 
-    multimodal_reward_ = []
-
     demo_type = [f"_{elem}" for elem in FLAGS.demo_type.split("|")]
-    if len(demo_type) == 1:
-        files = sorted(list(dir_path.glob(f"*{demo_type[0]}.pkl")))
-    else:
-        total_files = [sorted(list(dir_path.glob(f"*{_demo_type}.pkl"))) for _demo_type in demo_type]
-        file_per_demo = FLAGS.num_demos // len(total_files)
-        files = [elem[i] for elem in total_files for i in range(file_per_demo)]
+    files = []
+    for _demo_type in demo_type:
+        print(f"Loading {_demo_type} demos...")
+        demo_files = sorted(list(dir_path.glob(f"*{_demo_type}.pkl")))
+        len_demos = (
+            getattr(FLAGS, f"num{_demo_type}_demos")
+            if getattr(FLAGS, f"num{_demo_type}_demos") > 0
+            else len(demo_files)
+        )
+        files.extend([(idx, path) for idx, path in enumerate(demo_files[:len_demos])])
 
     len_files = len(files)
 
     if len_files == 0:
         raise ValueError(f"No pkl files found in {dir_path}")
+
+    out_dir = Path(FLAGS.out_dir).expanduser()
+    if not FLAGS.out_dir and not out_dir.exists():
+        raise ValueError(f"{FLAGS.out_dir} doesn't exist.")
 
     for idx, file_path in enumerate(files):
         if FLAGS.num_demos and idx == FLAGS.num_demos:
@@ -99,6 +114,7 @@ def main(_):
         print(f"Loading [{idx+1}/{len_files}] {file_path}...")
         with open(file_path, "rb") as f:
             x = pickle.load(f)
+            tp = file_path.stem.split("_")[-1].split(".")[0]
             if len(x["observations"]) == len(x["actions"]):
                 # Dummy
                 x["observations"].append(x["observations"][-1])
@@ -119,8 +135,10 @@ def main(_):
             args.window_size = FLAGS.window_size
             args.skip_frame = FLAGS.skip_frame
             args.return_images = True
+            args.get_text_feature = True
 
-            rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(
+            # rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(
+            output = reward_fn(
                 images=images,
                 actions=actions,
                 skills=skills,
@@ -132,29 +150,28 @@ def main(_):
                 texts=None,
                 device=device,
             )
+            rewards = output["rewards"]
             rewards = gaussian_smoothe(rewards)
             # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
             rewards = rewards[1:].tolist()
             rewards = np.asarray(rewards + rewards[-1:]).astype(np.float32)
-            multimodal_reward_.extend(rewards)
 
-    multimodal_rewards = np.array(multimodal_reward_).astype(np.float32)
-    out_file_path = Path(FLAGS.out_file_path).expanduser()
-    if not FLAGS.out_file_path and not out_file_path.exists():
-        raise ValueError(f"{FLAGS.out_file_path} doesn't exist.")
+            path = out_dir / f"{tp}_{idx}_{rewards.shape[0]}.npz"
 
-    with Path(out_file_path).open("rb") as f:
-        dst_dataset = pickle.load(f)
+            dst_dataset = np.load(path)
 
-    assert len(dst_dataset["observations"]) == len(
-        multimodal_rewards
-    ), f"dst_dataset {len(dst_dataset['observations'])} != multimodal_rewards {len(multimodal_rewards)}"
-    dst_dataset["multimodal_rewards"] = multimodal_rewards
-    dst_dataset["timestep"] = datetime.datetime.now().timestamp()
-
-    with Path(out_file_path).open("wb") as f:
-        pickle.dump(dst_dataset, f)
-        print(f"Re-saved at {out_file_path}")
+            assert len(dst_dataset["observations"]) == len(
+                rewards
+            ), f"dst_dataset {len(dst_dataset['observations'])} != multimodal_rewards {len(rewards)}"
+            dst_dataset["multimodal_rewards"] = rewards
+            for idx in range(len(rewards)):
+                dst_dataset["observations"][idx]["text_feature"] = output["text_features"][idx]
+                dst_dataset["next_observations"][idx]["text_feature"] = output["text_features"][
+                    min(idx + 1, len(rewards) - 1)
+                ]
+            dst_dataset["timestep"] = datetime.datetime.now().timestamp()
+            save_episode(dst_dataset, path)
+            print(f"Re-saved at {path}")
 
 
 if __name__ == "__main__":

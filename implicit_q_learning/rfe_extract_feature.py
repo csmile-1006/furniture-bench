@@ -1,31 +1,26 @@
-import sys
+import io
 import pickle
 from pathlib import Path
+from collections import deque
 
 import numpy as np
 import torch
 import torchvision.transforms as T
 import scipy
 from absl import app, flags
-from ml_collections import ConfigDict
-
-sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
-from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn  # noqa: E402
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("furniture", None, "Furniture name.")
 flags.DEFINE_string("demo_dir", "square_table_parts_state", "Demonstration dir.")
-flags.DEFINE_string("out_file_path", None, "Path to save converted data.")
+flags.DEFINE_string("out_dir", None, "Path to save converted data.")
 flags.DEFINE_boolean("use_r3m", False, "Use r3m to encode images.")
 flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
 flags.DEFINE_boolean("use_liv", False, "Use liv to encode images.")
 flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
-flags.DEFINE_integer("num_demos", None, "Number of demos to convert")
+flags.DEFINE_integer("num_success_demos", -1, "Number of demos to convert")
+flags.DEFINE_integer("num_failure_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
-flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
 flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
-flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
 flags.DEFINE_string("pvr_type", "liv", "pvr type.")
 flags.DEFINE_integer("window_size", 4, "window size")
 flags.DEFINE_integer("skip_frame", 16, "skip frame")
@@ -36,6 +31,14 @@ device = torch.device("cuda")
 
 def gaussian_smoothe(rewards, sigma=3.0):
     return scipy.ndimage.gaussian_filter1d(rewards, sigma=sigma, mode="nearest")
+
+
+def save_episode(episode, fn):
+    with io.BytesIO() as bs:
+        np.savez_compressed(bs, **episode)
+        bs.seek(0)
+        with fn.open("wb") as f:
+            f.write(bs.read())
 
 
 def load_embedding(rep="vip"):
@@ -67,27 +70,12 @@ def main(_):
         print(f"Setting torch.num_threads to {FLAGS.num_threads}")
         torch.set_num_threads(FLAGS.num_threads)
 
-    env_type = "Image"
-    furniture = FLAGS.furniture
     demo_dir = FLAGS.demo_dir
 
     # load reward model.
-    ckpt_path = Path(FLAGS.ckpt_path).expanduser()
-    reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
-    reward_fn = load_reward_fn(rm_type=FLAGS.rm_type, reward_model=reward_model)
     pvr_model, pvr_transform, feature_dim = load_embedding(rep=FLAGS.pvr_type)
 
     dir_path = Path(demo_dir)
-
-    obs_ = []
-    next_obs_ = []
-    action_ = []
-    reward_ = []
-    step_reward_ = []
-    multimodal_reward_ = []
-    viper_reward_ = []
-    diffusion_reward_ = []
-    done_ = []
 
     if FLAGS.use_r3m:
         # Use R3M for the image encoder.
@@ -115,25 +103,36 @@ def main(_):
         device = torch.device("cuda")
 
     demo_type = [f"_{elem}" for elem in FLAGS.demo_type.split("|")]
-    if len(demo_type) == 1:
-        files = sorted(list(dir_path.glob(f"*{demo_type[0]}.pkl")))
-    else:
-        total_files = [sorted(list(dir_path.glob(f"*{_demo_type}.pkl"))) for _demo_type in demo_type]
-        file_per_demo = FLAGS.num_demos // len(total_files)
-        files = [elem[i] for elem in total_files for i in range(file_per_demo)]
+    files = []
+    for _demo_type in demo_type:
+        print(f"Loading {_demo_type} demos...")
+        demo_files = sorted(list(dir_path.glob(f"*{_demo_type}.pkl")))
+        len_demos = (
+            getattr(FLAGS, f"num{_demo_type}_demos")
+            if getattr(FLAGS, f"num{_demo_type}_demos") > 0
+            else len(demo_files)
+        )
+        files.extend([(idx, path) for idx, path in enumerate(demo_files[:len_demos])])
 
     len_files = len(files)
 
     if len_files == 0:
         raise ValueError(f"No pkl files found in {dir_path}")
 
-    cnt = 0
-    for idx, file_path in enumerate(files):
-        if FLAGS.num_demos and idx == FLAGS.num_demos:
-            break
+    for idx, file_path in files:
+        obs_ = []
+        next_obs_ = []
+        action_ = []
+        reward_ = []
+        step_reward_ = []
+        viper_reward_ = []
+        diffusion_reward_ = []
+        done_ = []
+
         print(f"Loading [{idx+1}/{len_files}] {file_path}...")
         with open(file_path, "rb") as f:
             x = pickle.load(f)
+            tp = file_path.stem.split("_")[-1].split(".")[0]
 
             enable_viper = x.get("viper_reward", None) is not None
             enable_diffusion = x.get("diffusion_reward", None) is not None
@@ -171,33 +170,18 @@ def main(_):
                             .numpy()
                         )
 
-            images = {key: val for key, val in [("color_image2", img2), ("color_image1", img1)]}
-            for key, val in images.items():
-                val = np.asarray(val)
-                val = np.transpose(val, (0, 2, 3, 1))
-                images[key] = val
+            stacked_timesteps = []
+            timestep_stacks = {key: deque([], maxlen=FLAGS.window_size) for key in range(FLAGS.skip_frame)}
+            for _ in range(FLAGS.window_size):
+                for j in range(FLAGS.skip_frame):
+                    timestep_stacks[j].append(0)
 
-            actions, skills = x["actions"], np.cumsum(x["skills"])
-            args = ConfigDict()
-            args.task_name = FLAGS.furniture
-            args.image_keys = "color_image2|color_image1"
-            args.window_size = FLAGS.window_size
-            args.skip_frame = FLAGS.skip_frame
-            args.return_images = True
+            for i in range(length - 1):
+                mod = i % FLAGS.skip_frame
+                timestep_stack = timestep_stacks[mod]
+                timestep_stack.append(i)
+                stacked_timesteps.append(np.stack(timestep_stack))
 
-            rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(
-                images=images,
-                actions=actions,
-                skills=skills,
-                args=args,
-                pvr_model=pvr_model,
-                pvr_transform=pvr_transform,
-                model_type=FLAGS.pvr_type,
-                feature_dim=feature_dim,
-                texts=None,
-                device=device,
-            )
-            rewards = gaussian_smoothe(rewards)
             cumsum_skills = np.cumsum(x["skills"])
 
             for _len in range(length - 1):
@@ -206,14 +190,13 @@ def main(_):
                     next_image1 = img1_feature[min(_len + 1, length - 2)]
                     image2 = img2_feature[_len]
                     next_image2 = img1_feature[min(_len + 1, length - 2)]
-                    timestep = cnt + stacked_timesteps[_len]
-                    next_timestep = cnt + stacked_timesteps[min(_len + 1, length - 2)]
+                    timestep = stacked_timesteps[_len]
+                    next_timestep = stacked_timesteps[min(_len + 1, length - 2)]
                 else:
                     raise ValueError("You have to choose either use_r3m or use_vip or use_liv.")
 
                 obs_.append(
                     {
-                        # 'image_feature': feature1,
                         "image1": image1,
                         "image2": image2,
                         "timestep": timestep,
@@ -222,7 +205,6 @@ def main(_):
                 )
                 next_obs_.append(
                     {
-                        # 'image_feature': next_feature1,
                         "image1": next_image1,
                         "image2": next_image2,
                         "timestep": next_timestep,
@@ -237,32 +219,31 @@ def main(_):
                         x["viper_reward"][_len] if FLAGS.skip_frame == 4 else x["viper_reward_16"][_len]
                     )
                 if enable_diffusion:
-                    diffusion_reward_.append(
-                        x["diffusion_reward"][_len] if FLAGS.skip_frame == 1 else x["diffusion_reward_16"][_len]
-                    )
+                    if FLAGS.skip_frame == 4:
+                        _diff_reward = x["diffusion_reward_4"][len]
+                    elif FLAGS.skip_frame == 1:
+                        _diff_reward = x["diffusion_reward"][len]
+                    elif FLAGS.skip_frame == 16:
+                        _diff_reward = x["diffusion_reward_16"][len]
+                    diffusion_reward_.append(_diff_reward)
                 step_reward_.append(cumsum_skills[_len] + 1 if _len == length - 2 else cumsum_skills[_len])
-                multimodal_reward_.append(rewards[_len])
                 done_.append(1 if _len == length - 2 else 0)
-            cnt += length - 1
 
-    dataset = {
-        "observations": obs_,
-        "actions": np.array(action_).astype(np.float32),
-        "next_observations": next_obs_,
-        "rewards": np.array(reward_).astype(np.float32),
-        "multimodal_rewards": np.array(multimodal_reward_).astype(np.float32),
-        "viper_rewards": np.array(viper_reward_).astype(np.float32),
-        "diffusion_rewards": np.array(diffusion_reward_).astype(np.float32),
-        "step_rewards": np.array(step_reward_).astype(np.float32),
-        "terminals": np.array(done_),
-    }
+        dataset = {
+            "observations": obs_,
+            "actions": np.array(action_).astype(np.float32),
+            "next_observations": next_obs_,
+            "rewards": np.array(reward_).astype(np.float32),
+            "viper_rewards": np.array(viper_reward_).astype(np.float32),
+            "diffusion_rewards": np.array(diffusion_reward_).astype(np.float32),
+            "step_rewards": np.array(step_reward_).astype(np.float32),
+            "terminals": np.array(done_),
+        }
 
-    path = f"data/{env_type}/{furniture}.pkl" if FLAGS.out_file_path is None else FLAGS.out_file_path
-    path = Path(path)
-    path.parent.mkdir(exist_ok=True, parents=True)
-
-    with Path(path).open("wb") as f:
-        pickle.dump(dataset, f)
+        path = Path(FLAGS.out_dir)
+        path.mkdir(exist_ok=True, parents=True)
+        path = path / f"{tp}_{idx}_{dataset['terminals'].shape[0]}.npz"
+        save_episode(dataset, path)
         print(f"Saved at {path}")
 
 
