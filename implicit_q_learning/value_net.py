@@ -19,7 +19,7 @@ class ValueCritic(nn.Module):
         for k, v in observations.items():
             if v.ndim == 2:
                 v = v[jnp.newaxis]
-            if self.use_encoder and (k == "image1" or k == "image2"):
+            if self.use_encoder and (k == "image1" or k == "image2" or k == "text_feature"):
                 image_features[k] = v
             # else:
             #     state_embed = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(v)
@@ -62,7 +62,7 @@ class Critic(nn.Module):
     ) -> jnp.ndarray:
         image_features = {}
         for k, v in observations.items():
-            if self.use_encoder and (k == "image1" or k == "image2"):
+            if self.use_encoder and (k == "image1" or k == "image2" or k == "text_feature"):
                 image_features[k] = v
         if self.use_encoder:
             image_features = jnp.array(list(image_features.values()))

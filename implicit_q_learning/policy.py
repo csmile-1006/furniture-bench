@@ -29,7 +29,6 @@ class NormalTanhPolicy(nn.Module):
     log_std_min: Optional[float] = None
     log_std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
-    use_encoder: bool = False
     encoder_cls: nn.Module = None
 
     @nn.compact
@@ -43,7 +42,7 @@ class NormalTanhPolicy(nn.Module):
         for k, v in observations.items():
             if v.ndim == 2:
                 v = v[jnp.newaxis]
-            if self.use_encoder and (k == "image1" or k == "image2"):
+            if self.use_encoder and (k == "image1" or k == "image2" or k == "text_feature"):
                 image_features[k] = v
             # else:
             #     state_embed = MLP([self.emb_dim, self.emb_dim, self.emb_dim])(v)

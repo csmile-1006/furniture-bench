@@ -117,7 +117,6 @@ class Learner(object):
         dropout_rate: Optional[float] = None,
         max_steps: Optional[int] = None,
         opt_decay_schedule: str = "cosine",
-        use_encoder: bool = False,
         critic_layer_norm: bool = False,
         use_rnd: bool = False,
         beta_rnd: float = 1.0,
@@ -140,15 +139,11 @@ class Learner(object):
         if len(observations["robot_state"].shape) == 2:
             observations["robot_state"] = observations["robot_state"][np.newaxis]
 
-        encoder_cls = (
-            partial(
-                Transformer,
-                emb_dim=emb_dim,
-                att_drop=0.0 if dropout_rate is None else dropout_rate,
-                drop=0.0 if dropout_rate is None else dropout_rate,
-            )
-            if use_encoder
-            else None
+        encoder_cls = partial(
+            Transformer,
+            emb_dim=emb_dim,
+            att_drop=0.0 if dropout_rate is None else dropout_rate,
+            drop=0.0 if dropout_rate is None else dropout_rate,
         )
 
         action_dim = actions.shape[-1]
@@ -161,7 +156,6 @@ class Learner(object):
             dropout_rate=dropout_rate,
             state_dependent_std=False,
             tanh_squash_distribution=False,
-            use_encoder=use_encoder,
             encoder_cls=encoder_cls,
         )
 
@@ -174,7 +168,7 @@ class Learner(object):
         actor = Model.create(actor_def, inputs=[actor_key, observations], tx=optimiser)
 
         critic_def = value_net.DoubleCritic(
-            hidden_dims, emb_dim, use_encoder=use_encoder, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm
+            hidden_dims, emb_dim, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm
         )
         critic = Model.create(
             critic_def,
@@ -183,7 +177,7 @@ class Learner(object):
         )
 
         value_def = value_net.ValueCritic(
-            hidden_dims, emb_dim, use_encoder=use_encoder, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm
+            hidden_dims, emb_dim, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm
         )
         value = Model.create(
             value_def,
