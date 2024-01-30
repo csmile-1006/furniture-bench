@@ -52,14 +52,7 @@ class FurnitureSimRFE(FurnitureSimEnv):
             rm_type=kwargs["rm_type"], ckpt_path=Path(kwargs["rm_ckpt_path"]).expanduser()
         )
 
-        self.alpha = 1.0
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._eta = 10
-        self._negative_trend_eta = 1e-2
-
-        self._prev_reward = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._task_pass_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._task_fail_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
         self._window_size = kwargs["window_size"]
         self._skip_frame = kwargs["skip_frame"]
         self.__frames = {
@@ -195,7 +188,11 @@ class FurnitureSimRFE(FurnitureSimEnv):
             stack[0][key].append(liv_feat[key][idx])
         stack[0]["timestep"].append(np.asarray(self.i[idx]).astype(np.int32))
         stack[0]["attn_mask"].append(np.asarray(1).astype(np.int32))
-        return self._extract_vip_feature(_obs)
+        phases = np.tile(self._predict_phase(idx), (self.num_envs,))
+        text_feature = np.asarray([self._text_features[phase] for phase in phases])
+        vip_obs = self._extract_vip_feature(_obs)
+        vip_obs.update(dict(text_feature=text_feature))
+        return vip_obs
 
     def reset(self):
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
@@ -233,17 +230,21 @@ class FurnitureSimRFE(FurnitureSimEnv):
             self.__frames[env_idx][0]["timestep"].append(np.asarray(0).astype(np.int32))
             self.__frames[env_idx][0]["attn_mask"].append(np.asarray(1).astype(np.int32))
 
-        return self._extract_vip_feature(obs)
+        phases = np.concatenate([self._predict_phase(env_idx) for env_idx in range(self.num_envs)])
+        text_feature = np.asarray([self._text_features[phase] for phase in phases])
+        vip_obs = self._extract_vip_feature(obs)
+        vip_obs.update(dict(text_feature=text_feature))
 
-    def _predict_phase(self):
+        return vip_obs
+
+    def _predict_phase(self, env_idx):
         stacked_obs = {key: [] for key in ["color_image2", "color_image1"]}
         stacked_timestep, stacked_attn_mask = [], []
-        for env_idx in range(self.num_envs):
-            stack = self.__frames[env_idx][self.i[env_idx] % self._skip_frame]
-            for key in stacked_obs:
-                stacked_obs[key].append(self._batchify(stack[key]))
-            stacked_timestep.append(self._batchify(stack["timestep"]))
-            stacked_attn_mask.append(self._batchify(stack["attn_mask"]))
+        stack = self.__frames[env_idx][self.i[env_idx] % self._skip_frame]
+        for key in stacked_obs:
+            stacked_obs[key].append(self._batchify(stack[key]))
+        stacked_timestep.append(self._batchify(stack["timestep"]))
+        stacked_attn_mask.append(self._batchify(stack["attn_mask"]))
         stacked_obs = {key: np.stack(val) for key, val in stacked_obs.items()}
         stacked_timestep, stacked_attn_mask = np.stack(stacked_timestep), np.stack(stacked_attn_mask)
         batch = {
@@ -252,7 +253,6 @@ class FurnitureSimRFE(FurnitureSimEnv):
             "attn_mask": stacked_attn_mask,
         }
         phases = self._reward_model.get_phase(batch)
-        print(f"phases: {phases}")
         return np.asarray(phases)
 
     def step(self, action):
@@ -267,8 +267,8 @@ class FurnitureSimRFE(FurnitureSimEnv):
             stack["timestep"].append(np.asarray(self.i[env_idx]).astype(np.int32))
             stack["attn_mask"].append(np.asarray(1).astype(np.int32))
 
-        phase = self._predict_phase()
-        text_feature = np.asarray([self._text_features[key] for key in phase])
+        phases = np.concatenate([self._predict_phase(env_idx) for env_idx in range(self.num_envs)])
+        text_feature = np.asarray([self._text_features[phase] for phase in phases])
         vip_obs = self._extract_vip_feature(obs)
         vip_obs.update(dict(text_feature=text_feature))
         return vip_obs, task_reward, done, info
