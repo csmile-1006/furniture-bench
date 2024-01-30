@@ -138,7 +138,7 @@ def make_env_and_dataset(
             "success": FLAGS.num_success_demos,
             "failure": FLAGS.num_failure_demos,
         },
-        # obs_keys=tuple([key for key in env.observation_space.spaces.keys() if key != "robot_state"]),
+        obs_keys=tuple([key for key in env.observation_space.spaces.keys() if key != "robot_state"]),
     )
     return env, dataloader
 
