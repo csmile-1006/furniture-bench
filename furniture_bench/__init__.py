@@ -61,7 +61,7 @@ register(
 # FurnitureSim with R3M or VIP image feature observation.
 register(
     id="FurnitureSimRFE-v0",
-    entry_point="furniture_bench.envs.policy_envs.furniture_sim_arpv2:FurnitureSimRFE",
+    entry_point="furniture_bench.envs.policy_envs.furniture_sim_rfe:FurnitureSimRFE",
 )
 # FurnitureSim environment with state observations.
 register(

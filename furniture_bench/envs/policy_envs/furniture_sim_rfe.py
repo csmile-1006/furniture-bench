@@ -4,7 +4,6 @@ import numpy as np
 from gym import spaces
 from pathlib import Path
 from collections import deque
-import sys
 
 import torch
 import clip
@@ -241,7 +240,7 @@ class FurnitureSimRFE(FurnitureSimEnv):
         stacked_timestep, stacked_attn_mask = [], []
         for env_idx in range(self.num_envs):
             stack = self.__frames[env_idx][self.i[env_idx] % self._skip_frame]
-            for key in ["color_image2", "color_image1"]:
+            for key in stacked_obs:
                 stacked_obs[key].append(self._batchify(stack[key]))
             stacked_timestep.append(self._batchify(stack["timestep"]))
             stacked_attn_mask.append(self._batchify(stack["attn_mask"]))
@@ -253,6 +252,7 @@ class FurnitureSimRFE(FurnitureSimEnv):
             "attn_mask": stacked_attn_mask,
         }
         phases = self._reward_model.get_phase(batch)
+        print(f"phases: {phases}")
         return np.asarray(phases)
 
     def step(self, action):
@@ -285,7 +285,7 @@ if __name__ == "__main__":
     use_ours_reward = True
     rm_type = "ARP-V2"
     rm_ckpt_path = Path(
-        "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/w4-s4-nfp1.0-c1.0@0.5-supc1.0-ep0.1-demo500-total-phase/s0/best_model.pkl"
+        "/mnt/changyeon/ICML2024/reward_models/one_leg/w4-s4-nfp1.0-c1.0@0.5-supc1.0-ep0.5-demo100-total-phase/s0/best_model.pkl"
     ).expanduser()
 
     env = gym.make(
