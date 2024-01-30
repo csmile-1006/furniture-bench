@@ -1,3 +1,5 @@
+import isaacgym  # noqa: F401
+
 import numpy as np
 from gym import spaces
 from pathlib import Path
@@ -11,12 +13,11 @@ from kornia.augmentation import Resize, CenterCrop
 from furniture_bench.envs.furniture_sim_env import FurnitureSimEnv
 from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 
-sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
-from bpref_v2.data.label_reward_furniturebench import load_reward_model  # noqa: E402
-from bpref_v2.data.instruct import get_furniturebench_instruct  # noqa: E402
+from bpref_v2.data.instruct import get_furniturebench_instruct
+from bpref_v2.data.label_reward_furniturebench import load_reward_model
 
 
-class FurnitureSimARPV2(FurnitureSimEnv):
+class FurnitureSimRFE(FurnitureSimEnv):
     def __init__(self, **kwargs):
         super().__init__(
             concat_robot_state=True,
@@ -72,11 +73,13 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             }
             for env_idx in range(self.num_envs)
         }
+        self._task_phases = kwargs.get("task_phases", 5)
+        self._text_features = {key: self._get_instruct_feature(key) for key in range(self._task_phases)}
 
-        self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._current_instruct = {
-            env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
-        }
+        # self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
+        # self._current_instruct = {
+        #     env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
+        # }
         self._lambda_mr = kwargs.get("lambda_mr", 0.1)
 
         if not self._resize_img:
@@ -95,6 +98,7 @@ class FurnitureSimARPV2(FurnitureSimEnv):
                 robot_state=spaces.Box(-np.inf, np.inf, (robot_state_dim,)),
                 image1=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
                 image2=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
+                text_feature=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
             )
         )
 
@@ -143,8 +147,9 @@ class FurnitureSimARPV2(FurnitureSimEnv):
 
     def _get_instruct_feature(self, phase):
         instruct = get_furniturebench_instruct(self.furniture_name, phase, output_type="all")
-        tokens = clip.tokenize(instruct).to(self._device)
-        return self.liv_layer(input=tokens, modality="text").detach().cpu().numpy()
+        tokens = clip.tokenize(instruct).detach().cpu().numpy()
+        # return self.liv_layer(input=tokens, modality="text").detach().cpu().numpy()
+        return np.asarray(self._reward_model.get_text_feature({"instruct": tokens}))
 
     def _check_reward_condition(self, env_idx, current_reward, next_reward):
         if (
@@ -166,10 +171,10 @@ class FurnitureSimARPV2(FurnitureSimEnv):
         super().reset_env(idx)
         super().refresh()
         self.i[idx] = 0
-        self.phase[idx] = 0
-        self._prev_reward[idx] = 0
-        self._task_pass_threshold[idx] = 0
-        self._task_fail_threshold[idx] = 0
+        # self.phase[idx] = 0
+        # self._prev_reward[idx] = 0
+        # self._task_pass_threshold[idx] = 0
+        # self._task_fail_threshold[idx] = 0
 
         self.__frames[idx] = {
             frame: {
@@ -195,14 +200,14 @@ class FurnitureSimARPV2(FurnitureSimEnv):
 
     def reset(self):
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._prev_reward = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._task_pass_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
-        self._task_fail_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
+        # self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
+        # self._prev_reward = {env_idx: 0 for env_idx in range(self.num_envs)}
+        # self._task_pass_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
+        # self._task_fail_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
 
-        self._current_instruct = {
-            env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
-        }
+        # self._current_instruct = {
+        #     env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
+        # }
         self.__frames = {
             env_idx: {
                 frame: {
@@ -231,52 +236,24 @@ class FurnitureSimARPV2(FurnitureSimEnv):
 
         return self._extract_vip_feature(obs)
 
-    def _compute_reward(self):
+    def _predict_phase(self):
         stacked_obs = {key: [] for key in ["color_image2", "color_image1"]}
-        stacked_timestep, stacked_attn_mask, current_instruct, new_instruct = [], [], [], []
+        stacked_timestep, stacked_attn_mask = [], []
         for env_idx in range(self.num_envs):
             stack = self.__frames[env_idx][self.i[env_idx] % self._skip_frame]
             for key in ["color_image2", "color_image1"]:
                 stacked_obs[key].append(self._batchify(stack[key]))
             stacked_timestep.append(self._batchify(stack["timestep"]))
             stacked_attn_mask.append(self._batchify(stack["attn_mask"]))
-            new_instruct.append(self._get_instruct_feature(self.phase[env_idx] + 1))
-            # stacked_obs = {key: self._batchify(stack[key]) for key in ["color_image2", "color_image1"]}
-            # new_instruct = self._get_instruct_feature(self.phase + 1)
-
         stacked_obs = {key: np.stack(val) for key, val in stacked_obs.items()}
         stacked_timestep, stacked_attn_mask = np.stack(stacked_timestep), np.stack(stacked_attn_mask)
-        current_instruct = np.stack(list(self._current_instruct.values()))
-        new_instruct = np.stack(new_instruct)
-
         batch = {
             "image": stacked_obs,
-            "instruct": current_instruct,
             "timestep": stacked_timestep,
             "attn_mask": stacked_attn_mask,
         }
-        current_reward = np.asarray(self._reward_model.get_reward(batch))
-        batch.update(instruct=new_instruct)
-        next_reward = np.asarray(self._reward_model.get_reward(batch))
-        # reward = np.maximum(current_reward, next_reward) * self._lambda_mr
-
-        reward = current_reward.copy()
-        for env_idx in range(self.num_envs):
-            task_fail_flag, task_pass_flag = self._check_reward_condition(
-                env_idx, current_reward[env_idx], next_reward[env_idx]
-            )
-            if self._task_fail_threshold[env_idx] < self._eta and task_pass_flag:
-                self._task_pass_threshold[env_idx] += 1
-                if self._task_pass_threshold[env_idx] >= self._eta:
-                    self._current_instruct[env_idx] = new_instruct[env_idx]
-                    self.phase[env_idx] += 1
-                    self._task_pass_threshold[env_idx] = 0
-                    self._task_fail_threshold[env_idx] = 0
-                    reward[env_idx] = next_reward[env_idx]
-            if task_fail_flag:
-                self._task_fail_threshold[env_idx] += 1
-
-        return reward * self._lambda_mr
+        phases = self._reward_model.get_phase(batch)
+        return np.asarray(phases)
 
     def step(self, action):
         obs, task_reward, done, info = super().step(action)
@@ -290,23 +267,25 @@ class FurnitureSimARPV2(FurnitureSimEnv):
             stack["timestep"].append(np.asarray(self.i[env_idx]).astype(np.int32))
             stack["attn_mask"].append(np.asarray(1).astype(np.int32))
 
-        reward = self._compute_reward()
-        self._save_prev_reward(reward)
-        return self._extract_vip_feature(obs), reward, done, info
+        phase = self._predict_phase()
+        text_feature = np.asarray([self._text_features[key] for key in phase])
+        vip_obs = self._extract_vip_feature(obs)
+        vip_obs.update(dict(text_feature=text_feature))
+        return vip_obs, task_reward, done, info
 
 
 if __name__ == "__main__":
     import furniture_bench  # noqa: F401
     import gym
 
-    env_name = "FurnitureSimARPV2-v0/one_leg"
+    env_name = "FurnitureSimRFE-v0/one_leg"
     # env_name = "FurnitureSim-v0/one_leg"
     env_id, furniture_name = env_name.split("/")
-    num_frames, skip_frame, target_keys = 4, 16, ["image1", "image2"]
+    num_frames, skip_frame = 4, 4
     use_ours_reward = True
     rm_type = "ARP-V2"
     rm_ckpt_path = Path(
-        "/home/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/furnituresimenv-w4-s16-nfp1.0-liv0.1-c1.0-ep1.0-aug_crop+jitter-liv-img2+1-step-demo500-refactor/s0/best_model.pkl"
+        "/mnt/changyeon/ICML2024/new_arp_v2/reward_learning/furniturebench-one_leg/ARP-V2/w4-s4-nfp1.0-c1.0@0.5-supc1.0-ep0.1-demo500-total-phase/s0/best_model.pkl"
     ).expanduser()
 
     env = gym.make(
@@ -327,16 +306,15 @@ if __name__ == "__main__":
         skip_frame=skip_frame,
         rm_type=rm_type,
         rm_ckpt_path=rm_ckpt_path,
+        task_phases=5,
     )
 
     init = env.reset()
     timestep = 0
-    print(f"timestep {timestep} / stack step {env.i} / phase {env.phase}")
+    print(f"timestep {timestep} / stack step {env.i}")
     for _ in range(630):
         res, rew, done, info = env.step(env.action_space.sample())
         timestep += 1
-        print(
-            f"timestep {timestep} / stack step {env.i} / phase {env.phase} / rew: {rew} / success_thr: {env.env._task_pass_threshold} / fail_thr: {env.env._task_fail_threshold}"
-        )
+        print(f"timestep {timestep} / stack step {env.i} / rew: {rew} / text_feature: {res['text_feature']}")
         if np.any(done):
             break
