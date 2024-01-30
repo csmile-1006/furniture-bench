@@ -44,7 +44,6 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
-flags.DEFINE_boolean("use_encoder", True, "Use Transformer for the image encoder.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
@@ -53,6 +52,13 @@ flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
+flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
+flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
+flags.DEFINE_string(
+    "rm_ckpt_path",
+    "/mnt/changyeon/ICML2024/reward_models",
+    "reward model checkpoint base path.",
+)
 
 
 def make_env_and_dataset(
@@ -60,15 +66,21 @@ def make_env_and_dataset(
     seed: int,
     randomness: str,
     data_path: str,
-    use_encoder: bool,
     encoder_type: str,
     reward_type: str,
-    lambda_mr: float,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
         import furniture_bench  # noqa: F401
+
+        rm_ckpt_path = (
+            Path(FLAGS.rm_ckpt_path).expanduser()
+            / FLAGS.env_name.split("/")[-1]
+            / f"w{FLAGS.window_size}-s{FLAGS.skip_frame}-nfp1.0-c1.0@0.5-supc1.0-ep0.5-demo100-total-phase"
+            / "s0"
+            / "best_model.pkl"
+        )
 
         env_id, furniture_name = env_name.split("/")
         env = gym.make(
@@ -76,7 +88,6 @@ def make_env_and_dataset(
             num_envs=FLAGS.num_envs,
             furniture=furniture_name,
             data_path=data_path,
-            use_encoder=use_encoder,
             encoder_type=encoder_type,
             headless=True,
             record=True,
@@ -87,6 +98,10 @@ def make_env_and_dataset(
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
             max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
+            window_size=FLAGS.window_size,
+            skip_frame=FLAGS.skip_frame,
+            rm_type=FLAGS.rm_type,
+            rm_ckpt_path=rm_ckpt_path,
         )
     else:
         env = gym.make(env_name)
@@ -123,6 +138,7 @@ def make_env_and_dataset(
             "success": FLAGS.num_success_demos,
             "failure": FLAGS.num_failure_demos,
         },
+        # obs_keys=tuple([key for key in env.observation_space.spaces.keys() if key != "robot_state"]),
     )
     return env, dataloader
 
@@ -141,10 +157,8 @@ def main(_):
         FLAGS.seed,
         FLAGS.randomness,
         FLAGS.data_path,
-        FLAGS.use_encoder,
         FLAGS.encoder_type,
         FLAGS.reward_type,
-        FLAGS.lambda_mr,
     )
 
     kwargs = dict(FLAGS.config)
@@ -171,8 +185,8 @@ def main(_):
         env.observation_space.sample(),
         env.action_space.sample()[:1],
         max_steps=FLAGS.max_steps,
+        obs_keys=tuple([key for key in env.observation_space.spaces.keys() if key != "robot_state"]),
         **kwargs,
-        use_encoder=FLAGS.use_encoder,
     )
 
     eval_returns = []

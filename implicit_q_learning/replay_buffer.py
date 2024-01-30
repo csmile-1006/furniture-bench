@@ -6,6 +6,7 @@ import io
 import random
 import traceback
 import collections
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -28,25 +29,21 @@ def save_episode(episode, fn):
             f.write(bs.read())
 
 
-def load_episode(fn, reward_type="sparse", discount=0.99):
+def load_episode(fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "image2")):
     observations, next_observations, timesteps, next_timesteps = [], [], [], []
     with fn.open("rb") as f:
-        episode = np.load(f)
+        episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
         eps_len = episode_len(episode)
         dones_float = np.zeros_like(episode["terminals"], dtype=np.float32)
         for i in range(eps_len):
-            observations.append(
-                np.concatenate(
-                    [episode["observations"][i][key] for key in ["image1", "image2", "robot_state"]], axis=-1
-                )
-            )
+            observations.append(np.concatenate([episode["observations"][i][key] for key in obs_keys], axis=-1))
+            # observations.append({key: episode["observations"][i][key] for key in obs_keys})
             timesteps.append(episode["observations"][i]["timestep"])
             next_observations.append(
-                np.concatenate(
-                    [episode["next_observations"][i][key] for key in ["image1", "image2", "robot_state"]], axis=-1
-                )
+                np.concatenate([episode["next_observations"][i][key] for key in obs_keys], axis=-1)
             )
+            # next_observations.append({key: episode["next_observations"][i][key] for key in obs_keys})
             next_timesteps.append(episode["next_observations"][i]["timestep"])
             if (
                 np.linalg.norm(
@@ -126,6 +123,7 @@ class ReplayBuffer(IterableDataset):
         save_snapshot=False,
         reward_type: str = "sparse",
         embedding_dim: int = 1024,
+        obs_keys: Sequence[str] = ("image1", "image2"),
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -140,6 +138,7 @@ class ReplayBuffer(IterableDataset):
         self._save_snapshot = save_snapshot
         self._reward_type = reward_type
         self._embedding_dim = embedding_dim
+        self._obs_keys = obs_keys
 
     def _sample_episode(self):
         eps_fn = random.choice(self._episode_fns)
@@ -147,7 +146,9 @@ class ReplayBuffer(IterableDataset):
 
     def _store_episode(self, eps_fn):
         try:
-            episode = load_episode(eps_fn, reward_type=self._reward_type, discount=self._discount)
+            episode = load_episode(
+                eps_fn, reward_type=self._reward_type, discount=self._discount, obs_keys=self._obs_keys
+            )
         except Exception as e:
             print(f"Failed to load {eps_fn}: {e}")
             return False
@@ -211,17 +212,25 @@ class ReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        image1, image2, robot_state = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
-        next_image1, next_image2, next_robot_state = np.split(
-            next_obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1
-        )
+        if obs.shape[-1] == self._embedding * 2:
+            image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
+            next_image1, next_image2 = np.split(next_obs, [self._embedding_dim], axis=-1)
+            observation = dict(image1=image1, image2=image2)
+            next_observation = dict(image1=next_image1, image2=next_image2)
+        else:
+            image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
+            next_image1, next_image2, next_text_feature = np.split(
+                next_obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1
+            )
+            observation = dict(image1=image1, image2=image2, text_feature=text_feature)
+            next_observation = dict(image1=next_image1, image2=next_image2, text_feature=next_text_feature)
 
         return Batch(
-            observations=dict(image1=image1, image2=image2, robot_state=robot_state),
+            observations=observation,
             actions=action,
             rewards=reward,
             masks=discount,
-            next_observations=dict(image1=next_image1, image2=next_image2, robot_state=next_robot_state),
+            next_observations=next_observation,
         )
 
     def __iter__(self):
@@ -242,6 +251,7 @@ class OfflineReplayBuffer(IterableDataset):
         reward_type: str = "sparse",
         embedding_dim: int = 1024,
         num_demos: dict = None,
+        obs_keys: Sequence[str] = ("image1", "image2", "text_feature"),
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -257,6 +267,7 @@ class OfflineReplayBuffer(IterableDataset):
         self._reward_type = reward_type
         self._embedding_dim = embedding_dim
         self._num_demos = num_demos
+        self._obs_keys = obs_keys
         self._try_fetch()
 
     def _sample_episode(self):
@@ -265,7 +276,9 @@ class OfflineReplayBuffer(IterableDataset):
 
     def _store_episode(self, eps_fn):
         try:
-            episode = load_episode(eps_fn, reward_type=self._reward_type, discount=self._discount)
+            episode = load_episode(
+                eps_fn, reward_type=self._reward_type, discount=self._discount, obs_keys=self._obs_keys
+            )
         except Exception as e:
             print(f"Failed to load {eps_fn}: {e}")
             return False
@@ -306,7 +319,7 @@ class OfflineReplayBuffer(IterableDataset):
     def _sample(self):
         episode = self._sample_episode()
         # add +1 for the first dummy transition
-        idx = np.random.randint(0, episode_len(episode) - self._nstep)
+        idx = np.random.randint(0, episode_len(episode) - 1 - self._nstep)
         obs = episode["observations"][episode["timesteps"][idx]]
         action = episode["actions"][idx]
         next_obs = episode["observations"][episode["next_timesteps"][idx + self._nstep]]
@@ -317,17 +330,25 @@ class OfflineReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        image1, image2, robot_state = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
-        next_image1, next_image2, next_robot_state = np.split(
-            next_obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1
-        )
+        if obs.shape[-1] == self._embedding_dim * 2:
+            image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
+            next_image1, next_image2 = np.split(next_obs, [self._embedding_dim], axis=-1)
+            observation = dict(image1=image1, image2=image2)
+            next_observation = dict(image1=next_image1, image2=next_image2)
+        else:
+            image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
+            next_image1, next_image2, next_text_feature = np.split(
+                next_obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1
+            )
+            observation = dict(image1=image1, image2=image2, text_feature=text_feature)
+            next_observation = dict(image1=next_image1, image2=next_image2, text_feature=next_text_feature)
 
         return Batch(
-            observations=dict(image1=image1, image2=image2, robot_state=robot_state),
+            observations=observation,
             actions=action,
             rewards=reward,
             masks=discount,
-            next_observations=dict(image1=next_image1, image2=next_image2, robot_state=next_robot_state),
+            next_observations=next_observation,
         )
 
     def __iter__(self):
@@ -352,6 +373,7 @@ def make_replay_loader(
     buffer_type: str = "offline",
     reward_type: str = "sparse",
     num_demos: dict = None,
+    **kwargs,
 ):
     max_size_per_worker = max_size // max(1, num_workers)
 
@@ -365,6 +387,7 @@ def make_replay_loader(
             fetch_every=1000,
             save_snapshot=save_snapshot,
             reward_type=reward_type,
+            **kwargs,
         )
     elif buffer_type == "offline":
         iterable = OfflineReplayBuffer(
@@ -377,6 +400,7 @@ def make_replay_loader(
             save_snapshot=save_snapshot,
             reward_type=reward_type,
             num_demos=num_demos,
+            **kwargs,
         )
 
     loader = torch.utils.data.DataLoader(

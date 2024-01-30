@@ -60,7 +60,6 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
-flags.DEFINE_boolean("use_encoder", True, "Use Transformer for the image encoder.")
 flags.DEFINE_integer("skip_frame", 4, "how often skip frame.")
 flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
@@ -179,7 +178,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
 
 
 def make_env_and_dataset(
-    env_name: str, seed: int, randomness: str, data_path: str, use_encoder: bool, encoder_type: str, lambda_mr: float
+    env_name: str, seed: int, randomness: str, data_path: str, encoder_type: str, lambda_mr: float
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -192,7 +191,6 @@ def make_env_and_dataset(
             num_envs=FLAGS.num_envs,
             furniture=furniture_name,
             data_path=data_path,
-            use_encoder=use_encoder,
             encoder_type=encoder_type,
             headless=True,
             record=True,
@@ -314,7 +312,6 @@ def main(_):
         FLAGS.seed,
         FLAGS.randomness,
         FLAGS.data_path,
-        FLAGS.use_encoder,
         FLAGS.encoder_type,
         FLAGS.lambda_mr,
     )
@@ -359,7 +356,6 @@ def main(_):
         env.action_space.sample()[:1],
         max_steps=FLAGS.max_steps,
         **kwargs,
-        use_encoder=FLAGS.use_encoder,
     )
     if FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
         # load reward model.
