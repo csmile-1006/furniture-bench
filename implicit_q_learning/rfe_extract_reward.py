@@ -1,5 +1,4 @@
 import io
-import sys
 import pickle
 import datetime
 from pathlib import Path
@@ -11,17 +10,13 @@ import scipy
 from absl import app, flags
 from ml_collections import ConfigDict
 
-sys.path.append("/home/changyeon/ICML2024/BPref-v2/")
 from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn  # noqa: E402
 
 FLAGS = flags.FLAGS
 
+flags.DEFINE_string("furniture", "one_leg", "Name of furniture.")
 flags.DEFINE_string("demo_dir", "square_table_parts_state", "Demonstration dir.")
 flags.DEFINE_string("out_dir", None, "Path to save converted data.")
-flags.DEFINE_boolean("use_r3m", False, "Use r3m to encode images.")
-flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
-flags.DEFINE_boolean("use_liv", False, "Use liv to encode images.")
-flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
 flags.DEFINE_integer("num_success_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("num_failure_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
@@ -73,10 +68,6 @@ def load_embedding(rep="vip"):
 
 
 def main(_):
-    if FLAGS.num_threads > 0:
-        print(f"Setting torch.num_threads to {FLAGS.num_threads}")
-        torch.set_num_threads(FLAGS.num_threads)
-
     demo_dir = FLAGS.demo_dir
 
     # load reward model.
@@ -108,13 +99,25 @@ def main(_):
     if not FLAGS.out_dir and not out_dir.exists():
         raise ValueError(f"{FLAGS.out_dir} doesn't exist.")
 
-    for idx, file_path in enumerate(files):
-        if FLAGS.num_demos and idx == FLAGS.num_demos:
-            break
+    for idx, file_path in files:
         print(f"Loading [{idx+1}/{len_files}] {file_path}...")
         with open(file_path, "rb") as f:
             x = pickle.load(f)
             tp = file_path.stem.split("_")[-1].split(".")[0]
+
+            path = out_dir / f"{tp}_{idx}_{len(x['actions'])}.npz"
+            with path.open("rb") as f:
+                dst_dataset = np.load(f, allow_pickle=True)
+                dst_dataset = {key: dst_dataset[key] for key in dst_dataset.keys()}
+
+            # first check whether it is already labeled.
+            if (
+                dst_dataset.get("multimodal_rewards_ckpt_path", None) is not None
+                and dst_dataset.get("multimodal_rewards_ckpt_path").item() == FLAGS.ckpt_path
+            ):
+                print(f"Already labeled with {FLAGS.ckpt_path}")
+                continue
+
             if len(x["observations"]) == len(x["actions"]):
                 # Dummy
                 x["observations"].append(x["observations"][-1])
@@ -135,7 +138,6 @@ def main(_):
             args.window_size = FLAGS.window_size
             args.skip_frame = FLAGS.skip_frame
             args.return_images = True
-            args.get_text_feature = True
 
             # rewards, (_, stacked_attn_masks, stacked_timesteps) = reward_fn(
             output = reward_fn(
@@ -149,6 +151,8 @@ def main(_):
                 feature_dim=feature_dim,
                 texts=None,
                 device=device,
+                batch_size=FLAGS.batch_size,
+                get_text_feature=True,
             )
             rewards = output["rewards"]
             rewards = gaussian_smoothe(rewards)
@@ -157,8 +161,6 @@ def main(_):
             rewards = np.asarray(rewards + rewards[-1:]).astype(np.float32)
 
             path = out_dir / f"{tp}_{idx}_{rewards.shape[0]}.npz"
-
-            dst_dataset = np.load(path)
 
             assert len(dst_dataset["observations"]) == len(
                 rewards
@@ -169,7 +171,8 @@ def main(_):
                 dst_dataset["next_observations"][idx]["text_feature"] = output["text_features"][
                     min(idx + 1, len(rewards) - 1)
                 ]
-            dst_dataset["timestep"] = datetime.datetime.now().timestamp()
+            dst_dataset["timestamp"] = datetime.datetime.now().timestamp()
+            dst_dataset["multimodal_rewards_ckpt_path"] = FLAGS.ckpt_path
             save_episode(dst_dataset, path)
             print(f"Re-saved at {path}")
 
