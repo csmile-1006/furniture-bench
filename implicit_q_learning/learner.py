@@ -11,7 +11,7 @@ import optax
 import policy
 import value_net
 from actor import update as awr_update_actor
-from common import Batch, InfoDict, Model, PRNGKey, Transformer
+from common import Batch, InfoDict, Model, PRNGKey, TransformerEncoder, CrossAttnTransformerEncoder
 from critic import update_q, update_v
 
 
@@ -127,12 +127,24 @@ class Learner(object):
         if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
             observations["text_feature"] = observations["text_feature"][np.newaxis]
 
-        encoder_cls = partial(
-            Transformer,
-            emb_dim=emb_dim,
-            att_drop=0.0 if dropout_rate is None else dropout_rate,
-            drop=0.0 if dropout_rate is None else dropout_rate,
-        )
+        if "text_feature" in obs_keys:
+            encoder_cls = partial(
+                CrossAttnTransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+            )
+        else:
+            encoder_cls = partial(
+                TransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+            )
 
         action_dim = actions.shape[-1]
         actor_def = policy.NormalTanhPolicy(

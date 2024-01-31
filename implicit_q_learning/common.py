@@ -193,24 +193,118 @@ class Block(nn.Module):
         return batch + x
 
 
-class Transformer(nn.Module):
+class TransformerEncoder(nn.Module):
     emb_dim: int = 1024
     depth: int = 2
     att_drop: float = 0.0
     drop: float = 0.0
     num_heads: int = 8
     mlp_ratio: int = 4
+    obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
     @nn.compact
-    def __call__(self, x, deterministic=False, custom_mask=None):
+    def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
+        features = {}
+        for k, v in observations.items():
+            if v.ndim == 2:
+                v = v[jnp.newaxis]
+            if k in self.obs_keys:
+                features[k] = v
+
+        features = jnp.array(list(features.values()))
+        num_image, batch_size, num_timestep, _ = features.shape
+        features = concat_multiple_image_emb(features)
+        features = MLP([self.emb_dim], dropout_rate=self.drop, name="FeatureMLP")(features)
+        embed = features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
+
+        x = embed
         for _ in range(self.depth):
             x = Block(
-                self.emb_dim,
-                self.num_heads,
-                self.mlp_ratio,
-                self.att_drop,
-                self.drop,
+                dim=self.emb_dim,
+                num_heads=self.num_heads,
+                mlp_ratio=self.mlp_ratio,
+                att_drop=self.att_drop,
+                drop=self.drop,
             )(x, deterministic, custom_mask)
+
+        x = nn.LayerNorm()(x)
+        return x
+
+
+class PrenormPixelLangEncoder(nn.Module):
+    dim: int = 256
+    num_heads: int = 8
+    mlp_ratio: int = 4
+    att_drop: float = 0.0
+    drop: float = 0.0
+
+    @nn.compact
+    def __call__(self, pixel, lang, deterministic=False, custom_mask=None):
+        residual_lang = lang
+        pixel = nn.LayerNorm()(pixel)
+        lang = nn.LayerNorm()(lang)
+        x2 = nn.MultiHeadDotProductAttention(
+            num_heads=self.num_heads,
+            qkv_features=self.dim,
+            dropout_rate=self.att_drop,
+        )(inputs_q=lang, inputs_kv=pixel, mask=custom_mask, deterministic=deterministic)
+        x2 = nn.Dropout(self.drop)(x2, deterministic)
+        x3 = residual_lang + x2
+
+        x4 = nn.LayerNorm()(x3)
+        x5 = FeedForward(self.dim * self.mlp_ratio, self.dim, self.drop)(x4, deterministic)
+        x = x5 + x3
+        return x
+
+
+class CrossAttnTransformerEncoder(nn.Module):
+    emb_dim: int = 1024
+    depth: int = 2
+    att_drop: float = 0.0
+    drop: float = 0.0
+    num_heads: int = 8
+    mlp_ratio: int = 4
+    obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
+
+    @nn.compact
+    def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
+        assert "text_feature" in observations, "text_feature must be in observations"
+        image_features = {}
+        for k, v in observations.items():
+            if v.ndim == 2:
+                v = v[jnp.newaxis]
+            if k in ["image1", "image2"]:
+                image_features[k] = v
+        image_features = jnp.array(list(image_features.values()))
+        num_image, batch_size, num_timestep, _ = image_features.shape
+        image_features = concat_multiple_image_emb(image_features)
+        image_features = MLP([self.emb_dim], dropout_rate=self.drop, name="ImageFeatureMLP")(image_features)
+        image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
+
+        text_feature = observations["text_feature"]
+        text_feature = MLP([self.emb_dim], dropout_rate=self.drop, name="TextFeatureMLP")(text_feature)
+        text_embed = text_feature + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
+
+        fused_feature = text_embed
+        for _ in range(self.depth):
+            fused_feature = PrenormPixelLangEncoder(
+                dim=self.emb_dim,
+                num_heads=self.num_heads,
+                mlp_ratio=self.mlp_ratio,
+                att_drop=self.att_drop,
+                drop=self.drop,
+            )(lang=fused_feature, pixel=image_embed, deterministic=deterministic)
+        fused_feature = nn.LayerNorm()(fused_feature)
+
+        x = fused_feature
+        for _ in range(self.depth):
+            x = Block(
+                dim=self.emb_dim,
+                num_heads=self.num_heads,
+                mlp_ratio=self.mlp_ratio,
+                att_drop=self.att_drop,
+                drop=self.drop,
+            )(fused_feature, deterministic, custom_mask)
 
         x = nn.LayerNorm()(x)
         return x
