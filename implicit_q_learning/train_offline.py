@@ -139,6 +139,7 @@ def make_env_and_dataset(
             "failure": FLAGS.num_failure_demos,
         },
         obs_keys=tuple([key for key in env.observation_space.spaces.keys() if key != "robot_state"]),
+        lambda_mr=FLAGS.lambda_mr,
     )
     return env, dataloader
 

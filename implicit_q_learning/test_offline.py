@@ -1,7 +1,6 @@
 import os
 
 import gym
-import numpy as np
 
 from absl import app, flags
 from ml_collections import config_flags
@@ -32,7 +31,6 @@ flags.DEFINE_integer("high_random_idx", int(0), "High random idx.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 
 flags.DEFINE_boolean("image", True, "Image-based model")
-flags.DEFINE_boolean("use_encoder", False, "Use CNN for the image encoder.")
 flags.DEFINE_boolean("record", True, "Record video")
 flags.DEFINE_string("encoder_type", "r3m", "vip or r3m")
 flags.DEFINE_float("temperature", 0.00, "Temperature for the policy.")
@@ -110,7 +108,6 @@ def main(_):
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     os.makedirs(os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval"), exist_ok=True)
-    eval_path = os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval", f"{FLAGS.run_name}.{FLAGS.seed}")
 
     if "Sim" in FLAGS.env_name:
         import isaacgym  # noqa: F401
@@ -144,8 +141,7 @@ def main(_):
     ckpt_dir = os.path.join(FLAGS.ckpt_dir, FLAGS.env_name, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
 
-    eval_stats = evaluate(agent, env, FLAGS.eval_episodes, FLAGS.temperature)
-    np.savetxt(eval_path, [eval_stats["return"]], fmt=["%.1f"])
+    evaluate(agent, env, FLAGS.eval_episodes, FLAGS.temperature)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ def save_episode(episode, fn):
             f.write(bs.read())
 
 
-def load_episode(fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "image2")):
+def load_episode(fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "image2"), lambda_mr=1.0):
     observations, next_observations, timesteps, next_timesteps = [], [], [], []
     with fn.open("rb") as f:
         episode = np.load(f, allow_pickle=True)
@@ -61,16 +61,16 @@ def load_episode(fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "i
         elif reward_type == "step":
             rewards = episode["step_rewards"] / np.max(episode["step_rewards"])
         elif reward_type == "viper":
-            rewards = episode["viper_rewards"]
+            rewards = episode["viper_rewards"] / lambda_mr
         elif reward_type == "diffusion":
-            rewards = episode["diffusion_rewards"]
+            rewards = episode["diffusion_rewards"] / lambda_mr
         elif reward_type == "ours":
-            rewards = episode["multimodal_rewards"]
-            # our_reward = episode["multimodal_rewards"]
-            # next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())
-            # delta_our_reward = discount * next_our_reward - our_reward
-            # delta_our_reward[-1] = 0.0
-            # rewards = delta_our_reward + episode["rewards"]
+            # rewards = episode["multimodal_rewards"] / lambda_mr
+            our_reward = episode["multimodal_rewards"] / lambda_mr
+            next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())
+            delta_our_reward = discount * next_our_reward - our_reward
+            delta_our_reward[-1] = 0.0
+            rewards = delta_our_reward + episode["rewards"]
 
     return dict(
         observations=np.asarray(observations),
@@ -253,6 +253,7 @@ class OfflineReplayBuffer(IterableDataset):
         embedding_dim: int = 1024,
         num_demos: dict = None,
         obs_keys: Sequence[str] = ("image1", "image2", "text_feature"),
+        lambda_mr: float = 1.0,
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -269,6 +270,7 @@ class OfflineReplayBuffer(IterableDataset):
         self._embedding_dim = embedding_dim
         self._num_demos = num_demos
         self._obs_keys = obs_keys
+        self._lambda_mr = lambda_mr
         self._try_fetch()
 
     def _sample_episode(self):
@@ -278,7 +280,11 @@ class OfflineReplayBuffer(IterableDataset):
     def _store_episode(self, eps_fn):
         try:
             episode = load_episode(
-                eps_fn, reward_type=self._reward_type, discount=self._discount, obs_keys=self._obs_keys
+                eps_fn,
+                reward_type=self._reward_type,
+                discount=self._discount,
+                obs_keys=self._obs_keys,
+                lambda_mr=self._lambda_mr,
             )
         except Exception as e:
             print(f"Failed to load {eps_fn}: {e}")

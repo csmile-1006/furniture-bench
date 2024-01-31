@@ -271,6 +271,7 @@ class FurnitureSimRFE(FurnitureSimEnv):
         text_feature = np.asarray([self._text_features[phase] for phase in phases])
         vip_obs = self._extract_vip_feature(obs)
         vip_obs.update(dict(text_feature=text_feature))
+        info.update({"phases": phases})
         return vip_obs, task_reward, done, info
 
 
