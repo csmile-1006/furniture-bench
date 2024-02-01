@@ -10,7 +10,7 @@ import scipy
 from absl import app, flags
 from ml_collections import ConfigDict
 
-from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn  # noqa: E402
+from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn
 
 FLAGS = flags.FLAGS
 
