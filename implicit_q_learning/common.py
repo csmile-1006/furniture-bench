@@ -231,7 +231,7 @@ class TransformerEncoder(nn.Module):
         return x
 
 
-class PrenormPixelLangEncoder(nn.Module):
+class PrenormPixelLangBlock(nn.Module):
     dim: int = 256
     num_heads: int = 8
     mlp_ratio: int = 4
@@ -240,16 +240,16 @@ class PrenormPixelLangEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, pixel, lang, deterministic=False, custom_mask=None):
-        residual_lang = lang
+        residual_pixel = pixel
         pixel = nn.LayerNorm()(pixel)
         lang = nn.LayerNorm()(lang)
         x2 = nn.MultiHeadDotProductAttention(
             num_heads=self.num_heads,
             qkv_features=self.dim,
             dropout_rate=self.att_drop,
-        )(inputs_q=lang, inputs_kv=pixel, mask=custom_mask, deterministic=deterministic)
+        )(inputs_q=pixel, inputs_kv=lang, mask=custom_mask, deterministic=deterministic)
         x2 = nn.Dropout(self.drop)(x2, deterministic)
-        x3 = residual_lang + x2
+        x3 = residual_pixel + x2
 
         x4 = nn.LayerNorm()(x3)
         x5 = FeedForward(self.dim * self.mlp_ratio, self.dim, self.drop)(x4, deterministic)
@@ -285,15 +285,15 @@ class CrossAttnTransformerEncoder(nn.Module):
         text_feature = MLP([self.emb_dim], dropout_rate=self.drop, name="TextFeatureMLP")(text_feature)
         text_embed = text_feature + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
 
-        fused_feature = text_embed
+        fused_feature = image_embed
         for _ in range(self.depth):
-            fused_feature = PrenormPixelLangEncoder(
+            fused_feature = PrenormPixelLangBlock(
                 dim=self.emb_dim,
                 num_heads=self.num_heads,
                 mlp_ratio=self.mlp_ratio,
                 att_drop=self.att_drop,
                 drop=self.drop,
-            )(lang=fused_feature, pixel=image_embed, deterministic=deterministic)
+            )(lang=text_embed, pixel=image_embed, deterministic=deterministic)
         fused_feature = nn.LayerNorm()(fused_feature)
 
         x = fused_feature
