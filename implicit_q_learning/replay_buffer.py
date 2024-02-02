@@ -65,12 +65,12 @@ def load_episode(fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "i
         elif reward_type == "diffusion":
             rewards = episode["diffusion_rewards"] / lambda_mr
         elif reward_type == "ours":
-            # rewards = episode["multimodal_rewards"] / lambda_mr
-            our_reward = episode["multimodal_rewards"] / lambda_mr
-            next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())
-            delta_our_reward = discount * next_our_reward - our_reward
-            delta_our_reward[-1] = 0.0
-            rewards = delta_our_reward + episode["rewards"]
+            rewards = episode["multimodal_rewards"] / lambda_mr
+            # our_reward = episode["multimodal_rewards"] / lambda_mr
+            # next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())
+            # delta_our_reward = discount * next_our_reward - our_reward
+            # delta_our_reward[-1] = 0.0
+            # rewards = delta_our_reward + episode["rewards"]
 
     return dict(
         observations=np.asarray(observations),

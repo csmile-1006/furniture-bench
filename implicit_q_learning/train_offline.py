@@ -77,7 +77,7 @@ def make_env_and_dataset(
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
             / FLAGS.env_name.split("/")[-1]
-            / f"w{FLAGS.window_size}-s{FLAGS.skip_frame}-nfp1.0-c1.0@0.5-supc1.0-ep0.5-demo100-total-phase"
+            / f"w{FLAGS.window_size}-s{FLAGS.skip_frame}-nfp1.0-c1.0@0.5-supc1.0-ep0.1-demo500-total-phase"
             / "s0"
             / "best_model.pkl"
         )

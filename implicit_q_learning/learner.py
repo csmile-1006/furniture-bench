@@ -127,24 +127,24 @@ class Learner(object):
         if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
             observations["text_feature"] = observations["text_feature"][np.newaxis]
 
-        if "text_feature" in obs_keys:
-            encoder_cls = partial(
-                CrossAttnTransformerEncoder,
-                emb_dim=emb_dim,
-                depth=depth,
-                num_heads=num_heads,
-                att_drop=0.0 if dropout_rate is None else dropout_rate,
-                drop=0.0 if dropout_rate is None else dropout_rate,
-            )
-        else:
-            encoder_cls = partial(
-                TransformerEncoder,
-                emb_dim=emb_dim,
-                depth=depth,
-                num_heads=num_heads,
-                att_drop=0.0 if dropout_rate is None else dropout_rate,
-                drop=0.0 if dropout_rate is None else dropout_rate,
-            )
+        # if "text_feature" in obs_keys:
+        #     encoder_cls = partial(
+        #         CrossAttnTransformerEncoder,
+        #         emb_dim=emb_dim,
+        #         depth=depth,
+        #         num_heads=num_heads,
+        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
+        #         drop=0.0 if dropout_rate is None else dropout_rate,
+        #     )
+        # else:
+        encoder_cls = partial(
+            TransformerEncoder,
+            emb_dim=emb_dim,
+            depth=depth,
+            num_heads=num_heads,
+            att_drop=0.0 if dropout_rate is None else dropout_rate,
+            drop=0.0 if dropout_rate is None else dropout_rate,
+        )
 
         action_dim = actions.shape[-1]
         actor_def = policy.NormalTanhPolicy(
