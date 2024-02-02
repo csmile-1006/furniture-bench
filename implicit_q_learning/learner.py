@@ -11,7 +11,7 @@ import optax
 import policy
 import value_net
 from actor import update as awr_update_actor
-from common import Batch, InfoDict, Model, PRNGKey, TransformerEncoder, CrossAttnTransformerEncoder
+from common import Batch, InfoDict, Model, PRNGKey, TransformerEncoder
 from critic import update_q, update_v
 
 
@@ -68,11 +68,13 @@ def _update_jit(
     # new_target_critic = target_update(new_critic, target_critic, tau)
     actor = _share_encoder(source=critic, target=actor)
     value = _share_encoder(source=critic, target=value)
-    new_value, value_info = update_v(target_critic, value, batch, expectile)
+    key, rng = jax.random.split(rng)
+    new_value, value_info = update_v(key, target_critic, value, batch, expectile)
     key, rng = jax.random.split(rng)
     new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, batch, temperature)
 
-    new_critic, critic_info = update_q(critic, new_value, batch, discount)
+    key, rng = jax.random.split(rng)
+    new_critic, critic_info = update_q(key, critic, new_value, batch, discount)
     new_target_critic = target_update(new_critic, target_critic, tau)
     return (
         rng,
@@ -166,23 +168,28 @@ class Learner(object):
         else:
             optimiser = optax.adam(learning_rate=actor_lr)
 
-        actor = Model.create(actor_def, inputs=[actor_key, observations], tx=optimiser)
+        actor_key, actor_dropout_key = jax.random.split(actor_key)
+        actor = Model.create(
+            actor_def, inputs=[{"params": actor_key, "dropout": actor_dropout_key}, observations], tx=optimiser
+        )
 
         critic_def = value_net.DoubleCritic(
             hidden_dims, emb_dim, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
         )
+        critic_key, critic_dropout_key = jax.random.split(critic_key)
         critic = Model.create(
             critic_def,
-            inputs=[critic_key, observations, actions],
+            inputs=[{"params": critic_key, "dropout": critic_dropout_key}, observations, actions],
             tx=optax.adam(learning_rate=critic_lr),
         )
 
         value_def = value_net.ValueCritic(
             hidden_dims, emb_dim, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
         )
+        value_key, value_dropout_key = jax.random.split(value_key)
         value = Model.create(
             value_def,
-            inputs=[value_key, observations],
+            inputs=[{"params": value_key, "dropout": value_dropout_key}, observations],
             tx=optax.adam(learning_rate=value_lr),
         )
 

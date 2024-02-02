@@ -39,7 +39,7 @@ class NormalTanhPolicy(nn.Module):
         temperature: float = 1.0,
         training: bool = False,
     ) -> tfd.Distribution:
-        obs = self.encoder_cls(name="encoder")(observations, deterministic=training)[:, -1]
+        obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
         outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
             obs, training=training
         )
