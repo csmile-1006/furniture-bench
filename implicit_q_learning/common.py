@@ -214,7 +214,7 @@ class TransformerEncoder(nn.Module):
         features = jnp.array(list(features.values()))
         num_image, batch_size, num_timestep, _ = features.shape
         features = concat_multiple_image_emb(features)
-        features = nn.tanh(MLP([self.emb_dim], dropout_rate=self.drop, name="FeatureMLP")(features))
+        features = MLP([self.emb_dim], dropout_rate=self.drop, name="FeatureMLP")(features)
         embed = features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
 
         x = embed
@@ -278,11 +278,11 @@ class CrossAttnTransformerEncoder(nn.Module):
         image_features = jnp.array(list(image_features.values()))
         num_image, batch_size, num_timestep, _ = image_features.shape
         image_features = concat_multiple_image_emb(image_features)
-        image_features = nn.tanh(MLP([self.emb_dim], dropout_rate=self.drop, name="ImageFeatureMLP")(image_features))
+        image_features = MLP([self.emb_dim], dropout_rate=self.drop, name="ImageFeatureMLP")(image_features)
         image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
 
         text_feature = observations["text_feature"]
-        text_feature = nn.tanh(MLP([self.emb_dim], dropout_rate=self.drop, name="TextFeatureMLP")(text_feature))
+        text_feature = MLP([self.emb_dim], dropout_rate=self.drop, name="TextFeatureMLP")(text_feature)
         text_embed = text_feature + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
 
         fused_feature = image_embed
