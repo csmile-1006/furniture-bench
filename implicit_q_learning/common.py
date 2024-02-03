@@ -149,7 +149,8 @@ class Attention(nn.Module):
         n = attention.shape[-1]
         mask = custom_mask
         if mask is None:
-            mask = jnp.tril(jnp.ones((n, n)))[None, None, ...]
+            # mask = jnp.tril(jnp.ones((n, n)))[None, None, ...]
+            mask = jnp.ones((n, n))[None, None, ...]
             mask = jnp.broadcast_to(mask, attention.shape)
 
         big_neg = jnp.finfo(attention.dtype).min
@@ -215,7 +216,7 @@ class TransformerEncoder(nn.Module):
         num_image, batch_size, num_timestep, _ = features.shape
         features = concat_multiple_image_emb(features)
         features = MLP([self.emb_dim], dropout_rate=self.drop, name="FeatureMLP")(features)
-        embed = features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
+        embed = features + get_1d_sincos_pos_embed(features.shape[-1], num_timestep)
 
         x = embed
         for _ in range(self.depth):
@@ -279,11 +280,11 @@ class CrossAttnTransformerEncoder(nn.Module):
         num_image, batch_size, num_timestep, _ = image_features.shape
         image_features = concat_multiple_image_emb(image_features)
         image_features = MLP([self.emb_dim], dropout_rate=self.drop, name="ImageFeatureMLP")(image_features)
-        image_embed = image_features + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
+        image_embed = image_features + get_1d_sincos_pos_embed(image_features.shape[-1], num_timestep)
 
         text_feature = observations["text_feature"]
         text_feature = MLP([self.emb_dim], dropout_rate=self.drop, name="TextFeatureMLP")(text_feature)
-        text_embed = text_feature + get_1d_sincos_pos_embed(self.emb_dim, num_timestep)
+        text_embed = text_feature + get_1d_sincos_pos_embed(text_feature.shape[-1], num_timestep)
 
         fused_feature = image_embed
         for _ in range(self.depth):

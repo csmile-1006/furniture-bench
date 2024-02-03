@@ -11,7 +11,7 @@ import optax
 import policy
 import value_net
 from actor import update as awr_update_actor
-from common import Batch, InfoDict, Model, PRNGKey, TransformerEncoder
+from common import Batch, InfoDict, Model, PRNGKey, TransformerEncoder, CrossAttnTransformerEncoder
 from critic import update_q, update_v
 
 
@@ -47,27 +47,9 @@ def _update_jit(
     temperature: float,
     utd_ratio: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    # def slice(x, i):
-    #     assert x.shape[0] % utd_ratio == 0
-    #     batch_size = x.shape[0] // utd_ratio
-    #     return x[batch_size * i : batch_size * (i + 1)]
-
-    # for i in range(utd_ratio):
-    #     mini_batch = Batch(
-    #         observations={key: slice(batch.observations[key], i) for key in batch.observations},
-    #         actions=slice(batch.actions, i),
-    #         rewards=slice(batch.rewards, i),
-    #         masks=slice(batch.masks, i),
-    #         next_observations={key: slice(batch.next_observations[key], i) for key in batch.next_observations},
-    #     )
-    #     new_value, value_info = update_v(target_critic, value, mini_batch, expectile)
-    #     new_critic, critic_info = update_q(critic, new_value, mini_batch, discount)
-    # key, rng = jax.random.split(rng)
-    # new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, mini_batch, temperature)
-
-    # new_target_critic = target_update(new_critic, target_critic, tau)
     actor = _share_encoder(source=critic, target=actor)
     value = _share_encoder(source=critic, target=value)
+
     key, rng = jax.random.split(rng)
     new_value, value_info = update_v(key, target_critic, value, batch, expectile)
     key, rng = jax.random.split(rng)
@@ -129,24 +111,24 @@ class Learner(object):
         if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
             observations["text_feature"] = observations["text_feature"][np.newaxis]
 
-        # if "text_feature" in obs_keys:
-        #     encoder_cls = partial(
-        #         CrossAttnTransformerEncoder,
-        #         emb_dim=emb_dim,
-        #         depth=depth,
-        #         num_heads=num_heads,
-        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
-        #         drop=0.0 if dropout_rate is None else dropout_rate,
-        #     )
-        # else:
-        encoder_cls = partial(
-            TransformerEncoder,
-            emb_dim=emb_dim,
-            depth=depth,
-            num_heads=num_heads,
-            att_drop=0.0 if dropout_rate is None else dropout_rate,
-            drop=0.0 if dropout_rate is None else dropout_rate,
-        )
+        if "text_feature" in obs_keys:
+            encoder_cls = partial(
+                CrossAttnTransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+            )
+        else:
+            encoder_cls = partial(
+                TransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+            )
 
         action_dim = actions.shape[-1]
         actor_def = policy.NormalTanhPolicy(
