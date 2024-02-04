@@ -131,7 +131,8 @@ def main(_):
                 val = np.transpose(val, (0, 2, 3, 1))
                 images[key] = val
 
-            actions, skills = x["actions"], np.cumsum(x["skills"])
+            skills = np.asarray(x["skills"])
+            actions, skills = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
             args = ConfigDict()
             args.task_name = FLAGS.furniture
             args.image_keys = "color_image2|color_image1"
