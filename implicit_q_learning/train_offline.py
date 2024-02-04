@@ -45,6 +45,7 @@ config_flags.DEFINE_config_file(
 )
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
+flags.DEFINE_enum("model_type", "transformer", ["transformer", "crossattn"], "model type for transformer encoder")
 flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
@@ -187,6 +188,7 @@ def main(_):
         env.action_space.sample()[:1],
         max_steps=FLAGS.max_steps,
         obs_keys=tuple([key for key in env.observation_space.spaces.keys() if key != "robot_state"]),
+        model_type=FLAGS.model_type,
         **kwargs,
     )
 

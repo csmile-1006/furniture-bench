@@ -13,7 +13,7 @@ def update(
     q1, q2 = critic(batch.observations, batch.actions)
     q = jnp.minimum(q1, q2)
     exp_a = jnp.exp((q - v) * temperature)
-    exp_a = jnp.minimum(exp_a, 100.0)
+    exp_a = jnp.clip(exp_a, -100.0, 100.0)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist = actor.apply({"params": actor_params}, batch.observations, training=True, rngs={"dropout": key})

@@ -90,6 +90,7 @@ class Learner(object):
         opt_decay_schedule: str = "cosine",
         critic_layer_norm: bool = False,
         obs_keys: Sequence[str] = ("image1", "image2"),
+        model_type: str = "transformer",
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -111,7 +112,8 @@ class Learner(object):
         if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
             observations["text_feature"] = observations["text_feature"][np.newaxis]
 
-        if "text_feature" in obs_keys:
+        if "text_feature" in obs_keys and model_type == "crossattn":
+            print("[INFO] use CrossAttnTransformerEncoder")
             encoder_cls = partial(
                 CrossAttnTransformerEncoder,
                 emb_dim=emb_dim,
@@ -121,6 +123,7 @@ class Learner(object):
                 drop=0.0 if dropout_rate is None else dropout_rate,
             )
         else:
+            print("[INFO] use TransformerEncoder")
             encoder_cls = partial(
                 TransformerEncoder,
                 emb_dim=emb_dim,

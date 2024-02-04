@@ -40,9 +40,8 @@ class NormalTanhPolicy(nn.Module):
         training: bool = False,
     ) -> tfd.Distribution:
         obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
-        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
-            obs, training=training
-        )
+        # outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
+        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=0.0, name="OutputMLP")(obs, training=training)
 
         means = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseMean")(outputs)
 
