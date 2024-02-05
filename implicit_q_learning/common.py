@@ -215,12 +215,11 @@ class TransformerEncoder(nn.Module):
         num_image, batch_size, num_timestep, _ = features.shape
         features = concat_multiple_image_emb(features)
         features = MLP([self.emb_dim], dropout_rate=self.drop, name="FeatureMLP")(features)
+        # embed = features + get_1d_sincos_pos_embed(features.shape[-1], num_timestep)
+
         timesteps = jnp.tile(jnp.arange(num_timestep, dtype=jnp.int32), (batch_size, 1))
         embed_timestep = nn.Embed(num_timestep, features=self.emb_dim, name="TimestepEmbed")(timesteps)
-        # embed = features + get_1d_sincos_pos_embed(features.shape[-1], num_timestep)
         embed = features + embed_timestep
-        # embed = nn.LayerNorm(name="EmbedLn")(embed)
-        # embed = nn.Dropout(self.drop, name="EmbedDrop")(embed, deterministic)
 
         x = embed
         for _ in range(self.depth):
@@ -285,20 +284,17 @@ class CrossAttnTransformerEncoder(nn.Module):
         image_features = concat_multiple_image_emb(image_features)
         image_features = MLP([self.emb_dim], dropout_rate=self.drop, name="ImageFeatureMLP")(image_features)
         # image_embed = image_features + get_1d_sincos_pos_embed(image_features.shape[-1], num_timestep)
+
         timesteps = jnp.tile(jnp.arange(num_timestep, dtype=jnp.int32), (batch_size, 1))
         embed_timestep = nn.Embed(num_timestep, features=self.emb_dim, name="TimestepEmbed")(timesteps)
         image_embed = image_features + embed_timestep
-        # embed = nn.LayerNorm(name="ImageEmbedLn")(embed)
-        # embed = nn.Dropout(self.drop, name="ImageEmbedDrop")(embed, deterministic)
 
         text_feature = observations["text_feature"]
         text_feature = MLP([self.emb_dim], dropout_rate=self.drop, name="TextFeatureMLP")(text_feature)
-        text_embed_timestep = nn.Embed(num_timestep, features=self.emb_dim, name="TextTimestepEmbed")(timesteps)
-
         # text_embed = text_feature + get_1d_sincos_pos_embed(text_feature.shape[-1], num_timestep)
+
+        text_embed_timestep = nn.Embed(num_timestep, features=self.emb_dim, name="TextTimestepEmbed")(timesteps)
         text_embed = text_feature + text_embed_timestep
-        # text_embed = nn.LayerNorm(name="TextEmbedLn")(text_embed)
-        # text_embed = nn.Dropout(self.drop, name="TextEmbedDrop")(text_embed, deterministic)
 
         fused_feature = image_embed
         for _ in range(self.depth):
