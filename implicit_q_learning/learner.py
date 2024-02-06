@@ -134,15 +134,25 @@ class Learner(object):
             )
 
         action_dim = actions.shape[-1]
-        actor_def = policy.NormalTanhPolicy(
+        # actor_def = policy.NormalTanhPolicy(
+        #     hidden_dims,
+        #     emb_dim,
+        #     action_dim,
+        #     log_std_scale=1e-3,
+        #     log_std_min=-5.0,
+        #     dropout_rate=dropout_rate,
+        #     state_dependent_std=False,
+        #     tanh_squash_distribution=False,
+        #     encoder_cls=encoder_cls,
+        #     obs_keys=obs_keys,
+        # )
+        actor_def = policy.NormalTanhMixturePolicy(
             hidden_dims,
-            emb_dim,
             action_dim,
-            log_std_scale=1e-3,
-            log_std_min=-5.0,
+            num_modes=10,
             dropout_rate=dropout_rate,
-            state_dependent_std=False,
-            tanh_squash_distribution=False,
+            min_std=0.03,
+            use_tanh=False,
             encoder_cls=encoder_cls,
             obs_keys=obs_keys,
         )

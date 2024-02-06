@@ -21,7 +21,6 @@ LOG_STD_MAX = 2.0
 
 class NormalTanhPolicy(nn.Module):
     hidden_dims: Sequence[int]
-    emb_dim: int
     action_dim: int
     state_dependent_std: bool = True
     dropout_rate: Optional[float] = None
@@ -64,6 +63,52 @@ class NormalTanhPolicy(nn.Module):
             return tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh())
         else:
             return base_dist
+
+
+class NormalTanhMixturePolicy(nn.Module):
+    hidden_dims: Sequence[int]
+    action_dim: int
+    num_modes: int = 5
+    dropout_rate: Optional[float] = None
+    min_std: float = 3e-2
+    use_tanh: bool = False
+    encoder_cls: nn.Module = None
+    obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
+
+    @nn.compact
+    def __call__(self, observations: jnp.ndarray, temperature: float = 1.0, training: bool = False) -> tfd.Distribution:
+        obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
+        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate)(obs, training=training)
+
+        logits = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init())(outputs)
+        means = nn.Dense(
+            self.action_dim * self.num_modes,
+            kernel_init=default_init(),
+            bias_init=nn.initializers.normal(stddev=1.0),
+        )(outputs)
+        scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init())(outputs)
+        scales = nn.softplus(scales) + self.min_std
+
+        if not self.use_tanh:
+            means = nn.tanh(means)
+
+        shape = list(means.shape[:-1]) + [-1, self.num_modes]
+
+        logits = jnp.reshape(logits, shape)
+        mu = jnp.reshape(means, shape)
+        scales = jnp.reshape(scales, shape)
+
+        components_distribution = tfd.Normal(loc=mu, scale=scales * temperature)
+        # components_distribution = tfd.Independent(components_distribution, 1)
+
+        dist = tfd.MixtureSameFamily(
+            mixture_distribution=tfd.Categorical(logits=logits), components_distribution=components_distribution
+        )
+
+        if self.use_tanh:
+            dist = tfd.TransformedDistribution(distribution=dist, bijector=tfb.Tanh())
+
+        return tfd.Independent(dist, 1)
 
 
 @functools.partial(jax.jit, static_argnames=("actor_def", "distribution"))
