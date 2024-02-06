@@ -215,17 +215,22 @@ def main(_):
                 action_.append(x["actions"][_len])
                 reward_.append(x["rewards"][_len])
                 if enable_viper:
-                    viper_reward_.append(
-                        x["viper_reward"][_len] if FLAGS.skip_frame == 4 else x["viper_reward_16"][_len]
-                    )
+                    if FLAGS.skip_frame == 4 and FLAGS.window_size == 4:
+                        _viper_reward = x["viper_reward"][_len]
+                        viper_reward_.append(_viper_reward)
+                    if FLAGS.skip_frame == 16 and FLAGS.window_size == 4:
+                        _viper_reward = x["viper_reward_16"][_len]
+                        viper_reward_.append(_viper_reward)
                 if enable_diffusion:
-                    if FLAGS.skip_frame == 4:
+                    if FLAGS.skip_frame == 4 and FLAGS.window_size == 4:
                         _diff_reward = x["diffusion_reward_4"][len]
-                    elif FLAGS.skip_frame == 1:
+                        diffusion_reward_.append(_diff_reward)
+                    if FLAGS.skip_frame == 1 and FLAGS.window_size == 2:
                         _diff_reward = x["diffusion_reward"][len]
-                    elif FLAGS.skip_frame == 16:
+                        diffusion_reward_.append(_diff_reward)
+                    if FLAGS.skip_frame == 16 and FLAGS.window_size == 4:
                         _diff_reward = x["diffusion_reward_16"][len]
-                    diffusion_reward_.append(_diff_reward)
+                        diffusion_reward_.append(_diff_reward)
                 step_reward_.append(cumsum_skills[_len] + 1 if _len == length - 2 else cumsum_skills[_len])
                 done_.append(1 if _len == length - 2 else 0)
 
