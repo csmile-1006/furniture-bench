@@ -7,6 +7,7 @@ import random
 import traceback
 import collections
 from typing import Sequence
+from collections import deque
 
 import numpy as np
 import torch
@@ -17,7 +18,7 @@ SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 78
 
 
 def episode_len(episode):
-    # subtract -1 because the dummy first transition
+    # subtract -1 because the dummy last transition
     return np.asarray(next(iter(episode.values()))).shape[0] - 1
 
 
@@ -29,22 +30,39 @@ def save_episode(episode, fn):
             f.write(bs.read())
 
 
-def load_episode(fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "image2"), lambda_mr=1.0):
+def _get_stacked_timesteps(length, window_size, skip_frame):
+    stacked_timesteps = []
+    timestep_stacks = {key: deque([], maxlen=window_size) for key in range(skip_frame)}
+    for _ in range(window_size):
+        for j in range(skip_frame):
+            timestep_stacks[j].append(0)
+
+    for i in range(length):
+        mod = i % skip_frame
+        timestep_stack = timestep_stacks[mod]
+        timestep_stack.append(i)
+        stacked_timesteps.append(np.stack(timestep_stack))
+
+    return stacked_timesteps
+
+
+def load_episode(
+    fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "image2"), window_size=4, skip_frame=4, lambda_mr=1.0
+):
     observations, next_observations, timesteps, next_timesteps = [], [], [], []
     with fn.open("rb") as f:
         episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
         eps_len = episode_len(episode)
         dones_float = np.zeros_like(episode["terminals"], dtype=np.float32)
+        stacked_timesteps = _get_stacked_timesteps(eps_len, window_size, skip_frame)
         for i in range(eps_len):
             observations.append(np.concatenate([episode["observations"][i][key] for key in obs_keys], axis=-1))
-            # observations.append({key: episode["observations"][i][key] for key in obs_keys})
-            timesteps.append(episode["observations"][i]["timestep"])
+            timesteps.append(stacked_timesteps[i])
             next_observations.append(
                 np.concatenate([episode["next_observations"][i][key] for key in obs_keys], axis=-1)
             )
-            # next_observations.append({key: episode["next_observations"][i][key] for key in obs_keys})
-            next_timesteps.append(episode["next_observations"][i]["timestep"])
+            next_timesteps.append(stacked_timesteps[min(i + 1, eps_len - 1)])
             if (
                 np.linalg.norm(
                     episode["observations"][i + 1]["robot_state"] - episode["next_observations"][i]["robot_state"]
@@ -125,6 +143,8 @@ class ReplayBuffer(IterableDataset):
         reward_type: str = "sparse",
         embedding_dim: int = 1024,
         obs_keys: Sequence[str] = ("image1", "image2"),
+        window_size: int = 4,
+        skip_frame: int = 4,
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -139,6 +159,8 @@ class ReplayBuffer(IterableDataset):
         self._save_snapshot = save_snapshot
         self._reward_type = reward_type
         self._embedding_dim = embedding_dim
+        self._window_size = window_size
+        self._skip_frame = skip_frame
         self._obs_keys = obs_keys
 
     def _sample_episode(self):
@@ -201,7 +223,6 @@ class ReplayBuffer(IterableDataset):
 
     def __sample(self):
         episode = self._sample_episode()
-        # add +1 for the first dummy transition
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
         obs = episode["observations"][episode["timesteps"][idx]]
         action = episode["actions"][idx]
@@ -253,6 +274,8 @@ class OfflineReplayBuffer(IterableDataset):
         embedding_dim: int = 1024,
         num_demos: dict = None,
         obs_keys: Sequence[str] = ("image1", "image2", "text_feature"),
+        window_size: int = 4,
+        skip_frame: int = 4,
         lambda_mr: float = 1.0,
     ):
         self._replay_dir = replay_dir
@@ -270,6 +293,8 @@ class OfflineReplayBuffer(IterableDataset):
         self._embedding_dim = embedding_dim
         self._num_demos = num_demos
         self._obs_keys = obs_keys
+        self._window_size = window_size
+        self._skip_frame = skip_frame
         self._lambda_mr = lambda_mr
         self._try_fetch()
 
@@ -284,6 +309,8 @@ class OfflineReplayBuffer(IterableDataset):
                 reward_type=self._reward_type,
                 discount=self._discount,
                 obs_keys=self._obs_keys,
+                window_size=self._window_size,
+                skip_frame=self._skip_frame,
                 lambda_mr=self._lambda_mr,
             )
         except Exception as e:
@@ -325,7 +352,6 @@ class OfflineReplayBuffer(IterableDataset):
 
     def _sample(self):
         episode = self._sample_episode()
-        # add +1 for the first dummy transition
         idx = np.random.randint(0, episode_len(episode) - 1 - self._nstep)
         obs = episode["observations"][episode["timesteps"][idx]]
         action = episode["actions"][idx]
