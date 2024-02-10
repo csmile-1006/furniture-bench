@@ -119,7 +119,7 @@ def _sample_actions(
     observations: np.ndarray,
     temperature: float = 1.0,
 ) -> Tuple[PRNGKey, jnp.ndarray]:
-    dist = actor_def.apply({"params": actor_params}, observations, temperature)
+    dist = actor_def.apply(actor_params, observations, temperature)
     rng, key = jax.random.split(rng)
     return rng, dist.sample(seed=key)
 

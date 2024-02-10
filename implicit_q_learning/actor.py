@@ -16,22 +16,28 @@ def update(
     exp_a = jnp.clip(exp_a, -100.0, 100.0)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        dist = actor.apply({"params": actor_params}, batch.observations, training=True, rngs={"dropout": key})
+        dist, updated_states = actor.apply(
+            actor_params, batch.observations, training=True, rngs={"dropout": key}, mutable=actor.extra_variables.keys()
+        )
         log_probs = dist.log_prob(batch.actions)
         a = -(exp_a * log_probs)
         actor_loss = a.mean()
         adv = q - v
 
-        return actor_loss, {
-            "actor_loss_mean": actor_loss,
-            "actor_loss_min": a.min(),
-            "actor_loss_max": a.max(),
-            "actor_loss_std": a.std(),
-            "adv_mean": adv.mean(),
-            "adv_min": adv.min(),
-            "adv_max": adv.max(),
-            "adv_std": adv.std(),
-        }
+        return (
+            actor_loss,
+            {
+                "actor_loss_mean": actor_loss,
+                "actor_loss_min": a.min(),
+                "actor_loss_max": a.max(),
+                "actor_loss_std": a.std(),
+                "adv_mean": adv.mean(),
+                "adv_min": adv.min(),
+                "adv_max": adv.max(),
+                "adv_std": adv.std(),
+                "updated_states": updated_states,
+            },
+        )
 
     new_actor, info = actor.apply_gradient(actor_loss_fn)
 

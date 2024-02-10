@@ -114,7 +114,7 @@ class Learner(object):
 
         if "text_feature" in obs_keys and model_type == "crossattn":
             print("[INFO] use CrossAttnTransformerEncoder")
-            encoder_cls = partial(
+            critic_encoder_cls = partial(
                 CrossAttnTransformerEncoder,
                 emb_dim=emb_dim,
                 depth=depth,
@@ -122,9 +122,18 @@ class Learner(object):
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
             )
+            actor_encoder_cls = partial(
+                CrossAttnTransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+                stop_gradient=True,
+            )
         else:
             print("[INFO] use TransformerEncoder")
-            encoder_cls = partial(
+            critic_encoder_cls = partial(
                 TransformerEncoder,
                 emb_dim=emb_dim,
                 depth=depth,
@@ -132,11 +141,19 @@ class Learner(object):
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
             )
+            actor_encoder_cls = partial(
+                TransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+                stop_gradient=True,
+            )
 
         action_dim = actions.shape[-1]
         # actor_def = policy.NormalTanhPolicy(
         #     hidden_dims,
-        #     emb_dim,
         #     action_dim,
         #     log_std_scale=1e-3,
         #     log_std_min=-5.0,
@@ -153,7 +170,7 @@ class Learner(object):
             dropout_rate=dropout_rate,
             min_std=0.03,
             use_tanh=False,
-            encoder_cls=encoder_cls,
+            encoder_cls=actor_encoder_cls,
             obs_keys=obs_keys,
         )
 
@@ -169,7 +186,7 @@ class Learner(object):
         )
 
         critic_def = value_net.DoubleCritic(
-            hidden_dims, emb_dim, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+            hidden_dims, emb_dim, encoder_cls=critic_encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
         )
         critic_key, critic_dropout_key = jax.random.split(critic_key)
         critic = Model.create(
@@ -179,7 +196,7 @@ class Learner(object):
         )
 
         value_def = value_net.ValueCritic(
-            hidden_dims, emb_dim, encoder_cls=encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+            hidden_dims, emb_dim, encoder_cls=critic_encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
         )
         value_key, value_dropout_key = jax.random.split(value_key)
         value = Model.create(
@@ -197,9 +214,10 @@ class Learner(object):
         self.rng = rng
 
     def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
-        rng, actions = policy.sample_actions(
-            self.rng, self.actor.apply_fn, self.actor.params, observations, temperature
-        )
+        variables = {"params": self.actor.params}
+        if self.actor.extra_variables:
+            variables.update(self.actor.extra_variables)
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
         self.rng = rng
 
         actions = np.asarray(actions)

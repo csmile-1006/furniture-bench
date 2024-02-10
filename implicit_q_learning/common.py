@@ -1,17 +1,21 @@
 import collections
 from functools import partial
 import os
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import flax
 import flax.linen as nn
 import jax
+from jax import lax
+import jax.nn.initializers as initjax
+from flax.linen.dtypes import promote_dtype
 import jax.numpy as jnp
 import optax
 import einops
 import pickle
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
+PrecisionLike = Union[None, str, lax.Precision, Tuple[str, str], Tuple[lax.Precision, lax.Precision]]
 
 
 def default_init(scale: Optional[float] = None):
@@ -22,6 +26,7 @@ def default_init(scale: Optional[float] = None):
 
 PRNGKey = Any
 Params = flax.core.FrozenDict[str, Any]
+Variables = flax.core.FrozenDict[str, Any]
 PRNGKey = Any
 Shape = Sequence[int]
 Dtype = Any  # this could be a real type?
@@ -48,6 +53,85 @@ class MLP(nn.Module):
         return x
 
 
+class SNDense(nn.Module):
+    """A linear transformation applied over the last dimension of the input with sigmaReparam.
+    Attributes:
+        features: the number of output features.
+        use_bias: whether to add a bias to the output (default: True).
+        dtype: the dtype of the computation (default: infer from input and params).
+        param_dtype: the dtype passed to parameter initializers (default: float32).
+        precision: numerical precision of the computation see `jax.lax.Precision`
+        for details.
+        kernel_init: initializer function for the weight matrix.
+        bias_init: initializer function for the bias.
+    """
+
+    features: int
+    use_bias: bool = True
+    dtype: Optional[Dtype] = None
+    param_dtype: Dtype = jnp.float32
+    precision: PrecisionLike = None
+    bias_init: Callable[[PRNGKey, Shape, Dtype], jax.Array] = initjax.zeros
+    std_init: float = 0.1
+
+    @nn.compact
+    def __call__(self, inputs: Any) -> Any:
+        """Applies a linear transformation to the inputs along the last dimension.
+        Args:
+            inputs: The nd-array to be transformed.
+        Returns:
+            The transformed input.
+        """
+        initializing = self.is_mutable_collection("params")
+
+        kernel = self.param(
+            "kernel",
+            initjax.normal(self.std_init),
+            (jnp.shape(inputs)[-1], self.features),
+            self.param_dtype,
+        )
+
+        if self.use_bias:
+            bias = self.param("bias", self.bias_init, (self.features,), self.param_dtype)
+        else:
+            bias = None
+
+        # fake init
+        s = jnp.ones((1, 1))
+        vh = jnp.ones((1))
+        if initializing:
+            _, s, vh = lax.stop_gradient(jnp.linalg.svd(kernel, full_matrices=False))
+        sigma_param = self.param("sigma", initjax.ones, (1,), self.param_dtype)
+        spectral_u_var = self.variable("spectral", "u", lambda shape: jnp.ones(shape) * vh[0], vh[0].shape)
+        spectral_norm_var = self.variable("spectral", "norm", lambda shape: jnp.ones(shape) * s[0], (1,))
+        inputs, kernel, bias = promote_dtype(inputs, kernel, bias, dtype=self.dtype)
+        # power method to compute spectral norm
+        u = spectral_u_var.value
+        v = lax.stop_gradient(jnp.matmul(kernel, u))
+        # l2 norm
+        v = lax.stop_gradient(v / jnp.linalg.norm(v, ord=2))
+        u = lax.stop_gradient(jnp.matmul(jnp.transpose(kernel), v))
+        # l2 norm
+        u = lax.stop_gradient(u / jnp.linalg.norm(u, ord=2))
+        if spectral_u_var.is_mutable() and not initializing:
+            spectral_u_var.value = u
+        sigma = jnp.einsum("c,cd,d->", v, kernel, u)
+
+        if spectral_norm_var.is_mutable() and not initializing:
+            spectral_norm_var.value = sigma
+
+        inputs, sigma_param, sigma = promote_dtype(inputs, sigma_param, sigma, dtype=self.dtype)
+        y = lax.dot_general(
+            inputs,
+            (sigma_param / sigma) * kernel,
+            (((inputs.ndim - 1,), (0,)), ((), ())),
+            precision=self.precision,
+        )
+        if bias is not None:
+            y += jnp.reshape(bias, (1,) * (y.ndim - 1) + (-1,))
+        return y
+
+
 class Encoder(nn.Module):
     @nn.compact
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
@@ -69,22 +153,6 @@ class Encoder(nn.Module):
         return x
 
 
-# class Encoder(nn.Module):
-#   @nn.compact
-#   def __call__(self, x):
-#     x = nn.Conv(features=32, kernel_size=(3, 3))(x)
-#     x = nn.relu(x)
-#     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-#     x = nn.Conv(features=64, kernel_size=(3, 3))(x)
-#     x = nn.relu(x)
-#     x = nn.avg_pool(x, window_shape=(2, 2), strides=(2, 2))
-#     x = x.reshape((x.shape[0], -1))  # flatten
-#     x = nn.Dense(features=256)(x)
-#     x = nn.relu(x)
-#     x = nn.Dense(features=10)(x)
-#     return x
-
-
 class FeedForward(nn.Module):
     dim: int = 256
     out_dim: int = 256
@@ -93,27 +161,44 @@ class FeedForward(nn.Module):
     kernel_init: Callable = nn.initializers.xavier_uniform()
     bias_init: Callable = nn.initializers.zeros
     deterministic: Optional[bool] = None
+    use_sigmareparam: bool = True
 
     @nn.compact
     def __call__(self, batch, deterministic=None):
         deterministic = nn.merge_param("deterministic", self.deterministic, deterministic)
-        x = nn.Dense(
-            self.dim,
-            use_bias=self.use_bias,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init,
-            name="fc1",
-        )(batch)
+        if self.use_sigmareparam:
+            x = SNDense(
+                features=self.out_dim,
+                use_bias=self.use_bias,
+                bias_init=self.bias_init,
+                name="fc1",
+            )(batch)
+        else:
+            x = nn.Dense(
+                self.dim,
+                use_bias=self.use_bias,
+                kernel_init=self.kernel_init,
+                bias_init=self.bias_init,
+                name="fc1",
+            )(batch)
 
-        x = nn.gelu(x)
+        x = nn.leaky_relu(x)
         x = nn.Dropout(self.dropout)(x, deterministic)
-        x = nn.Dense(
-            self.out_dim,
-            use_bias=self.use_bias,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init,
-            name="fc2",
-        )(x)
+        if self.use_sigmareparam:
+            x = SNDense(
+                features=self.out_dim,
+                use_bias=self.use_bias,
+                bias_init=self.bias_init,
+                name="fc2",
+            )(x)
+        else:
+            x = nn.Dense(
+                self.out_dim,
+                use_bias=self.use_bias,
+                kernel_init=self.kernel_init,
+                bias_init=self.bias_init,
+                name="fc2",
+            )(x)
         x = nn.Dropout(self.dropout)(x, deterministic)
 
         return x
@@ -128,16 +213,24 @@ class Attention(nn.Module):
     kernel_init: Callable = nn.linear.default_kernel_init
     bias_init: Callable = nn.initializers.zeros
     deterministic: Optional[bool] = None
+    use_sigmareparam: bool = True
 
     @nn.compact
     def __call__(self, batch, deterministic=None, custom_mask=None):
         deterministic = nn.merge_param("deterministic", self.deterministic, deterministic)
-        qkv = nn.Dense(
-            self.dim * 3,
-            use_bias=self.use_bias,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init,
-        )(batch)
+        if self.use_sigmareparam:
+            qkv = SNDense(
+                features=self.dim * 3,
+                use_bias=self.use_bias,
+                bias_init=self.bias_init,
+            )(batch)
+        else:
+            qkv = nn.Dense(
+                self.dim * 3,
+                use_bias=self.use_bias,
+                kernel_init=self.kernel_init,
+                bias_init=self.bias_init,
+            )(batch)
         qkv = jnp.split(qkv, 3, axis=-1)
 
         mh_fn = lambda x: einops.rearrange(x, "b n (h d) -> b h n d", h=self.num_heads)  # noqa: E731
@@ -158,12 +251,19 @@ class Attention(nn.Module):
         attention = nn.Dropout(self.att_drop)(attention, deterministic)
 
         x = einops.rearrange(attention @ v, "b h n d -> b n (h d)")
-        x = nn.Dense(
-            self.dim,
-            use_bias=self.use_bias,
-            kernel_init=self.kernel_init,
-            bias_init=self.bias_init,
-        )(x)
+        if self.use_sigmareparam:
+            x = SNDense(
+                features=self.dim,
+                use_bias=self.use_bias,
+                bias_init=self.bias_init,
+            )(x)
+        else:
+            x = nn.Dense(
+                self.dim,
+                use_bias=self.use_bias,
+                kernel_init=self.kernel_init,
+                bias_init=self.bias_init,
+            )(x)
         x = nn.Dropout(self.proj_drop)(x, deterministic)
 
         return x
@@ -186,6 +286,7 @@ class Block(nn.Module):
             self.att_drop,
             self.drop,
         )(x, deterministic, custom_mask)
+        x = nn.LayerNorm()(x)
         batch = batch + x
 
         x = nn.LayerNorm()(batch)
@@ -201,6 +302,7 @@ class TransformerEncoder(nn.Module):
     num_heads: int = 8
     mlp_ratio: int = 4
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
+    stop_gradient: bool = False
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
@@ -210,16 +312,20 @@ class TransformerEncoder(nn.Module):
                 v = v[jnp.newaxis]
             if k in self.obs_keys:
                 features[k] = v
-
-        features = jnp.array(list(features.values()))
-        num_image, batch_size, num_timestep, _ = features.shape
-        features = concat_multiple_image_emb(features)
-        features = MLP([self.emb_dim], dropout_rate=self.drop, name="FeatureMLP")(features)
-        # embed = features + get_1d_sincos_pos_embed(features.shape[-1], num_timestep)
+        batch_size, num_timestep, _ = features[self.obs_keys[0]].shape
 
         timesteps = jnp.tile(jnp.arange(num_timestep, dtype=jnp.int32), (batch_size, 1))
         embed_timestep = nn.Embed(num_timestep, features=self.emb_dim, name="TimestepEmbed")(timesteps)
-        embed = features + embed_timestep
+
+        features["timestep"] = embed_timestep
+        # features = jnp.array(list(features.values()))
+        features = concat_multiple_emb(features)
+
+        embed = MLP(
+            [self.emb_dim * 2, self.emb_dim], dropout_rate=self.drop, activations=nn.leaky_relu, name="FeatureMLP"
+        )(features)
+        embed = nn.LayerNorm()(embed)
+        # embed = features + get_1d_sincos_pos_embed(features.shape[-1], num_timestep)
 
         x = embed
         for _ in range(self.depth):
@@ -232,6 +338,8 @@ class TransformerEncoder(nn.Module):
             )(x, deterministic, custom_mask)
 
         x = nn.LayerNorm()(x)
+        if self.stop_gradient:
+            x = lax.stop_gradient(x)
         return x
 
 
@@ -269,6 +377,7 @@ class CrossAttnTransformerEncoder(nn.Module):
     num_heads: int = 8
     mlp_ratio: int = 4
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
+    stop_gradient: bool = False
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
@@ -277,11 +386,10 @@ class CrossAttnTransformerEncoder(nn.Module):
         for k, v in observations.items():
             if v.ndim == 2:
                 v = v[jnp.newaxis]
-            if k in ["image1", "image2"]:
+            if k in self.obs_keys:
                 image_features[k] = v
-        image_features = jnp.array(list(image_features.values()))
-        num_image, batch_size, num_timestep, _ = image_features.shape
-        image_features = concat_multiple_image_emb(image_features)
+        batch_size, num_timestep, _ = image_features[self.obs_keys[0]].shape
+        image_features = concat_multiple_emb(image_features)
         image_features = MLP([self.emb_dim], dropout_rate=self.drop, name="ImageFeatureMLP")(image_features)
         # image_embed = image_features + get_1d_sincos_pos_embed(image_features.shape[-1], num_timestep)
 
@@ -318,6 +426,8 @@ class CrossAttnTransformerEncoder(nn.Module):
             )(fused_feature, deterministic, custom_mask)
 
         x = nn.LayerNorm()(x)
+        if self.stop_gradient:
+            x = lax.stop_gradient(x)
         return x
 
 
@@ -344,11 +454,12 @@ def get_1d_sincos_pos_embed(embed_dim, length):
     )
 
 
-def concat_multiple_image_emb(img_emb):
-    num_image, batch_size, num_timestep = img_emb.shape[:3]
-    img_emb = jnp.reshape(img_emb, (batch_size * num_image, num_timestep, -1))
-    img_emb = jnp.concatenate(jnp.split(img_emb, num_image, axis=0), -1)  # (batch_size, num_timestep, emb_dim)
-    return img_emb
+def concat_multiple_emb(img_emb: dict):
+    return jnp.concatenate([jnp.asarray(elem) for elem in img_emb.values()], axis=-1)
+    # num_features, batch_size, num_timestep = img_emb.shape[:3]
+    # img_emb = jnp.reshape(img_emb, (batch_size * num_features, num_timestep, -1))
+    # img_emb = jnp.concatenate(jnp.split(img_emb, num_features, axis=0), -1)  # (batch_size, num_timestep, emb_dim)
+    # return img_emb
 
 
 class ResNetBlock(nn.Module):
@@ -417,6 +528,7 @@ class Model:
     params: Params
     tx: Optional[optax.GradientTransformation] = flax.struct.field(pytree_node=False)
     opt_state: Optional[optax.OptState] = None
+    extra_variables: Params = None
 
     @classmethod
     def create(
@@ -425,28 +537,48 @@ class Model:
         variables = model_def.init(*inputs)
 
         _, params = variables.pop("params")
+        if len(variables) > 1:
+            extra_variables = {}
+            for key in variables.keys():
+                if key != "params":
+                    extra_variables[key] = variables[key]
+                    break
+        else:
+            extra_variables = {}
 
         if tx is not None:
             opt_state = tx.init(params)
         else:
             opt_state = None
 
-        return cls(step=1, apply_fn=model_def, params=params, tx=tx, opt_state=opt_state)
+        return cls(
+            step=1, apply_fn=model_def, params=params, tx=tx, opt_state=opt_state, extra_variables=extra_variables
+        )
 
     def __call__(self, *args, **kwargs):
-        return self.apply_fn.apply({"params": self.params}, *args, **kwargs)
+        variables = {"params": self.params}
+        variables.update(self.extra_variables)
+        return self.apply_fn.apply(variables, *args, **kwargs)
 
     def apply(self, *args, **kwargs):
         return self.apply_fn.apply(*args, **kwargs)
 
     def apply_gradient(self, loss_fn) -> Tuple[Any, "Model"]:
-        grad_fn = jax.grad(loss_fn, has_aux=True)
-        grads, info = grad_fn(self.params)
+        variables = {"params": self.params}
+        variables.update(self.extra_variables)
 
-        updates, new_opt_state = self.tx.update(grads, self.opt_state, self.params)
+        grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+        # grads, info = grad_fn(variables)
+        (_, info), grads = grad_fn(variables)
+
+        updates, new_opt_state = self.tx.update(grads["params"], self.opt_state, self.params)
         new_params = optax.apply_updates(self.params, updates)
+        new_variables = info["updated_states"]
+        info.pop("updated_states")
 
-        return self.replace(step=self.step + 1, params=new_params, opt_state=new_opt_state), info
+        return self.replace(
+            step=self.step + 1, params=new_params, opt_state=new_opt_state, extra_variables=new_variables
+        ), info
 
     def save(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
