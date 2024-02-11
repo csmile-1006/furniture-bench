@@ -20,7 +20,7 @@ def get_config():
 
     # transformer setup
     config.emb_dim = 256
-    config.depth = 6
+    config.depth = 2
     config.num_heads = 8
 
     return config
