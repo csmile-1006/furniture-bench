@@ -4,9 +4,9 @@ import ml_collections
 def get_config():
     config = ml_collections.ConfigDict()
 
-    config.actor_lr = 1e-4
-    config.value_lr = 1e-4
-    config.critic_lr = 1e-4
+    config.actor_lr = 3e-4
+    config.value_lr = 3e-4
+    config.critic_lr = 3e-4
 
     config.hidden_dims = (512, 256, 256)
 
@@ -20,7 +20,7 @@ def get_config():
 
     # transformer setup
     config.emb_dim = 256
-    config.depth = 2
+    config.depth = 3
     config.num_heads = 8
 
     return config
