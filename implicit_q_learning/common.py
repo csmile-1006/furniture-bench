@@ -201,6 +201,7 @@ class TransformerEncoder(nn.Module):
     num_heads: int = 8
     mlp_ratio: int = 4
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
+    stop_gradient: bool = False
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
@@ -232,6 +233,8 @@ class TransformerEncoder(nn.Module):
             )(x, deterministic, custom_mask)
 
         x = nn.LayerNorm()(x)
+        if self.stop_gradient:
+            x = jax.lax.stop_gradient(x)
         return x
 
 
