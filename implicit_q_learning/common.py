@@ -318,7 +318,6 @@ class TransformerEncoder(nn.Module):
         embed_timestep = nn.Embed(num_timestep, features=self.emb_dim, name="TimestepEmbed")(timesteps)
 
         features["timestep"] = embed_timestep
-        # features = jnp.array(list(features.values()))
         features = concat_multiple_emb(features)
 
         embed = MLP(
