@@ -303,6 +303,7 @@ class TransformerEncoder(nn.Module):
     mlp_ratio: int = 4
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
     stop_gradient: bool = False
+    normalize_inputs: bool = True
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
@@ -314,17 +315,16 @@ class TransformerEncoder(nn.Module):
                 features[k] = v
         batch_size, num_timestep, _ = features[self.obs_keys[0]].shape
 
-        timesteps = jnp.tile(jnp.arange(num_timestep, dtype=jnp.int32), (batch_size, 1))
-        embed_timestep = nn.Embed(num_timestep, features=self.emb_dim, name="TimestepEmbed")(timesteps)
-
-        features["timestep"] = embed_timestep
         features = concat_multiple_emb(features)
-
+        features = InputNorm(features.shape[-1], skip=not self.normalize_inputs)(features, deterministic=deterministic)
         embed = MLP(
-            [self.emb_dim * 2, self.emb_dim], dropout_rate=self.drop, activations=nn.leaky_relu, name="FeatureMLP"
+            [self.emb_dim, self.emb_dim, self.emb_dim],
+            dropout_rate=self.drop,
+            activations=nn.leaky_relu,
+            name="FeatureMLP",
         )(features)
+        embed = embed + get_1d_sincos_pos_embed(embed.shape[-1], num_timestep)
         embed = nn.LayerNorm()(embed)
-        # embed = features + get_1d_sincos_pos_embed(features.shape[-1], num_timestep)
 
         x = embed
         for _ in range(self.depth):
@@ -541,7 +541,6 @@ class Model:
             for key in variables.keys():
                 if key != "params":
                     extra_variables[key] = variables[key]
-                    break
         else:
             extra_variables = {}
 
@@ -590,3 +589,75 @@ class Model:
             params = pickle.load(f)
             # params = flax.serialization.from_bytes(self.params, f.read())
         return self.replace(params=params)
+
+
+MAGIC_PAD_VAL = -1  # Define this according to your needs
+
+
+class InputNorm(nn.Module):
+    dim: int
+    beta: float = 1e-4
+    init_nu: float = 1.0
+    skip: bool = False
+    pad_val: float = MAGIC_PAD_VAL
+
+    def setup(self):
+        self.mu = self.variable("batch_stats", "mu", lambda shape: jnp.zeros(shape), (self.dim,))
+        self.nu = self.variable("batch_stats", "nu", lambda shape: jnp.ones(shape) * self.init_nu, (self.dim,))
+        self.t = self.variable("batch_stats", "t", lambda shape: jnp.ones(shape), ())
+
+    def sigma(self):
+        mu, nu = self.mu.value, self.nu.value
+        sigma_ = jnp.sqrt(nu - mu**2 + 1e-5)
+        return jnp.clip(jnp.nan_to_num(sigma_), 1e-3, 1e6)
+
+    def normalize_values(self, val):
+        if self.skip:
+            return val
+        sigma = self.sigma()
+        normalized = jnp.clip((val - self.mu.value) / sigma, -1e4, 1e4)
+        not_nan = ~jnp.isnan(normalized)
+        stable = sigma > 0.01
+        use_norm = jnp.logical_and(stable, not_nan)
+        output = jnp.where(use_norm, normalized, val - jnp.nan_to_num(self.mu.value))
+        return output
+
+    def denormalize_values(self, val):
+        if self.skip:
+            return val
+        sigma = self.sigma()
+        denormalized = (val * sigma) + self.mu.value
+        stable = sigma > 0.01
+        output = jnp.where(stable, denormalized, val + jnp.nan_to_num(self.mu.value))
+        return output
+
+    def masked_stats(self, val):
+        mask = ~(val == self.pad_val)
+        sum_ = (val * mask).sum((0, 1))
+        square_sum = ((val * mask) ** 2).sum((0, 1))
+        total = mask.sum((0, 1))
+        mean = sum_ / total
+        square_mean = square_sum / total
+        return mean, square_mean
+
+    def update_stats(self, val, mu, nu, t):
+        new_t = t + 1
+        beta_t = self.beta / (1.0 - (1.0 - self.beta) ** new_t)
+        mean, square_mean = self.masked_stats(val)
+        new_mu = (1.0 - beta_t) * mu + (beta_t * mean)
+        new_nu = (1.0 - beta_t) * nu + (beta_t * square_mean)
+        return new_mu, new_nu, new_t
+
+    def __call__(self, x, denormalize=False, deterministic=False):
+        if denormalize:
+            val = self.denormalize_values(x)
+        else:
+            val = self.normalize_values(x)
+
+        if not deterministic:
+            mu, nu, t = self.update_stats(val, self.mu.value, self.nu.value, self.t.value)
+            self.mu.value = mu
+            self.nu.value = nu
+            self.t.value = t
+
+        return val
