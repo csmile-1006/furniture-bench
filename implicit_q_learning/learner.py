@@ -129,7 +129,6 @@ class Learner(object):
                 num_heads=num_heads,
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
-                stop_gradient=True,
             )
 
         else:
@@ -149,7 +148,6 @@ class Learner(object):
                 num_heads=num_heads,
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
-                stop_gradient=True,
             )
 
         action_dim = actions.shape[-1]
