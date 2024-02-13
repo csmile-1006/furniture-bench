@@ -78,15 +78,22 @@ class NormalTanhMixturePolicy(nn.Module):
     @nn.compact
     def __call__(self, observations: jnp.ndarray, temperature: float = 1.0, training: bool = False) -> tfd.Distribution:
         obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
-        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate)(obs, training=training)
+        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
+            obs, training=training
+        )
 
-        logits = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init())(outputs)
+        logits = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseLogit")(
+            outputs
+        )
         means = nn.Dense(
             self.action_dim * self.num_modes,
             kernel_init=default_init(),
             bias_init=nn.initializers.normal(stddev=1.0),
+            name="OutputDenseMean",
         )(outputs)
-        scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init())(outputs)
+        scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseScale")(
+            outputs
+        )
         scales = nn.softplus(scales) + self.min_std
 
         if not self.use_tanh:
