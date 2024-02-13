@@ -11,9 +11,9 @@ from kornia.augmentation import Resize, CenterCrop
 
 from furniture_bench.envs.furniture_sim_env import FurnitureSimEnv
 from furniture_bench.robot.robot_state import filter_and_concat_robot_state
+from furniture_bench.envs.initialization_mode import load_embedding
 
 from bpref_v2.data.instruct import get_furniturebench_instruct
-from bpref_v2.data.label_reward_furniturebench import load_reward_model
 
 
 class FurnitureSimRFE(FurnitureSimEnv):
@@ -28,31 +28,18 @@ class FurnitureSimRFE(FurnitureSimEnv):
 
         device_id = kwargs["compute_device_id"]
         self._device = torch.device(f"cuda:{device_id}")
-        from vip import load_vip
+        self._compute_text_feature = False
 
-        self.vip_layer = load_vip().module
-        self.vip_layer.requires_grad_(False)
-        self.vip_layer.eval()
-        self.vip_layer = self.vip_layer.to(self._device)
-
-        self.embedding_dim = 1024
-
-        from liv import load_liv
-
-        self.liv_layer = load_liv().module
-        self.liv_layer.requires_grad_(False)
-        self.liv_layer.eval()
-        self.liv_layer = self.liv_layer.to(self._device)
+        self.img_emb_layer, self.embedding_dim = load_embedding(kwargs["encoder_type"], self._device)
+        self.reward_img_emb_layer, _ = load_embedding(kwargs["reward_encoder_type"], self._device)
 
         import jax
 
         jax.config.update("jax_default_device", jax.devices()[device_id])
 
-        self._reward_model = load_reward_model(
-            rm_type=kwargs["rm_type"], ckpt_path=Path(kwargs["rm_ckpt_path"]).expanduser()
-        )
-
+        self._reward_model = kwargs["reward_model"]
         self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
+
         self._window_size = kwargs["window_size"]
         self._skip_frame = kwargs["skip_frame"]
         self.__frames = {
@@ -68,18 +55,18 @@ class FurnitureSimRFE(FurnitureSimEnv):
         self._task_phases = kwargs.get("task_phases", 5)
         self._text_features = {key: self._get_instruct_feature(key) for key in range(self._task_phases)}
 
-        # self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
-        # self._current_instruct = {
-        #     env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
-        # }
-        self._lambda_mr = kwargs.get("lambda_mr", 0.1)
-
         if not self._resize_img:
             self.resize = Resize((224, 224))
             img_size = self.img_size
             ratio = 256 / min(img_size[0], img_size[1])
             ratio_size = (int(img_size[1] * ratio), int(img_size[0] * ratio))
             self.resize_crop = torch.nn.Sequential(Resize(ratio_size), CenterCrop((224, 224)))
+
+    def compute_text_feature(self):
+        self._compute_text_feature = True
+
+    def uncompute_text_feature(self):
+        self._compute_text_feature = False
 
     @property
     def observation_space(self):
@@ -91,6 +78,8 @@ class FurnitureSimRFE(FurnitureSimEnv):
                 image1=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
                 image2=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
                 text_feature=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
+                color_image1=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
+                color_image2=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
             )
         )
 
@@ -115,127 +104,80 @@ class FurnitureSimRFE(FurnitureSimEnv):
     def _batchify(self, data: np.asarray):
         return np.stack(data)
 
-    def _extract_vip_feature(self, obs):
+    def _extract_img_feature(self, layer, obs):
         image1, image2, robot_state = obs["color_image1"], obs["color_image2"], obs["robot_state"]
         with torch.no_grad():
             image1 = torch.tensor(image1).to(self._device)
             image2 = torch.tensor(image2).to(self._device)
 
-            image1 = self.vip_layer(image1).detach().cpu().numpy()
-            image2 = self.vip_layer(image2).detach().cpu().numpy()
+            image1 = layer(image1).detach().cpu().numpy()
+            image2 = layer(image2).detach().cpu().numpy()
 
         return dict(robot_state=robot_state, image1=image1, image2=image2)
-
-    def _extract_liv_feature(self, obs):
-        image1, image2, robot_state = obs["color_image1"], obs["color_image2"], obs["robot_state"]
-        with torch.no_grad():
-            image1 = torch.tensor(image1).to(self._device)
-            image2 = torch.tensor(image2).to(self._device)
-
-            image1 = self.liv_layer(image1).detach().cpu().numpy()
-            image2 = self.liv_layer(image2).detach().cpu().numpy()
-
-        return dict(robot_state=robot_state, color_image1=image1, color_image2=image2)
 
     def _get_instruct_feature(self, phase):
         instruct = get_furniturebench_instruct(self.furniture_name, phase, output_type="all")
         tokens = clip.tokenize(instruct).detach().cpu().numpy()
-        # return self.liv_layer(input=tokens, modality="text").detach().cpu().numpy()
         return np.asarray(self._reward_model.get_text_feature({"instruct": tokens}))
-
-    def _check_reward_condition(self, env_idx, current_reward, next_reward):
-        if (
-            current_reward < self._prev_reward[env_idx]
-            and abs(current_reward - self._prev_reward[env_idx]) > self._negative_trend_eta
-        ):
-            return True, False
-        if next_reward > current_reward:
-            return False, True
-        return False, False
-
-    def _save_prev_reward(self, reward):
-        for env_idx in range(reward.shape[0]):
-            self._prev_reward[env_idx] = (
-                (1 - self.alpha) * self._prev_reward[env_idx] + self.alpha * reward[env_idx]
-            ) / self._lambda_mr
 
     def reset_env(self, idx):
         super().reset_env(idx)
         super().refresh()
-        self.i[idx] = 0
-        # self.phase[idx] = 0
-        # self._prev_reward[idx] = 0
-        # self._task_pass_threshold[idx] = 0
-        # self._task_fail_threshold[idx] = 0
-
-        self.__frames[idx] = {
-            frame: {
-                key: deque([], maxlen=self._window_size)
-                for key in ["color_image2", "color_image1", "timestep", "attn_mask"]
-            }
-            for frame in range(self._skip_frame)
-        }
-        _obs = super()._get_observation(video=False)
-        liv_feat = self._extract_liv_feature(_obs)
-        stack = self.__frames[idx]
-        for frame in range(self._skip_frame):
-            for _ in range(self._window_size):
-                for key in ["color_image2", "color_image1"]:
-                    stack[frame][key].append(np.zeros((self.embedding_dim,)))
-                stack[frame]["timestep"].append(np.asarray(0).astype(np.int32))
-                stack[frame]["attn_mask"].append(np.asarray(0).astype(np.int32))
-        for key in ["color_image2", "color_image1"]:
-            stack[0][key].append(liv_feat[key][idx])
-        stack[0]["timestep"].append(np.asarray(self.i[idx]).astype(np.int32))
-        stack[0]["attn_mask"].append(np.asarray(1).astype(np.int32))
-        phases = np.tile(self._predict_phase(idx), (self.num_envs,))
-        text_feature = np.asarray([self._text_features[phase] for phase in phases])
-        vip_obs = self._extract_vip_feature(_obs)
-        vip_obs.update(dict(text_feature=text_feature))
-        return vip_obs
-
-    def reset(self):
-        self.i = {env_idx: 0 for env_idx in range(self.num_envs)}
-        # self.phase = {env_idx: 0 for env_idx in range(self.num_envs)}
-        # self._prev_reward = {env_idx: 0 for env_idx in range(self.num_envs)}
-        # self._task_pass_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
-        # self._task_fail_threshold = {env_idx: 0 for env_idx in range(self.num_envs)}
-
-        # self._current_instruct = {
-        #     env_idx: self._get_instruct_feature(self.phase[env_idx]) for env_idx in range(self.num_envs)
-        # }
-        self.__frames = {
-            env_idx: {
+        obs = super()._get_observation(video=False)
+        reward_img_feat = self._extract_img_feature(self.reward_img_emb_layer, obs)
+        if self._compute_text_feature:
+            self.i[idx] = 0
+            self.__frames[idx] = {
                 frame: {
                     key: deque([], maxlen=self._window_size)
                     for key in ["color_image2", "color_image1", "timestep", "attn_mask"]
                 }
                 for frame in range(self._skip_frame)
             }
-            for env_idx in range(self.num_envs)
-        }
-
-        obs = super().reset()
-        liv_feat = self._extract_liv_feature(obs)
-        for env_idx in range(self.num_envs):
+            stack = self.__frames[idx]
             for frame in range(self._skip_frame):
                 for _ in range(self._window_size):
                     for key in ["color_image2", "color_image1"]:
-                        self.__frames[env_idx][frame][key].append(np.zeros((self.embedding_dim,)))
-                    self.__frames[env_idx][frame]["timestep"].append(np.asarray(0).astype(np.int32))
-                    self.__frames[env_idx][frame]["attn_mask"].append(np.asarray(0).astype(np.int32))
+                        stack[frame][key].append(np.zeros((self.embedding_dim,)))
+                    stack[frame]["timestep"].append(np.asarray(0).astype(np.int32))
+                    stack[frame]["attn_mask"].append(np.asarray(0).astype(np.int32))
+            for src_key, dst_key in [("image2", "color_image2"), ("image1", "color_image1")]:
+                stack[0][dst_key].append(reward_img_feat[src_key][idx])
+            stack[0]["timestep"].append(np.asarray(self.i[idx]).astype(np.int32))
+            stack[0]["attn_mask"].append(np.asarray(1).astype(np.int32))
+            phases = np.tile(self._predict_phase(idx), (self.num_envs,))
+            text_feature = np.asarray([self._text_features[phase] for phase in phases])
+        else:
+            text_feature = np.zeros((self.num_envs, self.embedding_dim))
 
-            for key in ["color_image2", "color_image1"]:
-                self.__frames[env_idx][0][key].append(liv_feat[key][env_idx])
-            self.__frames[env_idx][0]["timestep"].append(np.asarray(0).astype(np.int32))
-            self.__frames[env_idx][0]["attn_mask"].append(np.asarray(1).astype(np.int32))
+        new_obs = self._extract_img_feature(self.img_emb_layer, obs)
+        new_obs.update(dict(text_feature=text_feature))
+        new_obs.update(
+            dict(
+                color_image1=reward_img_feat["image1"],
+                color_image2=reward_img_feat["image2"],
+            )
+        )
+        return new_obs
 
-        phases = np.concatenate([self._predict_phase(env_idx) for env_idx in range(self.num_envs)])
-        text_feature = np.asarray([self._text_features[phase] for phase in phases])
-        vip_obs = self._extract_vip_feature(obs)
-        vip_obs.update(dict(text_feature=text_feature))
+    def reset(self):
+        obs = super().reset()
+        reward_img_feat = self._extract_img_feature(self.reward_img_emb_layer, obs)
+        new_obs = self._extract_img_feature(self.img_emb_layer, obs)
+        if self._compute_text_feature:
+            phases = np.concatenate([self._predict_phase(env_idx) for env_idx in range(self.num_envs)])
+            text_feature = np.asarray([self._text_features[phase] for phase in phases])
+            new_obs.update(dict(text_feature=text_feature))
+        else:
+            new_obs.update(dict(text_feature=np.zeros((self.num_envs, self.embedding_dim))))
 
-        return vip_obs
+        new_obs.update(
+            dict(
+                color_image1=reward_img_feat["image1"],
+                color_image2=reward_img_feat["image2"],
+            )
+        )
+        return new_obs
 
     def _predict_phase(self, env_idx):
         stacked_obs = {key: [] for key in ["color_image2", "color_image1"]}
@@ -257,22 +199,32 @@ class FurnitureSimRFE(FurnitureSimEnv):
 
     def step(self, action):
         obs, task_reward, done, info = super().step(action)
-        liv_feat = self._extract_liv_feature(obs)
+        reward_img_feat = self._extract_img_feature(self.reward_img_emb_layer, obs)
+        new_obs = self._extract_img_feature(self.img_emb_layer, obs)
 
-        for env_idx in range(self.num_envs):
-            self.i[env_idx] += 1
-            stack = self.__frames[env_idx][self.i[env_idx] % self._skip_frame]
-            for key in ["color_image2", "color_image1"]:
-                stack[key].append(liv_feat[key][env_idx])
-            stack["timestep"].append(np.asarray(self.i[env_idx]).astype(np.int32))
-            stack["attn_mask"].append(np.asarray(1).astype(np.int32))
+        if self._compute_text_feature:
+            for env_idx in range(self.num_envs):
+                self.i[env_idx] += 1
+                stack = self.__frames[env_idx][self.i[env_idx] % self._skip_frame]
+                for src_key, dst_key in [("image2", "color_image2"), ("image1", "color_image1")]:
+                    stack[dst_key].append(reward_img_feat[src_key][env_idx])
 
-        phases = np.concatenate([self._predict_phase(env_idx) for env_idx in range(self.num_envs)])
-        text_feature = np.asarray([self._text_features[phase] for phase in phases])
-        vip_obs = self._extract_vip_feature(obs)
-        vip_obs.update(dict(text_feature=text_feature))
-        info.update({"phases": phases})
-        return vip_obs, task_reward, done, info
+                stack["timestep"].append(np.asarray(self.i[env_idx]).astype(np.int32))
+                stack["attn_mask"].append(np.asarray(1).astype(np.int32))
+            phases = np.concatenate([self._predict_phase(env_idx) for env_idx in range(self.num_envs)])
+            text_feature = np.asarray([self._text_features[phase] for phase in phases])
+            new_obs.update(dict(text_feature=text_feature))
+            info.update({"phases": phases})
+        else:
+            new_obs.update(dict(text_feature=np.zeros((self.num_envs, self.embedding_dim))))
+
+        new_obs.update(
+            dict(
+                color_image1=reward_img_feat["image1"],
+                color_image2=reward_img_feat["image2"],
+            )
+        )
+        return new_obs, task_reward, done, info
 
 
 if __name__ == "__main__":

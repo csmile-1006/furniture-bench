@@ -31,3 +31,27 @@ def str_to_enum(v):
         return Randomness.SKILL_RANDOM
     else:
         raise ValueError(f"Unknown initialization mode: {v}")
+
+
+def load_embedding(encoder_type, device_id):
+    if encoder_type == "r3m":
+        from r3m import load_r3m
+
+        img_emb_layer = load_r3m("resnet50").module
+        embedding_dim = 2048
+    elif encoder_type == "vip":
+        from vip import load_vip
+
+        img_emb_layer = load_vip().module
+        embedding_dim = 1024
+    elif encoder_type == "liv":
+        from liv import load_liv
+
+        img_emb_layer = load_liv().module
+        embedding_dim = 1024
+    else:
+        raise ValueError(f"Unknown encoder type: {encoder_type}")
+    img_emb_layer.requires_grad_(False)
+    img_emb_layer.eval()
+    img_emb_layer = img_emb_layer.to(device_id)
+    return img_emb_layer, embedding_dim
