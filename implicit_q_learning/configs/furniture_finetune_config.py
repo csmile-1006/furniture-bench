@@ -20,13 +20,11 @@ def get_config():
     config.opt_decay_schedule = None  # Don't decay optimizer lr
 
     # transformer setup
-    config.emb_dim = 512
-    config.depth = 2
+    config.emb_dim = 256
+    config.depth = 3
     config.num_heads = 8
 
     # layer norm for critic
     config.critic_layer_norm = True
-    config.use_rnd = False
-    config.beta_rnd = 0.1
 
     return config
