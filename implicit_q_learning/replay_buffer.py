@@ -145,6 +145,7 @@ class ReplayBuffer(IterableDataset):
         obs_keys: Sequence[str] = ("image1", "image2"),
         window_size: int = 4,
         skip_frame: int = 4,
+        lambda_mr: float = 1.0,
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -162,6 +163,7 @@ class ReplayBuffer(IterableDataset):
         self._window_size = window_size
         self._skip_frame = skip_frame
         self._obs_keys = obs_keys
+        self._lambda_mr = lambda_mr
 
     def _sample_episode(self):
         eps_fn = random.choice(self._episode_fns)
@@ -170,7 +172,13 @@ class ReplayBuffer(IterableDataset):
     def _store_episode(self, eps_fn):
         try:
             episode = load_episode(
-                eps_fn, reward_type=self._reward_type, discount=self._discount, obs_keys=self._obs_keys
+                eps_fn,
+                reward_type=self._reward_type,
+                discount=self._discount,
+                obs_keys=self._obs_keys,
+                window_size=self._window_size,
+                skip_frame=self._skip_frame,
+                lambda_mr=self._lambda_mr,
             )
         except Exception as e:
             print(f"Failed to load {eps_fn}: {e}")
@@ -202,7 +210,8 @@ class ReplayBuffer(IterableDataset):
         eps_fns = sorted(self._replay_dir.glob("*.npz"), reverse=True)
         fetched_size = 0
         for eps_fn in eps_fns:
-            eps_tp, eps_idx, eps_len = [int(x) for x in eps_fn.stem.split("_")]
+            eps_tp, eps_idx, eps_len = eps_fn.stem.split("_")
+            eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
             if eps_idx % self._num_workers != worker_id:
                 continue
             if eps_fn in self._episodes.keys():
@@ -219,14 +228,14 @@ class ReplayBuffer(IterableDataset):
         except Exception:
             traceback.print_exc()
         self._samples_since_last_fetch += 1
-        self.__sample()
+        return self.__sample()
 
     def __sample(self):
         episode = self._sample_episode()
-        idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
+        idx = np.random.randint(0, episode_len(episode) - 1 - self._nstep)
         obs = episode["observations"][episode["timesteps"][idx]]
         action = episode["actions"][idx]
-        next_obs = episode["next_observations"][episode["next_timesteps"][idx + self._nstep - 1]]
+        next_obs = episode["observations"][episode["next_timesteps"][idx + self._nstep]]
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -234,7 +243,7 @@ class ReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        if obs.shape[-1] == self._embedding * 2:
+        if obs.shape[-1] == self._embedding_dim * 2:
             image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
             next_image1, next_image2 = np.split(next_obs, [self._embedding_dim], axis=-1)
             observation = dict(image1=image1, image2=image2)

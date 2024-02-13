@@ -3,28 +3,26 @@ import os
 from collections import deque
 from pathlib import Path
 
-import gym
 import clip
+import gym
 import numpy as np
 import tqdm
 import wandb
-from absl import app, flags
-from ml_collections import config_flags
-from tensorboardX import SummaryWriter
-from ml_collections import ConfigDict
-from tqdm import trange
-from rich.console import Console
-
-from furniture_bench.sim_config import sim_config
-
 import wrappers
-from replay_buffer import make_replay_loader, ReplayBufferStorage
-from dataset_utils import Batch, gaussian_smoothe
-from evaluation import evaluate
-from learner import Learner
-
+import flax.linen as nn
+from absl import app, flags
 from bpref_v2.data.instruct import get_furniturebench_instruct
 from bpref_v2.data.label_reward_furniturebench import load_reward_model
+from dataset_utils import gaussian_smoothe
+from evaluation import evaluate
+from learner import Learner
+from ml_collections import ConfigDict, config_flags
+from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
+from rich.console import Console
+from tensorboardX import SummaryWriter
+from tqdm import trange
+
+from furniture_bench.sim_config import sim_config
 
 console = Console()
 FLAGS = flags.FLAGS
@@ -48,6 +46,7 @@ flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
 flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_steps if unspecified).")
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
+flags.DEFINE_boolean("save_snapshot", False, "save snapshot of replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_string("data_path", "", "Path to data.")
 flags.DEFINE_integer("num_success_demos", 100, "Number of success demonstrations.")
@@ -63,6 +62,7 @@ flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
 flags.DEFINE_integer("skip_frame", 4, "how often skip frame.")
 flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
+flags.DEFINE_string("reward_encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
@@ -141,7 +141,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
         stacked_attn_masks = np.asarray(stacked_attn_masks)
 
         rewards, video_features, text_features = [], [], []
-        batch_size = 32
+        batch_size = 256
         for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
             _range = range(i, min(i + batch_size, len_demos))
             batch = {
@@ -169,16 +169,25 @@ def compute_multimodal_reward(reward_model, **kwargs):
             output["text_features"] = np.asarray(text_features)
         return output
 
-    multimodal_rewards = _get_reward(img_features=img_features)
+    output = _get_reward(img_features=img_features)
     # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
-    multimodal_rewards = multimodal_rewards[1:].tolist()
+    multimodal_rewards = output["rewards"][1:].tolist()
     multimodal_rewards = np.asarray(multimodal_rewards + multimodal_rewards[-1:]).astype(np.float32)
     final_rewards = multimodal_rewards * lambda_mr
-    return final_rewards
+    return {
+        "rewards": final_rewards[..., None],
+        "text_features": output.get("text_features", []),
+    }
 
 
 def make_env_and_dataset(
-    env_name: str, seed: int, randomness: str, data_path: str, encoder_type: str, lambda_mr: float
+    env_name: str,
+    seed: int,
+    randomness: str,
+    data_path: str,
+    encoder_type: str,
+    lambda_mr: float,
+    reward_model: nn.Module = None,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -192,6 +201,7 @@ def make_env_and_dataset(
             furniture=furniture_name,
             data_path=data_path,
             encoder_type=encoder_type,
+            reward_encoder_type=FLAGS.reward_encoder_type,
             headless=True,
             record=True,
             resize_img=True,
@@ -203,6 +213,7 @@ def make_env_and_dataset(
             window_size=FLAGS.window_size,
             skip_frame=FLAGS.skip_frame,
             max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
+            reward_model=reward_model,
         )
     else:
         env = gym.make(env_name)
@@ -215,8 +226,8 @@ def make_env_and_dataset(
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
 
-    import torch
     import random
+    import torch
 
     torch.manual_seed(seed)
     random.seed(seed)
@@ -239,6 +250,16 @@ def make_env_and_dataset(
             "success": FLAGS.num_success_demos,
             "failure": FLAGS.num_failure_demos,
         },
+        obs_keys=tuple(
+            [
+                key
+                for key in env.observation_space.spaces.keys()
+                if key not in ["robot_state", "color_image1", "color_image2"]
+            ]
+        ),
+        window_size=FLAGS.window_size,
+        skip_frame=FLAGS.skip_frame,
+        lambda_mr=FLAGS.lambda_mr,
     )
 
     return env, dataloader
@@ -269,7 +290,7 @@ def _initialize_traj_dict():
                 "actions",
                 "rewards",
                 "masks",
-                "done_floats",
+                "terminals",
                 "next_observations",
             ]
         }
@@ -286,7 +307,7 @@ def _reset_traj_dict(traj_dict, env_idx):
             "actions",
             "rewards",
             "masks",
-            "done_floats",
+            "terminals",
             "next_observations",
         ]
     }
@@ -307,6 +328,25 @@ def main(_):
     os.makedirs(buffer_dir, exist_ok=True)
     os.makedirs(eval_dir, exist_ok=True)
 
+    reward_model = None
+    if FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
+        # load reward model.
+        rm_ckpt_path = (
+            Path(FLAGS.rm_ckpt_path).expanduser()
+            / FLAGS.env_name.split("/")[-1]
+            / f"w{FLAGS.window_size}-s{FLAGS.skip_frame}-nfp1.0-c1.0@0.1-supc1.0-ep0.2-demo500-total-phase"
+            / "s0"
+            / "best_model.pkl"
+        )
+        reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=rm_ckpt_path)
+
+        args = ConfigDict()
+        args.task_name = FLAGS.env_name.split("/")[-1]
+        args.image_keys = "color_image2|color_image1"
+        args.window_size = FLAGS.window_size
+        args.skip_frame = FLAGS.skip_frame
+        args.lambda_mr = FLAGS.lambda_mr
+
     env, offline_loader = make_env_and_dataset(
         FLAGS.env_name,
         FLAGS.seed,
@@ -314,6 +354,7 @@ def main(_):
         FLAGS.data_path,
         FLAGS.encoder_type,
         FLAGS.lambda_mr,
+        reward_model=reward_model,
     )
 
     replay_storage = ReplayBufferStorage(
@@ -325,11 +366,21 @@ def main(_):
         max_size=FLAGS.replay_buffer_size,
         batch_size=int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio)),
         num_workers=FLAGS.num_workers,
-        save_snapshot=False,
+        save_snapshot=FLAGS.save_snapshot,
         nstep=FLAGS.n_step,
         discount=FLAGS.config.discount,
         buffer_type="online",
         reward_type=FLAGS.reward_type,
+        obs_keys=tuple(
+            [
+                key
+                for key in env.observation_space.spaces.keys()
+                if key not in ["robot_state", "color_image1", "color_image2"]
+            ]
+        ),
+        window_size=FLAGS.window_size,
+        skip_frame=FLAGS.skip_frame,
+        lambda_mr=FLAGS.lambda_mr,
     )
 
     kwargs = dict(FLAGS.config)
@@ -357,23 +408,6 @@ def main(_):
         max_steps=FLAGS.max_steps,
         **kwargs,
     )
-    if FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
-        # load reward model.
-        rm_ckpt_path = (
-            Path(FLAGS.rm_ckpt_path).expanduser()
-            / FLAGS.env_name.split("/")[-1]
-            / f"w{FLAGS.window_size}-s{FLAGS.skip_frame}-nfp1.0-c1.0@0.5-supc1.0-ep0.5-demo100-total-phase"
-            / "s0"
-            / "best_model.pkl"
-        )
-        reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=rm_ckpt_path)
-
-        args = ConfigDict()
-        args.task_name = FLAGS.env_name.split("/")[-1]
-        args.image_keys = "color_image2|color_image1"
-        args.window_size = FLAGS.window_size
-        args.skip_frame = FLAGS.skip_frame
-        args.lambda_mr = FLAGS.lambda_mr
 
     def batch_to_jax(y):
         return jax.tree_util.tree_map(lambda x: x.numpy(), y)
@@ -420,6 +454,8 @@ def main(_):
     observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
     start_training = env.furniture.max_env_steps * FLAGS.num_envs
 
+    offline_replay_iter, online_replay_iter = None, None
+
     with online_pbar:
         while i <= steps:
             action = agent.sample_actions(observation, temperature=FLAGS.temperature)
@@ -445,20 +481,23 @@ def main(_):
                 trajectories[env_idx]["actions"].append(action[env_idx])
                 trajectories[env_idx]["rewards"].append(reward[env_idx])
                 trajectories[env_idx]["masks"].append(mask[env_idx])
-                trajectories[env_idx]["done_floats"].append(done[env_idx])
+                trajectories[env_idx]["terminals"].append(done[env_idx])
 
-            for env_idx in range(FLAGS.num_envs):
                 if done[env_idx]:
                     if np.any(done) and FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
                         output = compute_multimodal_reward(
                             trajectories=trajectories[env_idx], reward_model=reward_model, args=args
                         )
                         trajectories[env_idx]["multimodal_rewards"] = output["rewards"]
-                        for idx in range(output["rewards"]):
-                            trajectories[env_idx]["observations"][idx]["text_feature"] = output["text_features"][idx]
-                            trajectories[env_idx]["next_observations"][idx]["text_feature"] = output["text_features"][
-                                min(idx + 1, len(output["rewards"]) - 1)
-                            ]
+                        if "text_feature" in env.observation_space.keys():
+                            for idx in range(output["rewards"]):
+                                trajectories[env_idx]["observations"][idx]["text_feature"] = output["text_features"][
+                                    idx
+                                ]
+                                trajectories[env_idx]["next_observations"][idx]["text_feature"] = output[
+                                    "text_features"
+                                ][min(idx + 1, len(output["rewards"]) - 1)]
+                        info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
                     replay_storage.add_episode(trajectories[env_idx])
                     new_ob = env.reset_env(env_idx)
                     for key in next_observation:
@@ -469,39 +508,43 @@ def main(_):
                     trajectories = _reset_traj_dict(trajectories, env_idx)
 
             if i > start_training:
-                for env_idx, offline_batch, online_batch in zip(range(FLAGS.num_envs), offline_loader, online_loader):
-                    offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
-                    combined = combine(offline_batch, online_batch)
+                if offline_replay_iter is None and online_replay_iter is None:
+                    offline_replay_iter, online_replay_iter = iter(offline_loader), iter(online_loader)
+                offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
+                offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
+                combined = combine(offline_batch, online_batch)
+                batch = Batch(
+                    observations=combined["observations"],
+                    actions=combined["actions"],
+                    rewards=combined["rewards"],
+                    masks=combined["masks"],
+                    next_observations=combined["next_observations"],
+                )
+                if "antmaze" in FLAGS.env_name:
                     batch = Batch(
-                        observations=combined["observations"],
-                        actions=combined["actions"],
-                        rewards=combined["rewards"],
-                        masks=combined["masks"],
-                        next_observations=combined["next_observations"],
+                        observations=batch.observations,
+                        actions=batch.actions,
+                        rewards=batch.rewards - 1,
+                        masks=batch.masks,
+                        next_observations=batch.next_observations,
                     )
-                    if "antmaze" in FLAGS.env_name:
-                        batch = Batch(
-                            observations=batch.observations,
-                            actions=batch.actions,
-                            rewards=batch.rewards - 1,
-                            masks=batch.masks,
-                            next_observations=batch.next_observations,
-                        )
-                    update_info = agent.update(batch)
+                update_info = agent.update(batch)
 
-                    if i % FLAGS.log_interval == 0:
-                        for k, v in update_info.items():
-                            if v.ndim == 0:
-                                summary_writer.add_scalar(f"training/{k}", v, i + env_idx)
-                            else:
-                                summary_writer.add_histogram(f"training/{k}", v, i + env_idx)
+                if i % FLAGS.log_interval == 0:
+                    for k, v in update_info.items():
+                        if v.ndim == 0:
+                            summary_writer.add_scalar(f"training/{k}", v, i)
+                        else:
+                            summary_writer.add_histogram(f"training/{k}", v, i)
             observation = next_observation
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if False and i % FLAGS.eval_interval == 0:
+            if i and i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
+                if getattr(env.unwrapped, "compute_text_feature", None):
+                    env.unwrapped.compute_text_feature()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():
@@ -516,7 +559,10 @@ def main(_):
                 )
                 observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
                 trajectories = _initialize_traj_dict()
+
                 env.unset_eval_flag()
+                if getattr(env.unwrapped, "uncompute_text_feature", None):
+                    env.unwrapped.uncompute_text_feature()
 
             i += done.shape[0]
             online_pbar.update(done.shape[0])
