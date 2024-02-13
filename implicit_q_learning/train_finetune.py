@@ -356,6 +356,8 @@ def main(_):
         FLAGS.lambda_mr,
         reward_model=reward_model,
     )
+    if getattr(env.unwrapped, "compute_text_feature", None):
+        env.unwrapped.compute_text_feature()
 
     replay_storage = ReplayBufferStorage(
         replay_dir=Path(buffer_dir).expanduser(),
@@ -437,15 +439,11 @@ def main(_):
 
             if i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
-                if getattr(env.unwrapped, "compute_text_feature", None):
-                    env.unwrapped.compute_text_feature()
                 eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
                 for k, v in eval_info.items():
                     summary_writer.add_scalar(f"offline-evaluation/{k}", v, i)
                 summary_writer.flush()
                 env.unset_eval_flag()
-                if getattr(env.unwrapped, "uncompute_text_feature", None):
-                    env.unwrapped.uncompute_text_feature()
 
             if i % FLAGS.ckpt_interval == 0:
                 agent.save(ckpt_dir, i)
@@ -547,8 +545,6 @@ def main(_):
 
             if i and i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
-                if getattr(env.unwrapped, "compute_text_feature", None):
-                    env.unwrapped.compute_text_feature()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():
@@ -565,9 +561,6 @@ def main(_):
                 trajectories = _initialize_traj_dict()
 
                 env.unset_eval_flag()
-                if getattr(env.unwrapped, "uncompute_text_feature", None):
-                    env.unwrapped.uncompute_text_feature()
-
             i += done.shape[0]
             online_pbar.update(done.shape[0])
             online_pbar.set_description(f" current {i} / total step {steps}")
