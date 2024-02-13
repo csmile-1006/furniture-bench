@@ -437,11 +437,15 @@ def main(_):
 
             if i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
+                if getattr(env.unwrapped, "compute_text_feature", None):
+                    env.unwrapped.compute_text_feature()
                 eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
                 for k, v in eval_info.items():
                     summary_writer.add_scalar(f"offline-evaluation/{k}", v, i)
                 summary_writer.flush()
                 env.unset_eval_flag()
+                if getattr(env.unwrapped, "uncompute_text_feature", None):
+                    env.unwrapped.uncompute_text_feature()
 
             if i % FLAGS.ckpt_interval == 0:
                 agent.save(ckpt_dir, i)
