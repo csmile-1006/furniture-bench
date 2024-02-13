@@ -206,7 +206,7 @@ def make_env_and_dataset(
             record=True,
             resize_img=True,
             randomness=randomness,
-            record_every=20,
+            record_every=5,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
