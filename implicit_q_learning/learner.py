@@ -158,7 +158,7 @@ class Learner(object):
         #     dropout_rate=dropout_rate,
         #     state_dependent_std=False,
         #     tanh_squash_distribution=False,
-        #     encoder_cls=encoder_cls,
+        #     encoder_cls=actor_encoder_cls,
         #     obs_keys=obs_keys,
         # )
         actor_def = policy.NormalTanhMixturePolicy(
