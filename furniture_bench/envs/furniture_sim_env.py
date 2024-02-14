@@ -171,7 +171,6 @@ class FurnitureSimEnv(gym.Env):
         self.record = record
         self.record_dir = record_dir
         self.record_every = record_every
-        self.record_idx = 5
         self.video_writer = {key: None for key in range(self.num_envs)}
 
         if act_rot_repr != "quat" and act_rot_repr != "axis" and act_rot_repr != "rot_6d":
@@ -1002,7 +1001,7 @@ class FurnitureSimEnv(gym.Env):
                 and self.record
                 and self.episode_cnts[env_idx]
                 and self.episode_cnts[env_idx] % self.record_every == 0
-                and env_idx % self.record_idx == 0
+                and env_idx % self.num_envs == 0
             ):
                 record_images = []
                 for k in sorted(color_obs.keys()):
@@ -1114,10 +1113,11 @@ class FurnitureSimEnv(gym.Env):
         if self.video_writer.get(env_idx) is not None:
             self.video_writer[env_idx].release()
             self.video_writer[env_idx] = None
-        if self.record and self.episode_cnts[env_idx] % self.record_every == 0 and env_idx % self.record_idx == 0:
-            record_dir = Path(
-                self.record_dir
-            ) / f"env{env_idx}_ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        if self.record and self.episode_cnts[env_idx] % self.record_every == 0 and env_idx % self.num_envs == 0:
+            record_dir = (
+                Path(self.record_dir)
+                / f"env{env_idx}_ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
             record_dir.mkdir(parents=True, exist_ok=True)
             self.video_writer[env_idx] = cv2.VideoWriter(
                 str(record_dir / "video.mp4"),
@@ -1438,7 +1438,7 @@ class FurnitureSimEnv(gym.Env):
                 self.record
                 and self.episode_cnts[env_idx] % self.record_every == 0
                 and self.video_writer.get(env_idx) is not None
-                and env_idx % self.record_idx == 0
+                and env_idx % self.num_envs == 0
             ):
                 self.video_writer[env_idx].release()
 

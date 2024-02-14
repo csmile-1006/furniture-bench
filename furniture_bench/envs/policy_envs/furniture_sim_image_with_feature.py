@@ -35,34 +35,13 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
     @property
     def observation_space(self):
         robot_state_dim = 14
-
         return spaces.Dict(
             dict(
-                robot_state=spaces.Box(
-                    -np.inf,
-                    np.inf,
-                    (robot_state_dim,),
-                ),
-                image1=spaces.Box(
-                    -np.inf,
-                    np.inf,
-                    (self.embedding_dim,),
-                ),
-                image2=spaces.Box(
-                    -np.inf,
-                    np.inf,
-                    (self.embedding_dim,),
-                ),
-                color_image1=spaces.Box(
-                    -np.inf,
-                    np.inf,
-                    (self.embedding_dim,),
-                ),
-                color_image2=spaces.Box(
-                    -np.inf,
-                    np.inf,
-                    (self.embedding_dim,),
-                ),
+                robot_state=spaces.Box(-np.inf, np.inf, (robot_state_dim,)),
+                image1=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
+                image2=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
+                color_image1=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
+                color_image2=spaces.Box(-np.inf, np.inf, (self.embedding_dim,)),
             )
         )
 

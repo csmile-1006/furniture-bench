@@ -71,7 +71,6 @@ class FurnitureSimRFE(FurnitureSimEnv):
     @property
     def observation_space(self):
         robot_state_dim = 14
-
         return spaces.Dict(
             dict(
                 robot_state=spaces.Box(-np.inf, np.inf, (robot_state_dim,)),

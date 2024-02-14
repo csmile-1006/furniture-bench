@@ -40,7 +40,7 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
-flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
+flags.DEFINE_float("offline_ratio", 0.25, "Offline ratio.")
 flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
@@ -299,8 +299,8 @@ def _initialize_traj_dict():
     return trajectories
 
 
-def _reset_traj_dict(traj_dict, env_idx):
-    traj_dict[env_idx] = {
+def _reset_traj_dict():
+    return {
         key: []
         for key in [
             "observations",
@@ -311,7 +311,6 @@ def _reset_traj_dict(traj_dict, env_idx):
             "next_observations",
         ]
     }
-    return traj_dict
 
 
 def main(_):
@@ -437,13 +436,13 @@ def main(_):
                     else:
                         summary_writer.add_histogram(f"offline-training/{k}", v, i)
 
-            if i % FLAGS.eval_interval == 0:
-                env.set_eval_flag()
-                eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
-                for k, v in eval_info.items():
-                    summary_writer.add_scalar(f"offline-evaluation/{k}", v, i)
-                summary_writer.flush()
-                env.unset_eval_flag()
+            # if i % FLAGS.eval_interval == 0:
+            #     env.set_eval_flag()
+            #     eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
+            #     for k, v in eval_info.items():
+            #         summary_writer.add_scalar(f"offline-evaluation/{k}", v, i)
+            #     summary_writer.flush()
+            #     env.unset_eval_flag()
 
             if i % FLAGS.ckpt_interval == 0:
                 agent.save(ckpt_dir, i)
@@ -507,7 +506,8 @@ def main(_):
                     done[env_idx] = False
                     for k, v in info[f"episode_{env_idx}"].items():
                         summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
-                    trajectories = _reset_traj_dict(trajectories, env_idx)
+                    del trajectories[env_idx]
+                    trajectories[env_idx] = _reset_traj_dict()
 
             if i > start_training:
                 if offline_replay_iter is None and online_replay_iter is None:
@@ -543,7 +543,7 @@ def main(_):
             if i != start_step and i % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if i and i % FLAGS.eval_interval == 0:
+            if i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
