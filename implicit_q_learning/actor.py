@@ -36,6 +36,7 @@ def update(
                 "adv_max": adv.max(),
                 "adv_std": adv.std(),
                 "updated_states": updated_states,
+                "log_probs_mean": log_probs.mean(),
             },
         )
 

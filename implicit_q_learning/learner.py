@@ -1,7 +1,7 @@
 """Implementations of algorithms for continuous control."""
 
 from functools import partial
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, Callable
 
 import flax.linen as nn
 import jax
@@ -92,7 +92,7 @@ class Learner(object):
         obs_keys: Sequence[str] = ("image1", "image2"),
         model_type: str = "transformer",
         normalize_inputs: bool = True,
-        activations: Optional[nn.activation.Activation] = nn.leaky_relu,
+        activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu,
         use_sigmareparam: bool = True,
     ):
         """
@@ -265,6 +265,7 @@ class Learner(object):
         self.target_critic = new_target_critic
 
         info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
+        info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 
     def save(self, ckpt_dir, step):
