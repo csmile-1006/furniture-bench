@@ -514,32 +514,33 @@ def main(_):
             if i > start_training:
                 if offline_replay_iter is None and online_replay_iter is None:
                     offline_replay_iter, online_replay_iter = iter(offline_loader), iter(online_loader)
-                offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
-                offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
-                combined = combine(offline_batch, online_batch)
-                batch = Batch(
-                    observations=combined["observations"],
-                    actions=combined["actions"],
-                    rewards=combined["rewards"],
-                    masks=combined["masks"],
-                    next_observations=combined["next_observations"],
-                )
-                if "antmaze" in FLAGS.env_name:
+                for _ in range(FLAGS.num_envs):
+                    offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
+                    offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
+                    combined = combine(offline_batch, online_batch)
                     batch = Batch(
-                        observations=batch.observations,
-                        actions=batch.actions,
-                        rewards=batch.rewards - 1,
-                        masks=batch.masks,
-                        next_observations=batch.next_observations,
+                        observations=combined["observations"],
+                        actions=combined["actions"],
+                        rewards=combined["rewards"],
+                        masks=combined["masks"],
+                        next_observations=combined["next_observations"],
                     )
-                update_info = agent.update(batch)
+                    if "antmaze" in FLAGS.env_name:
+                        batch = Batch(
+                            observations=batch.observations,
+                            actions=batch.actions,
+                            rewards=batch.rewards - 1,
+                            masks=batch.masks,
+                            next_observations=batch.next_observations,
+                        )
+                    update_info = agent.update(batch)
 
-                if i % FLAGS.log_interval == 0:
-                    for k, v in update_info.items():
-                        if v.ndim == 0:
-                            summary_writer.add_scalar(f"training/{k}", v, i)
-                        else:
-                            summary_writer.add_histogram(f"training/{k}", v, i)
+                    if i % FLAGS.log_interval == 0:
+                        for k, v in update_info.items():
+                            if v.ndim == 0:
+                                summary_writer.add_scalar(f"training/{k}", v, i)
+                            else:
+                                summary_writer.add_histogram(f"training/{k}", v, i)
             observation = next_observation
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:
