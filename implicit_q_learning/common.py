@@ -161,6 +161,7 @@ class FeedForward(nn.Module):
     kernel_init: Callable = nn.initializers.xavier_uniform()
     bias_init: Callable = nn.initializers.zeros
     deterministic: Optional[bool] = None
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     use_sigmareparam: bool = True
 
     @nn.compact
@@ -182,7 +183,7 @@ class FeedForward(nn.Module):
                 name="fc1",
             )(batch)
 
-        x = nn.leaky_relu(x)
+        x = self.activations(x)
         x = nn.Dropout(self.dropout)(x, deterministic)
         if self.use_sigmareparam:
             x = SNDense(
@@ -213,6 +214,7 @@ class Attention(nn.Module):
     kernel_init: Callable = nn.linear.default_kernel_init
     bias_init: Callable = nn.initializers.zeros
     deterministic: Optional[bool] = None
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     use_sigmareparam: bool = True
 
     @nn.compact
@@ -275,22 +277,32 @@ class Block(nn.Module):
     mlp_ratio: int = 4
     att_drop: float = 0.0
     drop: float = 0.0
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
+    use_sigmareparam: bool = True
 
     @nn.compact
     def __call__(self, batch, deterministic=False, custom_mask=None):
         x = nn.LayerNorm()(batch)
         x = Attention(
-            self.dim,
-            self.num_heads,
-            True,
-            self.att_drop,
-            self.drop,
+            dim=self.dim,
+            num_heads=self.num_heads,
+            use_bias=True,
+            att_drop=self.att_drop,
+            proj_drop=self.drop,
+            use_sigmareparam=self.use_sigmareparam,
         )(x, deterministic, custom_mask)
         x = nn.LayerNorm()(x)
         batch = batch + x
 
         x = nn.LayerNorm()(batch)
-        x = FeedForward(self.dim * self.mlp_ratio, self.dim, self.drop)(x, deterministic)
+        x = FeedForward(
+            dim=self.dim * self.mlp_ratio,
+            out_dim=self.dim,
+            dropout=self.drop,
+            use_bias=True,
+            activations=self.activations,
+            use_sigmareparam=self.use_sigmareparam,
+        )(x, deterministic)
         return batch + x
 
 
@@ -304,6 +316,8 @@ class TransformerEncoder(nn.Module):
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
     stop_gradient: bool = False
     normalize_inputs: bool = True
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
+    use_sigmareparam: bool = True
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
@@ -320,7 +334,7 @@ class TransformerEncoder(nn.Module):
         embed = MLP(
             [self.emb_dim, self.emb_dim, self.emb_dim],
             dropout_rate=self.drop,
-            activations=nn.leaky_relu,
+            activations=self.activations,
             name="FeatureMLP",
         )(features)
         embed = embed + get_1d_sincos_pos_embed(embed.shape[-1], num_timestep)
@@ -334,6 +348,8 @@ class TransformerEncoder(nn.Module):
                 mlp_ratio=self.mlp_ratio,
                 att_drop=self.att_drop,
                 drop=self.drop,
+                activations=self.activations,
+                use_sigmareparam=self.use_sigmareparam,
             )(x, deterministic, custom_mask)
 
         x = nn.LayerNorm()(x)

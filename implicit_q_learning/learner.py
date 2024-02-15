@@ -1,17 +1,17 @@
 """Implementations of algorithms for continuous control."""
 
-from typing import Optional, Sequence, Tuple
 from functools import partial
+from typing import Optional, Sequence, Tuple
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-
 import policy
 import value_net
 from actor import update as awr_update_actor
-from common import Batch, InfoDict, Model, PRNGKey, TransformerEncoder, CrossAttnTransformerEncoder
+from common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 from critic import update_q, update_v
 
 
@@ -91,6 +91,9 @@ class Learner(object):
         critic_layer_norm: bool = False,
         obs_keys: Sequence[str] = ("image1", "image2"),
         model_type: str = "transformer",
+        normalize_inputs: bool = True,
+        activations: Optional[nn.activation.Activation] = nn.leaky_relu,
+        use_sigmareparam: bool = True,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -121,6 +124,9 @@ class Learner(object):
                 num_heads=num_heads,
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
+                normalize_inputs=normalize_inputs,
+                activations=activations,
+                use_sigmareparam=use_sigmareparam,
             )
             actor_encoder_cls = partial(
                 CrossAttnTransformerEncoder,
@@ -129,6 +135,9 @@ class Learner(object):
                 num_heads=num_heads,
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
+                normalize_inputs=normalize_inputs,
+                activations=activations,
+                use_sigmareparam=use_sigmareparam,
             )
         else:
             print("[INFO] use TransformerEncoder")
@@ -139,6 +148,9 @@ class Learner(object):
                 num_heads=num_heads,
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
+                normalize_inputs=normalize_inputs,
+                activations=activations,
+                use_sigmareparam=use_sigmareparam,
             )
             actor_encoder_cls = partial(
                 TransformerEncoder,
@@ -147,6 +159,9 @@ class Learner(object):
                 num_heads=num_heads,
                 att_drop=0.0 if dropout_rate is None else dropout_rate,
                 drop=0.0 if dropout_rate is None else dropout_rate,
+                normalize_inputs=normalize_inputs,
+                activations=activations,
+                use_sigmareparam=use_sigmareparam,
             )
 
         action_dim = actions.shape[-1]

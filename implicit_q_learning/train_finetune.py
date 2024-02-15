@@ -175,18 +175,16 @@ def compute_multimodal_reward(reward_model, **kwargs):
     multimodal_rewards = np.asarray(multimodal_rewards + multimodal_rewards[-1:]).astype(np.float32)
     final_rewards = multimodal_rewards * lambda_mr
     return {
-        "rewards": final_rewards[..., None],
+        "rewards": final_rewards,
         "text_features": output.get("text_features", []),
     }
 
 
-def make_env_and_dataset(
+def make_env(
     env_name: str,
     seed: int,
     randomness: str,
-    data_path: str,
     encoder_type: str,
-    lambda_mr: float,
     reward_model: nn.Module = None,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
@@ -199,7 +197,6 @@ def make_env_and_dataset(
             env_id,
             num_envs=FLAGS.num_envs,
             furniture=furniture_name,
-            data_path=data_path,
             encoder_type=encoder_type,
             reward_encoder_type=FLAGS.reward_encoder_type,
             headless=True,
@@ -236,10 +233,14 @@ def make_env_and_dataset(
     console.print("Observation space", env.observation_space)
     console.print("Action space", env.action_space)
 
-    dataloader = make_replay_loader(
+    return env
+
+
+def make_offline_loader(env, data_path, batch_size):
+    return make_replay_loader(
         replay_dir=Path(data_path).expanduser(),
         max_size=1e6,
-        batch_size=int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio),
+        batch_size=batch_size,
         num_workers=FLAGS.num_workers,
         save_snapshot=True,
         nstep=FLAGS.n_step,
@@ -262,8 +263,6 @@ def make_env_and_dataset(
         lambda_mr=FLAGS.lambda_mr,
     )
 
-    return env, dataloader
-
 
 def combine(one_dict, other_dict):
     combined = {}
@@ -272,10 +271,13 @@ def combine(one_dict, other_dict):
     for k, v in one_dict.items():
         if isinstance(v, dict):
             combined[k] = combine(v, other_dict[k])
-        else:
-            tmp = np.empty((v.shape[0] + other_dict[k].shape[0], *other_dict[k].shape[1:]), dtype=v.dtype)
-            tmp[0::2] = np.expand_dims(v, axis=1) if tmp.ndim != v.ndim else v
+        elif v.shape[0] == other_dict[k].shape[0]:
+            tmp = np.empty((v.shape[0] + other_dict[k].shape[0], *v.shape[1:]), dtype=v.dtype)
+            tmp[0::2] = v
             tmp[1::2] = other_dict[k]
+            combined[k] = tmp
+        else:
+            tmp = np.concatenate([v, other_dict[k]], axis=0)
             combined[k] = tmp
 
     return combined
@@ -289,7 +291,6 @@ def _initialize_traj_dict():
                 "observations",
                 "actions",
                 "rewards",
-                "masks",
                 "terminals",
                 "next_observations",
             ]
@@ -306,7 +307,6 @@ def _reset_traj_dict():
             "observations",
             "actions",
             "rewards",
-            "masks",
             "terminals",
             "next_observations",
         ]
@@ -346,43 +346,15 @@ def main(_):
         args.skip_frame = FLAGS.skip_frame
         args.lambda_mr = FLAGS.lambda_mr
 
-    env, offline_loader = make_env_and_dataset(
+    env = make_env(
         FLAGS.env_name,
         FLAGS.seed,
         FLAGS.randomness,
-        FLAGS.data_path,
         FLAGS.encoder_type,
-        FLAGS.lambda_mr,
         reward_model=reward_model,
     )
     if getattr(env.unwrapped, "compute_text_feature", None):
         env.unwrapped.compute_text_feature()
-
-    replay_storage = ReplayBufferStorage(
-        replay_dir=Path(buffer_dir).expanduser(),
-        max_env_steps=env.furniture.max_env_steps,
-    )
-    online_loader = make_replay_loader(
-        replay_dir=Path(buffer_dir).expanduser(),
-        max_size=FLAGS.replay_buffer_size,
-        batch_size=int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio)),
-        num_workers=FLAGS.num_workers,
-        save_snapshot=FLAGS.save_snapshot,
-        nstep=FLAGS.n_step,
-        discount=FLAGS.config.discount,
-        buffer_type="online",
-        reward_type=FLAGS.reward_type,
-        obs_keys=tuple(
-            [
-                key
-                for key in env.observation_space.spaces.keys()
-                if key not in ["robot_state", "color_image1", "color_image2"]
-            ]
-        ),
-        window_size=FLAGS.window_size,
-        skip_frame=FLAGS.skip_frame,
-        lambda_mr=FLAGS.lambda_mr,
-    )
 
     kwargs = dict(FLAGS.config)
     if FLAGS.wandb:
@@ -413,6 +385,7 @@ def main(_):
     def batch_to_jax(y):
         return jax.tree_util.tree_map(lambda x: x.numpy(), y)
 
+    offline_loader = make_offline_loader(env, FLAGS.data_path, FLAGS.batch_size)
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         console.print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
         agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
@@ -447,6 +420,33 @@ def main(_):
             if i % FLAGS.ckpt_interval == 0:
                 agent.save(ckpt_dir, i)
 
+    offline_loader = make_offline_loader(env, FLAGS.data_path, int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio))
+    replay_storage = ReplayBufferStorage(
+        replay_dir=Path(buffer_dir).expanduser(),
+        max_env_steps=env.furniture.max_env_steps,
+    )
+    online_loader = make_replay_loader(
+        replay_dir=Path(buffer_dir).expanduser(),
+        max_size=FLAGS.replay_buffer_size,
+        batch_size=int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio)),
+        num_workers=FLAGS.num_workers,
+        save_snapshot=FLAGS.save_snapshot,
+        nstep=FLAGS.n_step,
+        discount=FLAGS.config.discount,
+        buffer_type="online",
+        reward_type=FLAGS.reward_type,
+        obs_keys=tuple(
+            [
+                key
+                for key in env.observation_space.spaces.keys()
+                if key not in ["robot_state", "color_image1", "color_image2"]
+            ]
+        ),
+        window_size=FLAGS.window_size,
+        skip_frame=FLAGS.skip_frame,
+        lambda_mr=FLAGS.lambda_mr,
+    )
+
     start_step, steps = 0, FLAGS.max_steps + 1
     online_pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="online-training")
     i = start_step
@@ -454,7 +454,6 @@ def main(_):
     trajectories = _initialize_traj_dict()
     observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
     start_training = env.furniture.max_env_steps * FLAGS.num_envs
-
     offline_replay_iter, online_replay_iter = None, None
 
     with online_pbar:
@@ -467,12 +466,8 @@ def main(_):
                     action[j] = np.array(action[j])
                     action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
 
-            mask = np.zeros((FLAGS.num_envs,), dtype=np.float32)
+            reward, done = reward.squeeze(), done.squeeze()
             for env_idx in range(FLAGS.num_envs):
-                if not done[env_idx] or "TimeLimit.truncated" in info:
-                    mask[env_idx] = 1.0
-                else:
-                    mask[env_idx] = 0.0
                 trajectories[env_idx]["observations"].append(
                     {key: observation[key][env_idx][-1] for key in observation.keys()}
                 )
@@ -481,7 +476,6 @@ def main(_):
                 )
                 trajectories[env_idx]["actions"].append(action[env_idx])
                 trajectories[env_idx]["rewards"].append(reward[env_idx])
-                trajectories[env_idx]["masks"].append(mask[env_idx])
                 trajectories[env_idx]["terminals"].append(done[env_idx])
 
                 if done[env_idx]:
