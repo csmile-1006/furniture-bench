@@ -27,8 +27,12 @@ from furniture_bench.sim_config import sim_config
 console = Console()
 FLAGS = flags.FLAGS
 
+TASK_TO_PHASE = {
+    "one_leg": 5,
+    "cabinet": 11,
+}
+
 flags.DEFINE_string("env_name", "FurnitureSimImageFeature-V0/one_leg", "Environment name.")
-flags.DEFINE_integer("num_phases", 5, "number of phases to solve.")
 flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
 flags.DEFINE_string("ckpt_dir", "./tmp/", "Checkpoint dir.")
@@ -58,9 +62,11 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
-flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
-flags.DEFINE_integer("skip_frame", 4, "how often skip frame.")
-flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
+flags.DEFINE_integer("n_step", 4, "N-step Q-learning.")
+flags.DEFINE_integer("window_size", 10, "Number of frames in context window.")
+flags.DEFINE_integer("skip_frame", 1, "how often skip frame.")
+flags.DEFINE_integer("reward_window_size", 4, "Number of frames in context window in reward model.")
+flags.DEFINE_integer("reward_skip_frame", 1, "how often skip frame in reward model.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_string("reward_encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
@@ -95,7 +101,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
     img_features = {}
     insts = [
         clip.tokenize(get_furniturebench_instruct(task_name, phase, output_type="all")).detach().cpu().numpy()
-        for phase in range(FLAGS.num_phases)
+        for phase in range(TASK_TO_PHASE[task_name])
     ]
 
     for ik in image_keys:
@@ -207,8 +213,8 @@ def make_env(
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
-            window_size=FLAGS.window_size,
-            skip_frame=FLAGS.skip_frame,
+            window_size=FLAGS.reward_window_size,
+            skip_frame=FLAGS.reward_skip_frame,
             max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
             reward_model=reward_model,
         )
@@ -333,7 +339,7 @@ def main(_):
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
             / FLAGS.env_name.split("/")[-1]
-            / f"w{FLAGS.window_size}-s{FLAGS.skip_frame}-nfp1.0-c1.0@0.1-supc1.0-ep0.5-demo500-total-phase"
+            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-c1.0@0.1-supc1.0-ep0.5-demo500-total-phase"
             / "s0"
             / "best_model.pkl"
         )
@@ -342,8 +348,8 @@ def main(_):
         args = ConfigDict()
         args.task_name = FLAGS.env_name.split("/")[-1]
         args.image_keys = "color_image2|color_image1"
-        args.window_size = FLAGS.window_size
-        args.skip_frame = FLAGS.skip_frame
+        args.window_size = FLAGS.reward_window_size
+        args.skip_frame = FLAGS.reward_skip_frame
         args.lambda_mr = FLAGS.lambda_mr
 
     env = make_env(
@@ -420,7 +426,9 @@ def main(_):
             if i % FLAGS.ckpt_interval == 0:
                 agent.save(ckpt_dir, i)
 
-    offline_loader = make_offline_loader(env, FLAGS.data_path, int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio))
+    offline_loader = make_offline_loader(
+        env, FLAGS.data_path, int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
+    )
     replay_storage = ReplayBufferStorage(
         replay_dir=Path(buffer_dir).expanduser(),
         max_env_steps=env.furniture.max_env_steps,
