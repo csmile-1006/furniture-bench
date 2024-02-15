@@ -62,7 +62,7 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
-flags.DEFINE_integer("n_step", 4, "N-step Q-learning.")
+flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
 flags.DEFINE_integer("window_size", 10, "Number of frames in context window.")
 flags.DEFINE_integer("skip_frame", 1, "how often skip frame.")
 flags.DEFINE_integer("reward_window_size", 4, "Number of frames in context window in reward model.")
