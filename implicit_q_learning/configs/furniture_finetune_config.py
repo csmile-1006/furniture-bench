@@ -12,7 +12,7 @@ def get_config():
 
     config.discount = 0.996
 
-    config.expectile = 0.7  # The actual tau for expectiles.
+    config.expectile = 0.8  # The actual tau for expectiles.
     config.temperature = 3.0
     config.dropout_rate = None
 
