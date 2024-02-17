@@ -19,7 +19,8 @@ from learner import Learner
 from ml_collections import ConfigDict, config_flags
 from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
 from rich.console import Console
-from tensorboardX import SummaryWriter
+
+# from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from furniture_bench.sim_config import sim_config
@@ -367,6 +368,7 @@ def main(_):
     if FLAGS.wandb:
         wandb.init(
             project=FLAGS.wandb_project,
+            dir=root_logdir,
             entity=FLAGS.wandb_entity,
             name=FLAGS.env_name
             + "-"
@@ -379,7 +381,7 @@ def main(_):
         )
         wandb.config.update(FLAGS)
 
-    summary_writer = SummaryWriter(root_logdir, write_to_disk=True)
+    # summary_writer = SummaryWriter(root_logdir, write_to_disk=True)
 
     agent = Learner(
         FLAGS.seed,
@@ -411,10 +413,7 @@ def main(_):
             update_info = agent.update(offline_batch, update_bc=True)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
-                    if v.ndim == 0:
-                        summary_writer.add_scalar(f"offline-training/{k}", v, i)
-                    else:
-                        summary_writer.add_histogram(f"offline-training/{k}", v, i)
+                    wandb.log({f"offline-training/{k}": v}, step=i)
 
             # if i % FLAGS.eval_interval == 0:
             #     env.set_eval_flag()
@@ -509,7 +508,8 @@ def main(_):
                         next_observation[key][env_idx] = new_ob[key]
                     done[env_idx] = False
                     for k, v in info[f"episode_{env_idx}"].items():
-                        summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
+                        wandb.log({f"training/{k}": v}, step=i + env_idx)
+                        # summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
                     del trajectories[env_idx]
                     trajectories[env_idx] = _reset_traj_dict()
 
@@ -539,10 +539,11 @@ def main(_):
 
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():
-                            if v.ndim == 0:
-                                summary_writer.add_scalar(f"training/{k}", v, i)
-                            else:
-                                summary_writer.add_histogram(f"training/{k}", v, i)
+                            wandb.log({f"training/{k}": v}, step=i)
+                            # if v.ndim == 0:
+                            #     summary_writer.add_scalar(f"training/{k}", v, i)
+                            # else:
+                            #     summary_writer.add_histogram(f"training/{k}", v, i)
             observation = next_observation
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:
@@ -553,8 +554,9 @@ def main(_):
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():
-                    summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
-                summary_writer.flush()
+                    wandb.log({f"evaluation/{k}": v}, step=i)
+                    # summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
+                # summary_writer.flush()
 
                 eval_returns.append((i, eval_stats["return"]))
                 np.savetxt(
