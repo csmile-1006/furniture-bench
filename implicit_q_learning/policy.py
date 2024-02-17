@@ -28,19 +28,21 @@ class NormalTanhPolicy(nn.Module):
     log_std_min: Optional[float] = None
     log_std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
-    encoder_cls: nn.Module = None
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
     @nn.compact
     def __call__(
         self,
-        observations: Dict[str, jnp.ndarray],
+        # observations: Dict[str, jnp.ndarray],
+        features: Dict[str, jnp.ndarray],
         temperature: float = 1.0,
         training: bool = False,
     ) -> tfd.Distribution:
-        obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
+        # obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
         # outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
-        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=0.0, name="OutputMLP")(obs, training=training)
+        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=0.0, name="OutputMLP")(
+            features, training=training
+        )
 
         means = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseMean")(outputs)
 
@@ -72,14 +74,13 @@ class NormalTanhMixturePolicy(nn.Module):
     dropout_rate: Optional[float] = None
     min_std: float = 3e-2
     use_tanh: bool = False
-    encoder_cls: nn.Module = None
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray, temperature: float = 1.0, training: bool = False) -> tfd.Distribution:
-        obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
+    def __call__(self, features: jnp.ndarray, temperature: float = 1.0, training: bool = False) -> tfd.Distribution:
+        # obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
         outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
-            obs, training=training
+            features, training=training
         )
 
         logits = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseLogit")(

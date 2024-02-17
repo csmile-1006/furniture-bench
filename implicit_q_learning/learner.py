@@ -1,16 +1,17 @@
 """Implementations of algorithms for continuous control."""
 
 from functools import partial
-from typing import Optional, Sequence, Tuple, Callable
+from typing import Callable, Optional, Sequence, Tuple
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import multiplexer
 import numpy as np
 import optax
 import policy
 import value_net
-from actor import update as awr_update_actor
+from actor import awr_update_actor, bc_update_actor
 from common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 from critic import update_q, update_v
 
@@ -65,6 +66,23 @@ def _update_jit(
         new_value,
         new_target_critic,
         {**critic_info, **value_info, **actor_info},
+    )
+
+
+@partial(jax.jit, static_argnames=("utd_ratio"))
+def _update_bc_jit(
+    rng: PRNGKey,
+    actor: Model,
+    batch: Batch,
+    temperature: float,
+) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
+    key, rng = jax.random.split(rng)
+    new_actor, actor_info = bc_update_actor(key, actor, batch, temperature)
+
+    return (
+        rng,
+        new_actor,
+        actor_info,
     )
 
 
@@ -176,17 +194,21 @@ class Learner(object):
         #     encoder_cls=actor_encoder_cls,
         #     obs_keys=obs_keys,
         # )
-        actor_def = policy.NormalTanhMixturePolicy(
+        actor_cls = partial(
+            policy.NormalTanhMixturePolicy,
             hidden_dims,
             action_dim,
             num_modes=10,
             dropout_rate=dropout_rate,
             min_std=0.03,
             use_tanh=False,
-            encoder_cls=actor_encoder_cls,
             obs_keys=obs_keys,
         )
-
+        actor_def = multiplexer.Multiplexer(
+            encoder_cls=actor_encoder_cls,
+            network_cls=actor_cls,
+            stop_gradient=False,
+        )
         if opt_decay_schedule == "cosine":
             schedule_fn = optax.cosine_decay_schedule(-actor_lr, max_steps)
             optimiser = optax.chain(optax.scale_by_adam(), optax.scale_by_schedule(schedule_fn))
@@ -198,8 +220,13 @@ class Learner(object):
             actor_def, inputs=[{"params": actor_key, "dropout": actor_dropout_key}, observations], tx=optimiser
         )
 
-        critic_def = value_net.DoubleCritic(
-            hidden_dims, emb_dim, encoder_cls=critic_encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+        critic_cls = partial(
+            value_net.DoubleCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+        )
+        critic_def = multiplexer.Multiplexer(
+            encoder_cls=critic_encoder_cls,
+            network_cls=critic_cls,
+            stop_gradient=False,
         )
         critic_key, critic_dropout_key = jax.random.split(critic_key)
         critic = Model.create(
@@ -208,8 +235,13 @@ class Learner(object):
             tx=optax.adam(learning_rate=critic_lr),
         )
 
-        value_def = value_net.ValueCritic(
-            hidden_dims, emb_dim, encoder_cls=critic_encoder_cls, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+        value_cls = partial(
+            value_net.ValueCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+        )
+        value_def = multiplexer.Multiplexer(
+            encoder_cls=critic_encoder_cls,
+            network_cls=value_cls,
+            stop_gradient=False,
         )
         value_key, value_dropout_key = jax.random.split(value_key)
         value = Model.create(
@@ -236,33 +268,43 @@ class Learner(object):
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
 
-    def update(self, batch: Batch, utd_ratio: int = 1) -> InfoDict:
-        (
-            new_rng,
-            new_actor,
-            new_critic,
-            new_value,
-            new_target_critic,
-            info,
-        ) = _update_jit(
-            self.rng,
-            self.actor,
-            self.critic,
-            self.value,
-            self.target_critic,
-            batch,
-            self.discount,
-            self.tau,
-            self.expectile,
-            self.temperature,
-            utd_ratio,
-        )
+    def prepare_online_step(self):
+        print("transfer pre-trained transformer encoder from BC actor.")
+        self.critic = _share_encoder(source=self.actor, target=self.critic)
+        self.value = _share_encoder(source=self.actor, target=self.value)
+        print("detach transformer encoder of BC actor.")
+        self.actor.apply_fn.disable_gradient()
+
+    def update(self, batch: Batch, utd_ratio: int = 1, update_bc: bool = False) -> InfoDict:
+        if update_bc:
+            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.temperature)
+        else:
+            (
+                new_rng,
+                new_actor,
+                new_critic,
+                new_value,
+                new_target_critic,
+                info,
+            ) = _update_jit(
+                self.rng,
+                self.actor,
+                self.critic,
+                self.value,
+                self.target_critic,
+                batch,
+                self.discount,
+                self.tau,
+                self.expectile,
+                self.temperature,
+                utd_ratio,
+            )
+            self.critic = new_critic
+            self.value = new_value
+            self.target_critic = new_target_critic
 
         self.rng = new_rng
         self.actor = new_actor
-        self.critic = new_critic
-        self.value = new_value
-        self.target_critic = new_target_critic
 
         info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)

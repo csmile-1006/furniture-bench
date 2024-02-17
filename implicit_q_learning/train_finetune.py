@@ -34,6 +34,7 @@ TASK_TO_PHASE = {
 
 flags.DEFINE_string("env_name", "FurnitureSimImageFeature-V0/one_leg", "Environment name.")
 flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
+flags.DEFINE_integer("num_gradient_steps", 2, "gradient steps per environment interaction.")
 flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
 flags.DEFINE_string("ckpt_dir", "./tmp/", "Checkpoint dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
@@ -403,11 +404,11 @@ def main(_):
             smoothing=0.1,
             disable=not FLAGS.tqdm,
             ncols=0,
-            desc="pre-training",
+            desc="pre-training using BC",
             total=FLAGS.num_pretraining_steps,
         ):
             offline_batch = batch_to_jax(offline_batch)
-            update_info = agent.update(offline_batch)
+            update_info = agent.update(offline_batch, update_bc=True)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     if v.ndim == 0:
@@ -464,6 +465,7 @@ def main(_):
     start_training = env.furniture.max_env_steps * FLAGS.num_envs
     offline_replay_iter, online_replay_iter = None, None
 
+    agent.prepare_online_step()
     with online_pbar:
         while i <= steps:
             action = agent.sample_actions(observation, temperature=FLAGS.temperature)
@@ -514,7 +516,7 @@ def main(_):
             if i > start_training:
                 if offline_replay_iter is None and online_replay_iter is None:
                     offline_replay_iter, online_replay_iter = iter(offline_loader), iter(online_loader)
-                for _ in range(FLAGS.num_envs):
+                for _ in range(FLAGS.num_gradient_steps):
                     offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
                     offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                     combined = combine(offline_batch, online_batch)
@@ -533,7 +535,7 @@ def main(_):
                             masks=batch.masks,
                             next_observations=batch.next_observations,
                         )
-                    update_info = agent.update(batch)
+                    update_info = agent.update(batch, update_bc=False)
 
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():
