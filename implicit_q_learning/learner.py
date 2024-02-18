@@ -272,8 +272,8 @@ class Learner(object):
         print("transfer pre-trained transformer encoder from BC actor.")
         self.critic = _share_encoder(source=self.actor, target=self.critic)
         self.value = _share_encoder(source=self.actor, target=self.value)
-        print("detach transformer encoder of BC actor.")
-        self.actor.apply_fn.disable_gradient()
+        # print("detach transformer encoder of BC actor.")
+        # self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, utd_ratio: int = 1, update_bc: bool = False) -> InfoDict:
         if update_bc:
