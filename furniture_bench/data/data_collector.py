@@ -41,6 +41,7 @@ class DataCollector:
         num_demos: int = 100,
         env_option: str = "legacy",
         resize_sim_img: bool = False,
+        phase_noise: int = -1,
     ):
         """
         Args:
@@ -59,6 +60,7 @@ class DataCollector:
             save_failure (bool): Whether to save failure trajectories.
             num_demos (int): The maximum number of demonstrations to collect in this run. Internal loop will be terminated when this number is reached.
             resize_sim_img (bool): Read resized image
+            phase_noise (int): Add noise to given phase to collect failure trajectories.
         """
         if is_sim:
             if env_option == "legacy":
@@ -79,6 +81,7 @@ class DataCollector:
                 randomness=randomness,
                 compute_device_id=compute_device_id,
                 graphics_device_id=graphics_device_id,
+                phase_noise=phase_noise,
             )
         else:
             if randomness == "med":

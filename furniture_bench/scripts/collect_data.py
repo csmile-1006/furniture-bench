@@ -76,6 +76,13 @@ def main():
 
     parser.add_argument("--resize-sim-img", action="store_true")
 
+    parser.add_argument(
+        "--phase-noise",
+        type=int,
+        default=-1,
+        help="Add noise to given phase to collect failure trajectories.",
+    )
+
     args = parser.parse_args()
 
     if args.scripted:
@@ -106,6 +113,7 @@ def main():
         num_demos=args.num_demos,
         env_option=args.env_option,
         resize_sim_img=args.resize_sim_img,
+        phase_noise=args.phase_noise,
     )
     data_collector.collect()
 

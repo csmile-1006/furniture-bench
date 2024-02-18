@@ -27,9 +27,7 @@ class Part(ABC):
         self.center_from_anchor = None  # should be set in subclass.
         self.rel_pose_from_center = {}  # should be set in subclass.
         self.reset_gripper_width = None  # should be set in subclass.
-        self.rel_pose_from_center[self.tag_ids[0]] = get_mat(
-            [0, 0, 0], [0, 0, 0]
-        )  # Anchor tag.
+        self.rel_pose_from_center[self.tag_ids[0]] = get_mat([0, 0, 0], [0, 0, 0])  # Anchor tag.
 
         self.part_idx = part_idx
         self.pre_assemble_done = True
@@ -44,23 +42,17 @@ class Part(ABC):
         self.prev_cnt = 0
         self.curr_cnt = 0
         self.part_moved_skill_idx = part_config.get("part_moved_skill_idx", np.inf)
-        self.part_attached_skill_idx = part_config.get(
-            "part_attached_skill_idx", np.inf
-        )
+        self.part_attached_skill_idx = part_config.get("part_attached_skill_idx", np.inf)
 
     def randomize_init_pose(self, from_skill=0, pos_range=[-0.05, 0.05], rot_range=45):
-        self.reset_pos[from_skill][:2] = self.part_config["reset_pos"][from_skill][
-            :2
-        ] + np.random.uniform(
+        self.reset_pos[from_skill][:2] = self.part_config["reset_pos"][from_skill][:2] + np.random.uniform(
             pos_range[0], pos_range[1], size=2
         )  # x, y
         self.mut_ori = rot_mat(
             [0, 0, np.random.uniform(np.radians(-rot_range), np.radians(rot_range))],
             hom=True,
         )
-        self.reset_ori[from_skill] = (
-            self.mut_ori @ self.part_config["reset_ori"][from_skill]
-        )
+        self.reset_ori[from_skill] = self.mut_ori @ self.part_config["reset_ori"][from_skill]
 
     def randomize_init_pose_high(self, high_random_idx: int):
         self.reset_pos[0] = self.part_config["high_rand_reset_pos"][high_random_idx][0]
@@ -123,28 +115,16 @@ class Part(ABC):
         except:
             pdb.set_trace()
 
-        if (
-            part1_x1 > part2_x2 + self.collision_margin
-            or part1_x2 < part2_x1 - self.collision_margin
-        ):
+        if part1_x1 > part2_x2 + self.collision_margin or part1_x2 < part2_x1 - self.collision_margin:
             return False
-        if (
-            part1_y1 > part2_y2 + self.collision_margin
-            or part1_y2 < part2_y1 - self.collision_margin
-        ):
+        if part1_y1 > part2_y2 + self.collision_margin or part1_y2 < part2_y1 - self.collision_margin:
             return False
         return True
 
     def in_boundary(self, pos_lim, from_skill):
-        if (
-            self.reset_pos[from_skill][0] < pos_lim[0][0]
-            or self.reset_pos[from_skill][0] > pos_lim[0][1]
-        ):
+        if self.reset_pos[from_skill][0] < pos_lim[0][0] or self.reset_pos[from_skill][0] > pos_lim[0][1]:
             return False
-        if (
-            self.reset_pos[from_skill][1] < pos_lim[1][0]
-            or self.reset_pos[from_skill][1] > pos_lim[1][1]
-        ):
+        if self.reset_pos[from_skill][1] < pos_lim[1][0] or self.reset_pos[from_skill][1] > pos_lim[1][1]:
             return False
         return True
 
@@ -152,24 +132,16 @@ class Part(ABC):
         for pose_filter in self.pose_filter:
             pose_filter.reset()
 
-    def is_in_reset_ori(
-        self, pose: npt.NDArray[np.float32], from_skill: int, ori_bound: float
-    ) -> bool:
-        reset_ori = (
-            self.reset_ori[from_skill] if len(self.reset_ori) > 1 else self.reset_ori[0]
-        )
+    def is_in_reset_ori(self, pose: npt.NDArray[np.float32], from_skill: int, ori_bound: float) -> bool:
+        reset_ori = self.reset_ori[from_skill] if len(self.reset_ori) > 1 else self.reset_ori[0]
         if is_similar_rot(pose[:3, :3], reset_ori[:3, :3], ori_bound=ori_bound):
             return True
         return False
 
     def is_in_reset_pose(self, pose, from_skill, pos_threshold, ori_bound):
-        if self.is_in_reset_pos(
-            pose, from_skill, pos_threshold
-        ) and self.is_in_reset_ori(pose, from_skill, ori_bound):
+        if self.is_in_reset_pos(pose, from_skill, pos_threshold) and self.is_in_reset_ori(pose, from_skill, ori_bound):
             return True
-        print(
-            f"[reset] Part {self.__class__.__name__} [{self.part_idx}] is not in the reset pose."
-        )
+        print(f"[reset] Part {self.__class__.__name__} [{self.part_idx}] is not in the reset pose.")
 
         if not self.is_in_reset_pos(pose, from_skill, pos_threshold):
             print(
@@ -190,9 +162,7 @@ class Part(ABC):
         reset_pos = self.reset_pos[from_skill][:2]
         part_pos = np.array(reset_pos)
         detected_pos = np.array(pose[:2, 3])
-        return is_similar_pos(
-            part_pos[:2], detected_pos[:2], pos_threshold=pos_threshold
-        )
+        return is_similar_pos(part_pos[:2], detected_pos[:2], pos_threshold=pos_threshold)
 
     def assemble_done(self, rel_pose, assembled_rel_poses):
         for assembled_rel_pose in assembled_rel_poses:
@@ -276,7 +246,7 @@ class Part(ABC):
             # The failure is checked in the next state of the executed skill.
             return skill_complete
         if skill_complete == 1:
-            return skill_complete # The first transition is always success.
+            return skill_complete  # The first transition is always success.
         # Check grasping failure.
         if self.gripper_action == 1:
             if gripper_width <= self.gripper_target - 0.01 or gripper_width < 0.001:  # 1cm Margin or missed the object.
@@ -303,16 +273,16 @@ class Part(ABC):
 
         return skill_complete
 
-    def add_noise_first_target(self, target, pos_noise=None, ori_noise=None):
+    def add_noise_first_target(self, target, pos_noise=None, ori_noise=None, add_phase_noise=None):
         if self.state_no_noise():
             return target
         if self.first_setting_target:
+            if add_phase_noise:
+                pos_noise = torch.normal(mean=torch.zeros((3,)), std=torch.ones((3,)) * 0.030).to(target.device)
             if pos_noise is not None:
                 target[:3, 3] += pos_noise
             else:
-                target[:3, 3] += torch.normal(
-                    mean=torch.zeros((3,)), std=torch.ones((3,)) * 0.003
-                ).to(target.device)
+                target[:3, 3] += torch.normal(mean=torch.zeros((3,)), std=torch.ones((3,)) * 0.003).to(target.device)
             ori = C.mat2quat(target[:3, :3]).to(target.device)
             if ori_noise is not None:
                 ori = C.quat_multiply(ori, ori_noise).to(target.device)

@@ -179,6 +179,9 @@ class FurnitureSimEnv(gym.Env):
 
         self.robot_state_as_dict = kwargs.get("robot_state_as_dict", True)
         self.squeeze_batch_dim = kwargs.get("squeeze_batch_dim", False)
+        # Give noise to a given phase in order to collect failure trajectories at specific phase.
+        self.phase_noise = kwargs.get("phase_noise", -1)
+        self.phase_counter = 0
 
     def _create_ground_plane(self):
         """Creates ground plane."""
@@ -1068,6 +1071,7 @@ class FurnitureSimEnv(gym.Env):
 
         self.refresh()
         self.assemble_idx = 0
+        self.phase_counter = 0
 
         if self.save_camera_input:
             self._save_camera_input()
@@ -1355,6 +1359,7 @@ class FurnitureSimEnv(gym.Env):
                 torch.tensor([0, 0, 0, 0, 0, 0, 1, -1], dtype=torch.float32, device=self.device).unsqueeze(0),
                 1,
             )  # Skill complete is always 1 when assembled.
+        add_phase_noise = self.phase_counter == self.phase_noise
         if not part1.pre_assemble_done:
             goal_pos, goal_ori, gripper, skill_complete = part1.pre_assemble(
                 ee_pos,
@@ -1365,6 +1370,7 @@ class FurnitureSimEnv(gym.Env):
                 self.sim_to_april_mat,
                 self.april_to_robot_mat,
                 self.furniture,
+                add_phase_noise,
             )
         elif not part2.pre_assemble_done:
             goal_pos, goal_ori, gripper, skill_complete = part2.pre_assemble(
@@ -1376,6 +1382,7 @@ class FurnitureSimEnv(gym.Env):
                 self.sim_to_april_mat,
                 self.april_to_robot_mat,
                 self.furniture,
+                add_phase_noise,
             )
         else:
             goal_pos, goal_ori, gripper, skill_complete = self.furniture.parts[part_idx2].fsm_step(
@@ -1388,10 +1395,13 @@ class FurnitureSimEnv(gym.Env):
                 self.april_to_robot_mat,
                 self.furniture.parts[part_idx1].name,
                 self.furniture,
+                add_phase_noise,
             )
 
         delta_pos = goal_pos - ee_pos
 
+        if skill_complete == 1:
+            self.phase_counter += 1
         # Scale translational action.
         delta_pos_sign = delta_pos.sign()
         delta_pos = torch.abs(delta_pos) * 2
@@ -1407,7 +1417,11 @@ class FurnitureSimEnv(gym.Env):
 
         delta_quat = C.quat_mul(C.quat_conjugate(ee_quat), goal_ori)
         # Add random noise to the action.
-        if self.furniture.parts[part_idx2].state_no_noise() and np.random.random() < 0.50:
+        if (
+            (add_phase_noise or
+            self.furniture.parts[part_idx2].state_no_noise())
+            and np.random.random() < 0.50
+        ):
             delta_pos = torch.normal(delta_pos, 0.005)
             delta_quat = C.quat_multiply(
                 delta_quat,
