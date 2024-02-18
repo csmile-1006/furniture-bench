@@ -46,6 +46,7 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
+flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
 flags.DEFINE_float("offline_ratio", 0.25, "Offline ratio.")
 flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
@@ -388,6 +389,7 @@ def main(_):
         env.observation_space.sample(),
         env.action_space.sample()[:1],
         max_steps=FLAGS.max_steps,
+        use_bc=FLAGS.use_bc,
         **kwargs,
     )
 
@@ -410,7 +412,7 @@ def main(_):
             total=FLAGS.num_pretraining_steps,
         ):
             offline_batch = batch_to_jax(offline_batch)
-            update_info = agent.update(offline_batch, update_bc=True)
+            update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     wandb.log({f"offline-training/{k}": v}, step=i)
@@ -464,7 +466,7 @@ def main(_):
     start_training = env.furniture.max_env_steps * FLAGS.num_envs
     offline_replay_iter, online_replay_iter = None, None
 
-    agent.prepare_online_step()
+    agent.prepare_online_step(use_bc=FLAGS.use_bc)
     with online_pbar:
         while i <= steps:
             action = agent.sample_actions(observation, temperature=FLAGS.temperature)
