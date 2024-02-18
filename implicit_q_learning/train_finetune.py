@@ -465,7 +465,8 @@ def main(_):
     start_training = env.furniture.max_env_steps * FLAGS.num_envs
     offline_replay_iter, online_replay_iter = None, None
 
-    agent.prepare_online_step(use_bc=FLAGS.use_bc)
+    if FLAGS.use_bc:
+        agent.prepare_online_step()
     with online_pbar:
         while i <= steps:
             action = agent.sample_actions(observation, temperature=FLAGS.temperature)

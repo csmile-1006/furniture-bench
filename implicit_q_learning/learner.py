@@ -48,7 +48,7 @@ def _update_jit(
     temperature: float,
     utd_ratio: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    actor = _share_encoder(source=critic, target=actor)
+    # actor = _share_encoder(source=critic, target=actor)
     value = _share_encoder(source=critic, target=value)
 
     key, rng = jax.random.split(rng)
@@ -268,13 +268,13 @@ class Learner(object):
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
 
-    def prepare_online_step(self, use_bc=False):
+    def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
         self.critic = _share_encoder(source=self.actor, target=self.critic)
         self.value = _share_encoder(source=self.actor, target=self.value)
-        if use_bc:
-            print("detach transformer encoder of BC actor.")
-            self.actor.apply_fn.disable_gradient()
+        # if use_bc:
+        #     print("detach transformer encoder of BC actor.")
+        #     self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, utd_ratio: int = 1, update_bc: bool = False) -> InfoDict:
         if update_bc:
