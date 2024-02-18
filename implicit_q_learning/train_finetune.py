@@ -389,7 +389,6 @@ def main(_):
         env.observation_space.sample(),
         env.action_space.sample()[:1],
         max_steps=FLAGS.max_steps,
-        use_bc=FLAGS.use_bc,
         **kwargs,
     )
 

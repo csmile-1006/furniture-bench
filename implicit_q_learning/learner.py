@@ -112,7 +112,6 @@ class Learner(object):
         normalize_inputs: bool = True,
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu,
         use_sigmareparam: bool = True,
-        use_bc: bool = False,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -208,7 +207,7 @@ class Learner(object):
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
-            stop_gradient=not use_bc,
+            stop_gradient=False,
         )
         if opt_decay_schedule == "cosine":
             schedule_fn = optax.cosine_decay_schedule(-actor_lr, max_steps)
