@@ -13,7 +13,7 @@ def get_config():
 
     config.hidden_dims = (512, 256, 256)
 
-    config.discount = 0.996
+    config.discount = 0.99
     config.target_update_period = 1
 
     config.dropout_rate = None

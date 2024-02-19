@@ -95,6 +95,7 @@ class AWACLearner(object):
         emb_dim: int = 256,
         depth: int = 2,
         num_heads: int = 8,
+        num_samples: int = 1,
         discount: float = 0.99,
         tau: float = 0.005,
         dropout_rate: Optional[float] = None,
@@ -105,13 +106,17 @@ class AWACLearner(object):
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
         target_update_period: int = 1,
+        beta: float = 1.0,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
         """
 
         self.tau = tau
+        self.target_update_period = target_update_period
         self.discount = discount
+        self.num_samples = num_samples
+        self.beta = beta
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
@@ -200,7 +205,7 @@ class AWACLearner(object):
             network_cls=actor_cls,
             stop_gradient=False,
         )
-        optimiser = optax.adam(**actor_optim_kwargs)
+        optimiser = optax.adamw(**actor_optim_kwargs)
 
         actor_key, actor_dropout_key = jax.random.split(actor_key)
         actor = Model.create(
