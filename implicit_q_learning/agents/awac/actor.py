@@ -8,14 +8,19 @@ from agents.awac.critic import get_value
 
 
 def awac_update_actor(
-    key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, beta: float
+    key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, beta: float, temperature: float
 ) -> Tuple[Model, InfoDict]:
     v1, v2 = get_value(key, actor, critic, batch, num_samples)
     v = jnp.minimum(v1, v2)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
-            actor_params, batch.observations, training=True, rngs={"dropout": key}, mutable=actor.extra_variables.keys()
+            actor_params,
+            batch.observations,
+            temperature=temperature,
+            training=True,
+            rngs={"dropout": key},
+            mutable=actor.extra_variables.keys(),
         )
         lim = 1 - 1e-5
         actions = jnp.clip(batch.actions, -lim, lim)
@@ -47,7 +52,7 @@ def awac_update_actor(
     return new_actor, info
 
 
-def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch, temperature: float) -> Tuple[Model, InfoDict]:
+def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, InfoDict]:
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
             actor_params, batch.observations, training=True, rngs={"dropout": key}, mutable=actor.extra_variables.keys()

@@ -395,6 +395,7 @@ def main(_):
         FLAGS.seed,
         env.observation_space.sample(),
         env.action_space.sample()[:1],
+        temperature=FLAGS.temperature,
         **kwargs,
     )
 
@@ -413,7 +414,7 @@ def main(_):
             smoothing=0.1,
             disable=not FLAGS.tqdm,
             ncols=0,
-            desc="pre-training using BC" if FLAGS.use_bc else "pre-training using IQL",
+            desc="pre-training using BC" if FLAGS.use_bc else "pre-training using AWAC",
             total=FLAGS.num_pretraining_steps,
         ):
             offline_batch = batch_to_jax(offline_batch)

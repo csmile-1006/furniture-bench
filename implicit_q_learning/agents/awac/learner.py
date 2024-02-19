@@ -37,13 +37,14 @@ def _update_jit(
     tau: float,
     num_samples: int,
     beta: float,
+    temperature: float,
     update_target: bool,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     actor = _share_encoder(source=critic, target=actor)
 
     key, rng = jax.random.split(rng)
     new_critic, critic_info = awac_update_critic(
-        key, actor, critic, target_critic, None, batch, discount, backup_entropy=False
+        key, actor, critic, target_critic, None, batch, discount, temperature, backup_entropy=False
     )
     if update_target:
         new_target_critic = target_update(new_critic, target_critic, tau)
@@ -51,7 +52,7 @@ def _update_jit(
         new_target_critic = target_critic
 
     key, rng = jax.random.split(rng)
-    new_actor, actor_info = awac_update_actor(key, actor, new_critic, batch, num_samples, beta)
+    new_actor, actor_info = awac_update_actor(key, actor, new_critic, batch, num_samples, beta, temperature)
 
     return (
         rng,
@@ -67,10 +68,9 @@ def _update_bc_jit(
     rng: PRNGKey,
     actor: Model,
     batch: Batch,
-    temperature: float,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
     key, rng = jax.random.split(rng)
-    new_actor, actor_info = bc_update_actor(key, actor, batch, temperature)
+    new_actor, actor_info = bc_update_actor(key, actor, batch)
 
     return (
         rng,
@@ -107,6 +107,7 @@ class AWACLearner(object):
         use_sigmareparam: bool = True,
         target_update_period: int = 1,
         beta: float = 1.0,
+        temperature: float = 1.0,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -117,6 +118,7 @@ class AWACLearner(object):
         self.discount = discount
         self.num_samples = num_samples
         self.beta = beta
+        self.temperature = temperature
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
@@ -255,7 +257,7 @@ class AWACLearner(object):
     def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
         self.step += 1
         if update_bc:
-            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.temperature)
+            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch)
         else:
             (
                 new_rng,
@@ -273,6 +275,7 @@ class AWACLearner(object):
                 self.tau,
                 self.num_samples,
                 self.beta,
+                self.temperature,
                 self.step % self.target_update_period == 0,
             )
             self.critic = new_critic
