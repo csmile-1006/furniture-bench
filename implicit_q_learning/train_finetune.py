@@ -20,7 +20,6 @@ from ml_collections import ConfigDict, config_flags
 from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
 from rich.console import Console
 
-# from tensorboardX import SummaryWriter
 from tqdm import trange
 
 from furniture_bench.sim_config import sim_config
@@ -36,7 +35,7 @@ TASK_TO_PHASE = {
 flags.DEFINE_string("env_name", "FurnitureSimImageFeature-V0/one_leg", "Environment name.")
 flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
 flags.DEFINE_integer("num_gradient_steps", 2, "gradient steps per environment interaction.")
-flags.DEFINE_string("save_dir", "./tmp/", "Tensorboard logging dir.")
+flags.DEFINE_string("save_dir", "./tmp/", "logging dir.")
 flags.DEFINE_string("ckpt_dir", "./tmp/", "Checkpoint dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
 flags.DEFINE_integer("ckpt_step", 0, "Specific checkpoint step")
@@ -328,11 +327,12 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-    root_logdir = os.path.join(FLAGS.save_dir, "tb", FLAGS.env_name, f"{FLAGS.run_name}_{FLAGS.seed}_ft")
+    wandb_dir = os.path.join(FLAGS.save_dir, "wandb", FLAGS.env_name, f"{FLAGS.run_name}_{FLAGS.seed}")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     buffer_dir = os.path.join(FLAGS.save_dir, "buffer", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     eval_dir = os.path.join(FLAGS.save_dir, "eval", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
+    os.makedirs(wandb_dir, exist_ok=True)
     os.makedirs(buffer_dir, exist_ok=True)
     os.makedirs(eval_dir, exist_ok=True)
 
@@ -369,7 +369,7 @@ def main(_):
     if FLAGS.wandb:
         wandb.init(
             project=FLAGS.wandb_project,
-            dir=root_logdir,
+            dir=wandb_dir,
             entity=FLAGS.wandb_entity,
             name=FLAGS.env_name
             + "-"
@@ -378,11 +378,8 @@ def main(_):
             + str(FLAGS.data_path.split("/")[-1])
             + "-"
             + str(FLAGS.run_name),
-            sync_tensorboard=True,
         )
         wandb.config.update(FLAGS)
-
-    # summary_writer = SummaryWriter(root_logdir, write_to_disk=True)
 
     agent = Learner(
         FLAGS.seed,
@@ -412,16 +409,11 @@ def main(_):
         ):
             offline_batch = batch_to_jax(offline_batch)
             update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc)
-            if i % FLAGS.log_interval == 0:
-                for k, v in update_info.items():
-                    wandb.log({f"offline-training/{k}": v}, step=i)
-
-            # if i % FLAGS.eval_interval == 0:
+            # if i % FLAGS.log_interval == 0:
             #     env.set_eval_flag()
             #     eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
             #     for k, v in eval_info.items():
-            #         summary_writer.add_scalar(f"offline-evaluation/{k}", v, i)
-            #     summary_writer.flush()
+            #         wandb.log({f"offline-evaluation/{k}": v}, step=i)
             #     env.unset_eval_flag()
 
             if i % FLAGS.ckpt_interval == 0:
@@ -511,7 +503,6 @@ def main(_):
                     done[env_idx] = False
                     for k, v in info[f"episode_{env_idx}"].items():
                         wandb.log({f"training/{k}": v}, step=i + env_idx)
-                        # summary_writer.add_scalar(f"training/{k}", v, info["total"]["timesteps"])
                     del trajectories[env_idx]
                     trajectories[env_idx] = _reset_traj_dict()
 
@@ -542,10 +533,6 @@ def main(_):
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():
                             wandb.log({f"training/{k}": v}, step=i)
-                            # if v.ndim == 0:
-                            #     summary_writer.add_scalar(f"training/{k}", v, i)
-                            # else:
-                            #     summary_writer.add_histogram(f"training/{k}", v, i)
             observation = next_observation
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:
@@ -557,8 +544,6 @@ def main(_):
 
                 for k, v in eval_stats.items():
                     wandb.log({f"evaluation/{k}": v}, step=i)
-                    # summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
-                # summary_writer.flush()
 
                 eval_returns.append((i, eval_stats["return"]))
                 np.savetxt(
