@@ -451,7 +451,7 @@ def main(_):
     eval_returns = []
     trajectories = _initialize_traj_dict()
     observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
-    start_training = env.furniture.max_env_steps * FLAGS.num_envs
+    start_training = FLAGS.num_pretraining_steps + env.furniture.max_env_steps * FLAGS.num_envs
     offline_replay_iter, online_replay_iter = None, None
 
     if FLAGS.use_bc:
