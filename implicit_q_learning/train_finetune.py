@@ -409,12 +409,9 @@ def main(_):
         ):
             offline_batch = batch_to_jax(offline_batch)
             update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc)
-            # if i % FLAGS.log_interval == 0:
-            #     env.set_eval_flag()
-            #     eval_info = evaluate(agent, env, num_episodes=FLAGS.eval_episodes)
-            #     for k, v in eval_info.items():
-            #         wandb.log({f"offline-evaluation/{k}": v}, step=i)
-            #     env.unset_eval_flag()
+            if i % FLAGS.log_interval == 0:
+                for k, v in update_info.items():
+                    wandb.log({f"offline-training/{k}": v}, step=i)
 
             if i % FLAGS.ckpt_interval == 0:
                 agent.save(ckpt_dir, i)
