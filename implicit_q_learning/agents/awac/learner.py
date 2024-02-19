@@ -6,20 +6,12 @@ from typing import Callable, Optional, Sequence, Tuple
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
-import multiplexer
 import numpy as np
 import optax
-import policy
-import value_net
-from actor import awr_update_actor, bc_update_actor
-from common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
-from critic import update_q, update_v
-
-
-def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
-    new_target_params = jax.tree_map(lambda p, tp: p * tau + tp * (1 - tau), critic.params, target_critic.params)
-
-    return target_critic.replace(params=new_target_params)
+from agents.awac.actor import awac_update_actor, bc_update_actor
+from agents.awac.critic import awac_update_critic, target_update
+from networks import multiplexer, policy, value_net
+from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 
 
 def _share_encoder(source, target):
@@ -34,38 +26,39 @@ def _share_encoder(source, target):
     return target.replace(params=new_params)
 
 
-@partial(jax.jit, static_argnames=("utd_ratio"))
+@partial(jax.jit, static_argnames=("update_target", "num_samples"))
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
     critic: Model,
-    value: Model,
     target_critic: Model,
     batch: Batch,
     discount: float,
     tau: float,
-    expectile: float,
-    temperature: float,
-    utd_ratio: int,
-) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    # actor = _share_encoder(source=critic, target=actor)
-    value = _share_encoder(source=critic, target=value)
+    num_samples: int,
+    beta: float,
+    update_target: bool,
+) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
+    actor = _share_encoder(source=critic, target=actor)
 
     key, rng = jax.random.split(rng)
-    new_value, value_info = update_v(key, target_critic, value, batch, expectile)
-    key, rng = jax.random.split(rng)
-    new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, batch, temperature)
+    new_critic, critic_info = awac_update_critic(
+        key, actor, critic, target_critic, None, batch, discount, backup_entropy=False
+    )
+    if update_target:
+        new_target_critic = target_update(new_critic, target_critic, tau)
+    else:
+        new_target_critic = target_critic
 
     key, rng = jax.random.split(rng)
-    new_critic, critic_info = update_q(key, critic, new_value, batch, discount)
-    new_target_critic = target_update(new_critic, target_critic, tau)
+    new_actor, actor_info = awac_update_actor(key, actor, new_critic, batch, num_samples, beta)
+
     return (
         rng,
         new_actor,
         new_critic,
-        new_value,
         new_target_critic,
-        {**critic_info, **value_info, **actor_info},
+        {**critic_info, **actor_info},
     )
 
 
@@ -86,13 +79,16 @@ def _update_bc_jit(
     )
 
 
-class Learner(object):
+class AWACLearner(object):
     def __init__(
         self,
         seed: int,
         observations: jnp.ndarray,
         actions: jnp.ndarray,
-        actor_lr: float = 3e-4,
+        actor_optim_kwargs: dict = {
+            "learning_rate": 3e-4,
+            "weight_decay": 1e-4,
+        },
         value_lr: float = 3e-4,
         critic_lr: float = 3e-4,
         hidden_dims: Sequence[int] = (256, 256),
@@ -101,26 +97,21 @@ class Learner(object):
         num_heads: int = 8,
         discount: float = 0.99,
         tau: float = 0.005,
-        expectile: float = 0.8,
-        temperature: float = 0.1,
         dropout_rate: Optional[float] = None,
-        max_steps: Optional[int] = None,
-        opt_decay_schedule: str = "cosine",
         critic_layer_norm: bool = False,
         obs_keys: Sequence[str] = ("image1", "image2"),
         model_type: str = "transformer",
         normalize_inputs: bool = True,
-        activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu,
+        activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
+        target_update_period: int = 1,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
         """
 
-        self.expectile = expectile
         self.tau = tau
         self.discount = discount
-        self.temperature = temperature
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
@@ -209,11 +200,7 @@ class Learner(object):
             network_cls=actor_cls,
             stop_gradient=False,
         )
-        if opt_decay_schedule == "cosine":
-            schedule_fn = optax.cosine_decay_schedule(-actor_lr, max_steps)
-            optimiser = optax.chain(optax.scale_by_adam(), optax.scale_by_schedule(schedule_fn))
-        else:
-            optimiser = optax.adam(learning_rate=actor_lr)
+        optimiser = optax.adam(**actor_optim_kwargs)
 
         actor_key, actor_dropout_key = jax.random.split(actor_key)
         actor = Model.create(
@@ -235,28 +222,13 @@ class Learner(object):
             tx=optax.adam(learning_rate=critic_lr),
         )
 
-        value_cls = partial(
-            value_net.ValueCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
-        )
-        value_def = multiplexer.Multiplexer(
-            encoder_cls=critic_encoder_cls,
-            network_cls=value_cls,
-            stop_gradient=False,
-        )
-        value_key, value_dropout_key = jax.random.split(value_key)
-        value = Model.create(
-            value_def,
-            inputs=[{"params": value_key, "dropout": value_dropout_key}, observations],
-            tx=optax.adam(learning_rate=value_lr),
-        )
-
         target_critic = Model.create(critic_def, inputs=[critic_key, observations, actions])
 
         self.actor = actor
         self.critic = critic
-        self.value = value
         self.target_critic = target_critic
         self.rng = rng
+        self.step = 1
 
     def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
@@ -271,12 +243,12 @@ class Learner(object):
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
         self.critic = _share_encoder(source=self.actor, target=self.critic)
-        self.value = _share_encoder(source=self.actor, target=self.value)
         # if use_bc:
         #     print("detach transformer encoder of BC actor.")
         #     self.actor.apply_fn.disable_gradient()
 
-    def update(self, batch: Batch, utd_ratio: int = 1, update_bc: bool = False) -> InfoDict:
+    def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
+        self.step += 1
         if update_bc:
             new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.temperature)
         else:
@@ -284,24 +256,21 @@ class Learner(object):
                 new_rng,
                 new_actor,
                 new_critic,
-                new_value,
                 new_target_critic,
                 info,
             ) = _update_jit(
                 self.rng,
                 self.actor,
                 self.critic,
-                self.value,
                 self.target_critic,
                 batch,
                 self.discount,
                 self.tau,
-                self.expectile,
-                self.temperature,
-                utd_ratio,
+                self.num_samples,
+                self.beta,
+                self.step % self.target_update_period == 0,
             )
             self.critic = new_critic
-            self.value = new_value
             self.target_critic = new_target_critic
 
         self.rng = new_rng
@@ -318,8 +287,6 @@ class Learner(object):
         self.critic.save(path)
         path = f"{ckpt_dir}/{step}_target_critic"
         self.target_critic.save(path)
-        path = f"{ckpt_dir}/{step}_value"
-        self.value.save(path)
 
     def load(self, ckpt_dir, step):
         path = f"{ckpt_dir}/{step}_actor"
@@ -328,5 +295,3 @@ class Learner(object):
         self.critic = self.critic.load(path)
         path = f"{ckpt_dir}/{step}_target_critic"
         self.target_critic = self.target_critic.load(path)
-        path = f"{ckpt_dir}/{step}_value"
-        self.value = self.value.load(path)

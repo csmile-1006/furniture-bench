@@ -15,7 +15,7 @@ from furniture_bench.sim_config import sim_config
 import wrappers
 from replay_buffer import make_replay_loader
 from evaluation import evaluate
-from learner import Learner
+from agents.iql.learner import Learner as IQLLearner
 
 FLAGS = flags.FLAGS
 
@@ -190,7 +190,7 @@ def main(_):
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
-    agent = Learner(
+    agent = IQLLearner(
         FLAGS.seed,
         env.observation_space.sample(),
         env.action_space.sample()[:1],

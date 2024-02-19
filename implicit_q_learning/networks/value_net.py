@@ -3,7 +3,7 @@ from typing import Callable, Sequence, Tuple, Dict
 import jax.numpy as jnp
 from flax import linen as nn
 
-from common import MLP
+from networks.common import MLP
 
 
 class ValueCritic(nn.Module):

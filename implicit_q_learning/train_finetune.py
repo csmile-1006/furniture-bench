@@ -15,7 +15,9 @@ from bpref_v2.data.instruct import get_furniturebench_instruct
 from bpref_v2.data.label_reward_furniturebench import load_reward_model
 from dataset_utils import gaussian_smoothe
 from evaluation import evaluate
-from learner import Learner
+
+# from agents.iql.learner import Learner as IQLLearner
+from agents.awac.learner import AWACLearner
 from ml_collections import ConfigDict, config_flags
 from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
 from rich.console import Console
@@ -381,11 +383,18 @@ def main(_):
     )
     wandb.config.update(FLAGS)
 
-    agent = Learner(
+    # agent = IQLLearner(
+    #     FLAGS.seed,
+    #     env.observation_space.sample(),
+    #     env.action_space.sample()[:1],
+    #     max_steps=FLAGS.max_steps,
+    #     **kwargs,
+    # )
+
+    agent = AWACLearner(
         FLAGS.seed,
         env.observation_space.sample(),
         env.action_space.sample()[:1],
-        max_steps=FLAGS.max_steps,
         **kwargs,
     )
 

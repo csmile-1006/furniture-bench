@@ -1,28 +1,35 @@
 from typing import Tuple
 
+import jax
 import jax.numpy as jnp
 
-from common import Batch, InfoDict, Model, Params, PRNGKey
+from networks.common import Batch, InfoDict, Model, Params, PRNGKey
+from agents.awac.critic import get_value
 
 
-def awr_update_actor(
-    key: PRNGKey, actor: Model, critic: Model, value: Model, batch: Batch, temperature: float
+def awac_update_actor(
+    key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, beta: float
 ) -> Tuple[Model, InfoDict]:
-    v = value(batch.observations)
-
-    q1, q2 = critic(batch.observations, batch.actions)
-    q = jnp.minimum(q1, q2)
-    exp_a = jnp.exp((q - v) * temperature)
-    exp_a = jnp.clip(exp_a, -100.0, 100.0)
+    v1, v2 = get_value(key, actor, critic, batch, num_samples)
+    v = jnp.minimum(v1, v2)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
             actor_params, batch.observations, training=True, rngs={"dropout": key}, mutable=actor.extra_variables.keys()
         )
-        log_probs = dist.log_prob(batch.actions)
-        a = -(exp_a * log_probs)
-        actor_loss = a.mean()
-        adv = q - v
+        lim = 1 - 1e-5
+        actions = jnp.clip(batch.actions, -lim, lim)
+        log_probs = dist.log_prob(actions)
+
+        q1, q2 = critic(batch.observations, actions)
+        q = jnp.minimum(q1, q2)
+        a = q - v
+
+        # we could have used exp(a / beta) here but
+        # exp(a / beta) is unbiased but high variance,
+        # softmax(a / beta) is biased but lower variance.
+        # sum() instead of mean(), because it should be multiplied by batch size.
+        actor_loss = -(jax.nn.softmax(a / beta) * log_probs).sum()
 
         return (
             actor_loss,
@@ -31,10 +38,6 @@ def awr_update_actor(
                 "actor_loss_min": a.min(),
                 "actor_loss_max": a.max(),
                 "actor_loss_std": a.std(),
-                "adv_mean": adv.mean(),
-                "adv_min": adv.min(),
-                "adv_max": adv.max(),
-                "adv_std": adv.std(),
                 "updated_states": updated_states,
             },
         )

@@ -10,10 +10,10 @@ from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
-from common import MLP  # noqa: E402
-from common import Params  # noqa: E402
-from common import PRNGKey  # noqa: E402
-from common import default_init  # noqa: E402
+from networks.common import MLP  # noqa: E402
+from networks.common import Params  # noqa: E402
+from networks.common import PRNGKey  # noqa: E402
+from networks.common import default_init  # noqa: E402
 
 LOG_STD_MIN = -10.0
 LOG_STD_MAX = 2.0
