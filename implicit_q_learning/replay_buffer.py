@@ -76,8 +76,6 @@ def load_episode(
 
         if reward_type == "sparse":
             rewards = episode["rewards"]
-            # apply -1 in whole episode: to prevent the agent to näively converge to BC.
-            rewards = rewards - 1
         elif reward_type == "step":
             rewards = episode["step_rewards"] / np.max(episode["step_rewards"])
         elif reward_type == "viper":

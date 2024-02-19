@@ -445,7 +445,7 @@ def main(_):
         lambda_mr=FLAGS.lambda_mr,
     )
 
-    start_step, steps = 0, FLAGS.max_steps + 1
+    start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps + 1
     online_pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="online-training")
     i = start_step
     eval_returns = []
@@ -518,6 +518,14 @@ def main(_):
                         next_observations=combined["next_observations"],
                     )
                     if "antmaze" in FLAGS.env_name:
+                        batch = Batch(
+                            observations=batch.observations,
+                            actions=batch.actions,
+                            rewards=batch.rewards - 1,
+                            masks=batch.masks,
+                            next_observations=batch.next_observations,
+                        )
+                    if "Furniture" in FLAGS.env_name and FLAGS.reward_type == "sparse":
                         batch = Batch(
                             observations=batch.observations,
                             actions=batch.actions,
