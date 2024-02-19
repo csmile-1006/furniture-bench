@@ -366,20 +366,20 @@ def main(_):
         env.unwrapped.compute_text_feature()
 
     kwargs = dict(FLAGS.config)
-    if FLAGS.wandb:
-        wandb.init(
-            project=FLAGS.wandb_project,
-            dir=wandb_dir,
-            entity=FLAGS.wandb_entity,
-            name=FLAGS.env_name
-            + "-"
-            + str(FLAGS.seed)
-            + "-"
-            + str(FLAGS.data_path.split("/")[-1])
-            + "-"
-            + str(FLAGS.run_name),
-        )
-        wandb.config.update(FLAGS)
+    wandb.init(
+        project=FLAGS.wandb_project,
+        dir=wandb_dir,
+        entity=FLAGS.wandb_entity,
+        mode="online" if FLAGS.wandb else "offline",
+        name=FLAGS.env_name
+        + "-"
+        + str(FLAGS.seed)
+        + "-"
+        + str(FLAGS.data_path.split("/")[-1])
+        + "-"
+        + str(FLAGS.run_name),
+    )
+    wandb.config.update(FLAGS)
 
     agent = Learner(
         FLAGS.seed,
