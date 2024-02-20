@@ -68,10 +68,10 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
-flags.DEFINE_integer("window_size", 10, "Number of frames in context window.")
-flags.DEFINE_integer("skip_frame", 1, "how often skip frame.")
+flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
+flags.DEFINE_integer("skip_frame", 2, "how often skip frame.")
 flags.DEFINE_integer("reward_window_size", 4, "Number of frames in context window in reward model.")
-flags.DEFINE_integer("reward_skip_frame", 1, "how often skip frame in reward model.")
+flags.DEFINE_integer("reward_skip_frame", 2, "how often skip frame in reward model.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_string("reward_encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
@@ -194,9 +194,11 @@ def compute_multimodal_reward(reward_model, **kwargs):
 def load_reward_stat(data_path):
     stat_path = data_path / "stats.npz"
     if stat_path.exists():
-        print(f"load stat faile from {stat_path}.")
+        print(f"load stat file from {stat_path}.")
         reward_stat = np.load(stat_path)
         reward_stat = {key: reward_stat[key] for key in reward_stat}
+        print("no stat file in this folder.")
+        reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
     else:
         print("no stat file in this folder.")
         reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
