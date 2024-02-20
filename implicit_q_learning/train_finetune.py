@@ -16,8 +16,8 @@ from bpref_v2.data.label_reward_furniturebench import load_reward_model
 from dataset_utils import gaussian_smoothe
 from evaluation import evaluate
 
-# from agents.iql.learner import Learner as IQLLearner
-from agents.awac.learner import AWACLearner
+from agents.iql.iql_learner import IQLLearner
+from agents.awac.awac_learner import AWACLearner
 from ml_collections import ConfigDict, config_flags
 from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
 from rich.console import Console
@@ -47,6 +47,7 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "iql"], "agent type.")
 flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
 flags.DEFINE_float("offline_ratio", 0.25, "Offline ratio.")
 flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
@@ -383,21 +384,24 @@ def main(_):
     )
     wandb.config.update(FLAGS)
 
-    # agent = IQLLearner(
-    #     FLAGS.seed,
-    #     env.observation_space.sample(),
-    #     env.action_space.sample()[:1],
-    #     max_steps=FLAGS.max_steps,
-    #     **kwargs,
-    # )
-
-    agent = AWACLearner(
-        FLAGS.seed,
-        env.observation_space.sample(),
-        env.action_space.sample()[:1],
-        temperature=FLAGS.temperature,
-        **kwargs,
-    )
+    if FLAGS.agent_type == "iql":
+        agent = IQLLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            max_steps=FLAGS.max_steps,
+            **kwargs,
+        )
+    elif FLAGS.agent_type == "awac":
+        agent = AWACLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            temperature=FLAGS.temperature,
+            **kwargs,
+        )
+    else:
+        raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")
 
     def batch_to_jax(y):
         return jax.tree_util.tree_map(lambda x: x.numpy(), y)

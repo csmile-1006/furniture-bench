@@ -84,7 +84,7 @@ def _update_bc_jit(
     )
 
 
-class Learner(object):
+class IQLLearner(object):
     def __init__(
         self,
         seed: int,
