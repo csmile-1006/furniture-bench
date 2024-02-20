@@ -8,8 +8,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.awac.actor import awac_update_actor, bc_update_actor
+from agents.awac.actor import awac_update_actor
 from agents.awac.critic import awac_update_critic, target_update
+from agents.iql.iql_learner import _update_bc_jit
 from networks import multiplexer, policy, value_net
 from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 
@@ -40,9 +41,7 @@ def _update_jit(
     temperature: float,
     update_target: bool,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
-    actor = _share_encoder(source=critic, target=actor)
-
-    key, rng = jax.random.split(rng)
+    rng, key = jax.random.split(rng)
     new_critic, critic_info = awac_update_critic(
         key, actor, critic, target_critic, None, batch, discount, temperature, backup_entropy=False
     )
@@ -51,7 +50,7 @@ def _update_jit(
     else:
         new_target_critic = target_critic
 
-    key, rng = jax.random.split(rng)
+    rng, key = jax.random.split(rng)
     new_actor, actor_info = awac_update_actor(key, actor, new_critic, batch, num_samples, beta, temperature)
 
     return (
@@ -60,22 +59,6 @@ def _update_jit(
         new_critic,
         new_target_critic,
         {**critic_info, **actor_info},
-    )
-
-
-@partial(jax.jit, static_argnames=("utd_ratio"))
-def _update_bc_jit(
-    rng: PRNGKey,
-    actor: Model,
-    batch: Batch,
-) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    key, rng = jax.random.split(rng)
-    new_actor, actor_info = bc_update_actor(key, actor, batch)
-
-    return (
-        rng,
-        new_actor,
-        actor_info,
     )
 
 
@@ -181,27 +164,27 @@ class AWACLearner(object):
             )
 
         action_dim = actions.shape[-1]
-        # actor_def = policy.NormalTanhPolicy(
-        #     hidden_dims,
-        #     action_dim,
-        #     log_std_scale=1e-3,
-        #     log_std_min=-5.0,
-        #     dropout_rate=dropout_rate,
-        #     state_dependent_std=False,
-        #     tanh_squash_distribution=False,
-        #     encoder_cls=actor_encoder_cls,
-        #     obs_keys=obs_keys,
-        # )
         actor_cls = partial(
-            policy.NormalTanhMixturePolicy,
+            policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            num_modes=10,
+            log_std_scale=1e-3,
+            log_std_min=-5.0,
             dropout_rate=dropout_rate,
-            min_std=0.03,
-            use_tanh=False,
+            state_dependent_std=False,
+            tanh_squash_distribution=False,
             obs_keys=obs_keys,
         )
+        # actor_cls = partial(
+        #     policy.NormalTanhMixturePolicy,
+        #     hidden_dims,
+        #     action_dim,
+        #     num_modes=10,
+        #     dropout_rate=dropout_rate,
+        #     min_std=0.03,
+        #     use_tanh=False,
+        #     obs_keys=obs_keys,
+        # )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
@@ -243,7 +226,6 @@ class AWACLearner(object):
             variables.update(self.actor.extra_variables)
         rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
         self.rng = rng
-
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
 

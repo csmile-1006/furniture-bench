@@ -11,7 +11,7 @@ def get_config():
     config.value_lr = 3e-4
     config.critic_lr = 3e-4
 
-    config.hidden_dims = (512, 256, 256)
+    config.hidden_dims = (512, 256, 256, 256)
 
     config.discount = 0.99
     config.target_update_period = 1
