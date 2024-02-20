@@ -153,7 +153,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
         stacked_attn_masks = np.asarray(stacked_attn_masks)
 
         rewards, video_features, text_features = [], [], []
-        batch_size = 256
+        batch_size = 32
         for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
             _range = range(i, min(i + batch_size, len_demos))
             batch = {
@@ -162,7 +162,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
                 "attn_mask": stacked_attn_masks[_range],
             }
             phases = reward_model.get_phase(batch)
-            batch["instruct"] = np.stack([insts[phase] for phase in phases])
+            batch["instruct"] = np.stack([insts[phase] for phase in phases])  # noqa: F821
             reward_output = reward_model.get_reward(
                 batch, get_video_feature=get_video_feature, get_text_feature=get_text_feature
             )
@@ -190,6 +190,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
     multimodal_rewards = output["rewards"][1:].tolist()
     multimodal_rewards = np.asarray(multimodal_rewards + multimodal_rewards[-1:]).astype(np.float32)
     final_rewards = multimodal_rewards * lambda_mr
+    del insts
     return {
         "rewards": final_rewards,
         "text_features": output.get("text_features", []),
