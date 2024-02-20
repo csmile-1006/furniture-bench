@@ -302,7 +302,6 @@ def combine(one_dict, other_dict):
             combined[k] = tmp
         else:
             tmp = np.concatenate([v, other_dict[k]], axis=0)
-            np.random.shuffle(tmp)
             combined[k] = tmp
 
     return combined
