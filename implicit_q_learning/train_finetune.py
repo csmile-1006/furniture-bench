@@ -191,6 +191,17 @@ def compute_multimodal_reward(reward_model, **kwargs):
     }
 
 
+def load_reward_stat(data_path):
+    stat_path = data_path / "stat.npz"
+    if stat_path.exists():
+        reward_stat = np.load(data_path / "stat.npz")
+        reward_stat = {key: reward_stat[key] for key in reward_stat}
+    else:
+        print("no stat file in this folder.")
+        reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
+    return reward_stat
+
+
 def make_env(
     env_name: str,
     seed: int,
@@ -272,6 +283,7 @@ def make_offline_loader(env, data_path, batch_size):
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
+        reward_stat=load_reward_stat(Path(data_path)) if FLAGS.reward_type == "ours" else None,
     )
 
 
@@ -358,6 +370,8 @@ def main(_):
         args.skip_frame = FLAGS.reward_skip_frame
         args.lambda_mr = FLAGS.lambda_mr
 
+        reward_stat = load_reward_stat(Path(FLAGS.data_path))
+
     env = make_env(
         FLAGS.env_name,
         FLAGS.seed,
@@ -397,7 +411,7 @@ def main(_):
             FLAGS.seed,
             env.observation_space.sample(),
             env.action_space.sample()[:1],
-            temperature=FLAGS.temperature,
+            # temperature=FLAGS.temperature,
             **kwargs,
         )
     else:
@@ -466,6 +480,7 @@ def main(_):
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
+        reawrd_stat=reward_stat if FLAGS.reward_type == "ours" else None,
     )
 
     start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps + 1
@@ -516,6 +531,7 @@ def main(_):
                                     "text_features"
                                 ][min(idx + 1, len(output["rewards"]) - 1)]
                         info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
+                        del output
                     replay_storage.add_episode(trajectories[env_idx])
                     new_ob = env.reset_env(env_idx)
                     for key in next_observation:
@@ -566,7 +582,7 @@ def main(_):
             if i != start_step and i % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if i % FLAGS.eval_interval == 0:
+            if (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 

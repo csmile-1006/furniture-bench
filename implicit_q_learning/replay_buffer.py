@@ -47,7 +47,14 @@ def _get_stacked_timesteps(length, window_size, skip_frame):
 
 
 def load_episode(
-    fn, reward_type="sparse", discount=0.99, obs_keys=("image1", "image2"), window_size=4, skip_frame=4, lambda_mr=1.0
+    fn,
+    reward_type="sparse",
+    discount=0.99,
+    obs_keys=("image1", "image2"),
+    window_size=4,
+    skip_frame=4,
+    lambda_mr=1.0,
+    reward_stat: dict = None,
 ):
     observations, next_observations, timesteps, next_timesteps = [], [], [], []
     with fn.open("rb") as f:
@@ -83,7 +90,10 @@ def load_episode(
         elif reward_type == "diffusion":
             rewards = episode["diffusion_rewards"] / lambda_mr
         elif reward_type == "ours":
-            rewards = episode["multimodal_rewards"] / lambda_mr
+            _min, _max = reward_stat["min"], reward_stat["max"]
+            rewards = (episode["multimodal_rewards"] - _min) / (_max - _min)
+            rewards = rewards / lambda_mr
+
             # our_reward = episode["multimodal_rewards"] / lambda_mr
             # next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())
             # delta_our_reward = discount * next_our_reward - our_reward
@@ -146,6 +156,7 @@ class ReplayBuffer(IterableDataset):
         window_size: int = 4,
         skip_frame: int = 4,
         lambda_mr: float = 1.0,
+        reward_stat: dict = None,
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -164,6 +175,7 @@ class ReplayBuffer(IterableDataset):
         self._skip_frame = skip_frame
         self._obs_keys = obs_keys
         self._lambda_mr = lambda_mr
+        self._reward_stat = reward_stat
 
     def _sample_episode(self):
         eps_fn = random.choice(self._episode_fns)
@@ -286,6 +298,7 @@ class OfflineReplayBuffer(IterableDataset):
         window_size: int = 4,
         skip_frame: int = 4,
         lambda_mr: float = 1.0,
+        reward_stat: dict = None,
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -305,6 +318,7 @@ class OfflineReplayBuffer(IterableDataset):
         self._window_size = window_size
         self._skip_frame = skip_frame
         self._lambda_mr = lambda_mr
+        self._reward_stat = reward_stat
         self._try_fetch()
 
     def _sample_episode(self):
