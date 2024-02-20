@@ -104,7 +104,7 @@ class AWACLearner(object):
         self.temperature = temperature
 
         rng = jax.random.PRNGKey(seed)
-        rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
+        rng, actor_key, critic_key, target_critic_key = jax.random.split(rng, 4)
 
         if len(observations["image1"].shape) == 3 or len(observations["image1"].shape) == 2:
             observations["image1"] = observations["image1"][np.newaxis]
@@ -212,7 +212,7 @@ class AWACLearner(object):
             tx=optax.adam(learning_rate=critic_lr),
         )
 
-        target_critic = Model.create(critic_def, inputs=[critic_key, observations, actions])
+        target_critic = Model.create(critic_def, inputs=[target_critic_key, observations, actions])
 
         self.actor = actor
         self.critic = critic
