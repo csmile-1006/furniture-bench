@@ -22,7 +22,7 @@ flags.DEFINE_integer("num_failure_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
 flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
 flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
-flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
+flags.DEFINE_string("rm_type", "RFE", "reward model type.")
 flags.DEFINE_string("pvr_type", "liv", "pvr type.")
 flags.DEFINE_integer("window_size", 4, "window size")
 flags.DEFINE_integer("skip_frame", 16, "skip frame")
@@ -99,6 +99,7 @@ def main(_):
     if not FLAGS.out_dir and not out_dir.exists():
         raise ValueError(f"{FLAGS.out_dir} doesn't exist.")
 
+    statistics = []
     for idx, file_path in files:
         print(f"Loading [{idx+1}/{len_files}] {file_path}...")
         with open(file_path, "rb") as f:
@@ -160,6 +161,7 @@ def main(_):
             # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
             rewards = rewards[1:].tolist()
             rewards = np.asarray(rewards + rewards[-1:]).astype(np.float32)
+            statistics.append(rewards)
 
             path = out_dir / f"{tp}_{idx}_{rewards.shape[0]}.npz"
 
@@ -176,6 +178,16 @@ def main(_):
             dst_dataset["multimodal_rewards_ckpt_path"] = FLAGS.ckpt_path
             save_episode(dst_dataset, path)
             print(f"Re-saved at {path}")
+
+    statistics = np.concatenate(statistics)
+    total_stat = {
+        "mean": np.mean(statistics),
+        "std": np.std(statistics),
+        "var": np.var(statistics),
+        "min": np.min(statistics),
+        "max": np.max(statistics),
+    }
+    save_episode(total_stat, out_dir / "stats.npz")
 
 
 if __name__ == "__main__":
