@@ -191,6 +191,7 @@ class ReplayBuffer(IterableDataset):
                 window_size=self._window_size,
                 skip_frame=self._skip_frame,
                 lambda_mr=self._lambda_mr,
+                reward_stat=self._reward_stat,
             )
         except Exception as e:
             print(f"Failed to load {eps_fn}: {e}")
@@ -335,6 +336,7 @@ class OfflineReplayBuffer(IterableDataset):
                 window_size=self._window_size,
                 skip_frame=self._skip_frame,
                 lambda_mr=self._lambda_mr,
+                reward_stat=self._reward_stat,
             )
         except Exception as e:
             print(f"Failed to load {eps_fn}: {e}")

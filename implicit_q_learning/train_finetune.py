@@ -80,13 +80,13 @@ flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
-flags.DEFINE_float("temperature", 0.1, "Temperature for stochastic actor.")
+flags.DEFINE_float("temperature", 1.0, "Temperature for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
-flags.DEFINE_string("rm_type", "ARP-V2", "type of reward model.")
+flags.DEFINE_string("rm_type", "RFE", "type of reward model.")
 flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
 flags.DEFINE_string(
     "rm_ckpt_path",
-    "/home/changyeon/ICML2024/reward_models",
+    "/home/changyeon/ICML2024/rfe_checkpoints",
     "reward model checkpoint base path.",
 )
 
@@ -192,9 +192,10 @@ def compute_multimodal_reward(reward_model, **kwargs):
 
 
 def load_reward_stat(data_path):
-    stat_path = data_path / "stat.npz"
+    stat_path = data_path / "stats.npz"
     if stat_path.exists():
-        reward_stat = np.load(data_path / "stat.npz")
+        print(f"load stat faile from {stat_path}.")
+        reward_stat = np.load(stat_path)
         reward_stat = {key: reward_stat[key] for key in reward_stat}
     else:
         print("no stat file in this folder.")
@@ -357,7 +358,7 @@ def main(_):
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
             / FLAGS.env_name.split("/")[-1]
-            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-c1.0@0.1-supc1.0-ep0.5-demo500-total-phase"
+            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-c0.0@0.0-supc0.2-ep0.5-demo100-newsupcon-negepic"
             / "s0"
             / "best_model.pkl"
         )
@@ -480,7 +481,7 @@ def main(_):
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
-        reawrd_stat=reward_stat if FLAGS.reward_type == "ours" else None,
+        reward_stat=reward_stat if FLAGS.reward_type == "ours" else None,
     )
 
     start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps + 1
