@@ -451,8 +451,7 @@ def main(_):
                 for k, v in update_info.items():
                     wandb.log({f"offline-training/{k}": v}, step=i)
 
-            if i % FLAGS.ckpt_interval == 0:
-                agent.save(ckpt_dir, i)
+        agent.save(ckpt_dir, i)
 
     offline_loader = make_offline_loader(
         env, FLAGS.data_path, int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
