@@ -181,27 +181,27 @@ class IQLLearner(object):
             )
 
         action_dim = actions.shape[-1]
-        # actor_def = policy.NormalTanhPolicy(
-        #     hidden_dims,
-        #     action_dim,
-        #     log_std_scale=1e-3,
-        #     log_std_min=-5.0,
-        #     dropout_rate=dropout_rate,
-        #     state_dependent_std=False,
-        #     tanh_squash_distribution=False,
-        #     encoder_cls=actor_encoder_cls,
-        #     obs_keys=obs_keys,
-        # )
         actor_cls = partial(
-            policy.NormalTanhMixturePolicy,
+            policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            num_modes=10,
+            log_std_scale=1e-3,
+            log_std_min=-5.0,
             dropout_rate=dropout_rate,
-            min_std=0.03,
-            use_tanh=False,
+            state_dependent_std=False,
+            tanh_squash_distribution=False,
             obs_keys=obs_keys,
         )
+        # actor_cls = partial(
+        #     policy.NormalTanhMixturePolicy,
+        #     hidden_dims,
+        #     action_dim,
+        #     num_modes=10,
+        #     dropout_rate=dropout_rate,
+        #     min_std=0.03,
+        #     use_tanh=False,
+        #     obs_keys=obs_keys,
+        # )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
