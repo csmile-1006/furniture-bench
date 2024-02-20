@@ -1,5 +1,6 @@
 import isaacgym  # noqa: F401
 import os
+import gc
 from collections import deque
 from pathlib import Path
 
@@ -162,14 +163,17 @@ def compute_multimodal_reward(reward_model, **kwargs):
             }
             phases = reward_model.get_phase(batch)
             batch["instruct"] = np.stack([insts[phase] for phase in phases])
-            output = reward_model.get_reward(
+            reward_output = reward_model.get_reward(
                 batch, get_video_feature=get_video_feature, get_text_feature=get_text_feature
             )
-            rewards.extend(output["rewards"])
+            rewards.extend(reward_output["rewards"])
             if get_video_feature:
-                video_features.extend(output["video_features"])
+                video_features.extend(reward_output["video_features"])
             if get_text_feature:
-                text_features.extend(output["text_features"])
+                text_features.extend(reward_output["text_features"])
+            del batch
+
+        del reward_output
 
         output = {
             "rewards": gaussian_smoothe(np.asarray(rewards)),
@@ -178,6 +182,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
             output["video_features"] = np.asarray(video_features)
         if get_text_feature:
             output["text_features"] = np.asarray(text_features)
+        gc.collect()
         return output
 
     output = _get_reward(img_features=img_features)
