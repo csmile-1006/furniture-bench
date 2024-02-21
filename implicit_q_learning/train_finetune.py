@@ -439,7 +439,10 @@ def main(_):
     offline_loader = make_offline_loader(env, FLAGS.data_path, FLAGS.batch_size)
     if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
         console.print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
-        agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
+        if FLAGS.use_bc:
+            agent.load_actor(ckpt_dir, FLAGS.num_pretraining_steps)
+        else:
+            agent.load(ckpt_dir, FLAGS.num_pretraining_steps)
     else:
         console.print("Start pre-training with offline dataset.")
         start_step, steps = 1, FLAGS.num_pretraining_steps + 1
