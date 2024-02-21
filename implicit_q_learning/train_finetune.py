@@ -19,6 +19,7 @@ from evaluation import evaluate
 
 from agents.iql.iql_learner import IQLLearner
 from agents.awac.awac_learner import AWACLearner
+from agents.dapg.dapg_learner import DAPGLearner
 from ml_collections import ConfigDict, config_flags
 from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
 from rich.console import Console
@@ -48,7 +49,7 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
-flags.DEFINE_enum("agent_type", "awac", ["awac", "iql"], "agent type.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql"], "agent type.")
 flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
 flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
 flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
@@ -420,7 +421,13 @@ def main(_):
             FLAGS.seed,
             env.observation_space.sample(),
             env.action_space.sample()[:1],
-            # temperature=FLAGS.temperature,
+            **kwargs,
+        )
+    elif FLAGS.agent_type == "dapg":
+        agent = DAPGLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
             **kwargs,
         )
     else:
