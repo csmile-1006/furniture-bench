@@ -72,8 +72,8 @@ class NormalTanhMixturePolicy(nn.Module):
     action_dim: int
     num_modes: int = 5
     dropout_rate: Optional[float] = None
-    log_std_min: Optional[float] = None
-    log_std_max: Optional[float] = None
+    std_min: Optional[float] = None
+    std_max: Optional[float] = None
     use_tanh: bool = False
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
@@ -93,12 +93,11 @@ class NormalTanhMixturePolicy(nn.Module):
             bias_init=nn.initializers.normal(stddev=1.0),
             name="OutputDenseMean",
         )(outputs)
-        log_stds = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseLogStds")(
+        scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseScales")(
             outputs
         )
-        log_std_min = self.log_std_min or LOG_STD_MIN
-        log_std_max = self.log_std_max or LOG_STD_MAX
-        log_stds = jnp.clip(log_stds, log_std_min, log_std_max)
+        scales = nn.softplus(scales) + self.std_min
+        scales = jnp.clip(scales, self.std_min, self.std_max)
 
         if not self.use_tanh:
             means = nn.tanh(means)
@@ -107,9 +106,9 @@ class NormalTanhMixturePolicy(nn.Module):
 
         logits = jnp.reshape(logits, shape)
         mu = jnp.reshape(means, shape)
-        log_stds = jnp.reshape(log_stds, shape)
+        scales = jnp.reshape(scales, shape)
 
-        components_distribution = tfd.Normal(loc=mu, scale=jnp.exp(log_stds) * temperature)
+        components_distribution = tfd.Normal(loc=mu, scale=scales * temperature)
         # components_distribution = tfd.Independent(components_distribution, 1)
 
         dist = tfd.MixtureSameFamily(

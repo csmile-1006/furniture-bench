@@ -198,8 +198,8 @@ class IQLLearner(object):
             action_dim,
             num_modes=10,
             dropout_rate=dropout_rate,
-            log_std_min=-10.0,
-            log_std_max=-2.0,
+            std_min=1e-4,
+            std_max=3e-2,
             use_tanh=False,
             obs_keys=obs_keys,
         )

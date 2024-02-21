@@ -459,8 +459,16 @@ def main(_):
                 for k, v in update_info.items():
                     wandb.log({f"offline-training/{k}": v}, step=i)
 
+            # if i % FLAGS.eval_interval == 0:
+            #     env.set_eval_flag()
+            #     eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+
+            #     for k, v in eval_stats.items():
+            #         wandb.log({f"offline-evaluation/{k}": v}, step=i)
+            #     env.unset_eval_flag()
         agent.save(ckpt_dir, i)
 
+    # raise
     offline_loader = make_offline_loader(
         env, FLAGS.data_path, int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
     )
