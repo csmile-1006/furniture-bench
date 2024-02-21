@@ -44,7 +44,7 @@ def awr_update_actor(
     return new_actor, info
 
 
-def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch, temperature: float) -> Tuple[Model, InfoDict]:
+def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, InfoDict]:
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
             actor_params, batch.observations, training=True, rngs={"dropout": key}, mutable=actor.extra_variables.keys()

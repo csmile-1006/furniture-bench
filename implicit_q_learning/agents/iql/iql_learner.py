@@ -72,10 +72,9 @@ def _update_bc_jit(
     rng: PRNGKey,
     actor: Model,
     batch: Batch,
-    temperature: float,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
     key, rng = jax.random.split(rng)
-    new_actor, actor_info = bc_update_actor(key, actor, batch, temperature)
+    new_actor, actor_info = bc_update_actor(key, actor, batch)
 
     return (
         rng,
@@ -277,7 +276,7 @@ class IQLLearner(object):
 
     def update(self, batch: Batch, utd_ratio: int = 1, update_bc: bool = False) -> InfoDict:
         if update_bc:
-            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.temperature)
+            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch)
         else:
             (
                 new_rng,
