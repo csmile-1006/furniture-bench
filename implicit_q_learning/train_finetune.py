@@ -235,7 +235,7 @@ def make_env(
             record=True,
             resize_img=True,
             randomness=randomness,
-            record_every=5,
+            record_every=3,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
@@ -437,12 +437,14 @@ def main(_):
         return jax.tree_util.tree_map(lambda x: x.numpy(), y)
 
     offline_loader = make_offline_loader(env, FLAGS.data_path, FLAGS.batch_size)
-    if FLAGS.run_name != "" and FLAGS.ckpt_step != 0:
-        console.print(f"load trained {FLAGS.ckpt_step} checkpoints from {ckpt_dir}")
+    if FLAGS.ckpt_dir != "":
+        console.print(
+            f"load trained checkpoints trained with {FLAGS.num_pretraining_steps} steps from {FLAGS.ckpt_dir}"
+        )
         if FLAGS.use_bc:
-            agent.load_actor(ckpt_dir, FLAGS.num_pretraining_steps)
+            agent.load_actor(f"{FLAGS.ckpt_dir}.{FLAGS.seed}", FLAGS.num_pretraining_steps)
         else:
-            agent.load(ckpt_dir, FLAGS.num_pretraining_steps)
+            agent.load(f"{FLAGS.ckpt_dir}.{FLAGS.seed}", FLAGS.num_pretraining_steps)
     else:
         console.print("Start pre-training with offline dataset.")
         start_step, steps = 1, FLAGS.num_pretraining_steps + 1
@@ -479,9 +481,12 @@ def main(_):
         agent.save(ckpt_dir, i)
 
     # raise
-    offline_loader = make_offline_loader(
-        env, FLAGS.data_path, int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
-    )
+    offline_batch_size = int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
+    online_batch_size = FLAGS.batch_size - offline_batch_size
+    if FLAGS.agent_type == "dapg":
+        assert offline_batch_size == online_batch_size, "DAPG requires the same batch size for offline and online."
+
+    offline_loader = make_offline_loader(env, FLAGS.data_path, offline_batch_size)
     replay_storage = ReplayBufferStorage(
         replay_dir=Path(buffer_dir).expanduser(),
         max_env_steps=env.furniture.max_env_steps,
@@ -489,7 +494,7 @@ def main(_):
     online_loader = make_replay_loader(
         replay_dir=Path(buffer_dir).expanduser(),
         max_size=FLAGS.replay_buffer_size,
-        batch_size=int(FLAGS.batch_size * FLAGS.utd_ratio * (1 - FLAGS.offline_ratio)),
+        batch_size=online_batch_size,
         num_workers=FLAGS.num_workers,
         save_snapshot=FLAGS.save_snapshot,
         nstep=FLAGS.n_step,
@@ -558,7 +563,11 @@ def main(_):
                                 ][min(idx + 1, len(output["rewards"]) - 1)]
                         info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
                         del output
-                    replay_storage.add_episode(trajectories[env_idx])
+                    replay_storage.add_episode(
+                        trajectories[env_idx],
+                        env_idx,
+                        env.episode_cnts[env_idx],
+                    )
                     new_ob = env.reset_env(env_idx)
                     for key in next_observation:
                         next_observation[key][env_idx] = new_ob[key]

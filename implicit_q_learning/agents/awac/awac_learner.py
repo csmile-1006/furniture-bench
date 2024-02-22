@@ -286,3 +286,7 @@ class AWACLearner(object):
         self.critic = self.critic.load(path)
         path = f"{ckpt_dir}/{step}_target_critic"
         self.target_critic = self.target_critic.load(path)
+
+    def load_actor(self, ckpt_dir, step):
+        path = f"{ckpt_dir}/{step}_actor"
+        self.actor = self.actor.load(path)

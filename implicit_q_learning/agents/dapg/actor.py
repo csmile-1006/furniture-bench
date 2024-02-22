@@ -5,6 +5,24 @@ import jax.numpy as jnp
 from networks.common import Batch, InfoDict, Model, Params, PRNGKey
 
 
+def get_value(
+    key: PRNGKey, actor: Model, critic: Model, observations: jnp.ndarray, num_samples: int, temperature: float
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    dist = actor(observations, temperature)
+
+    policy_actions = dist.sample(seed=key)
+
+    n_observations = {}
+    for k, v in observations.items():
+        n_observations[k] = jnp.repeat(v[jnp.newaxis], num_samples, axis=0).reshape(-1, *v.shape[1:])
+    q_pi1, q_pi2 = critic(n_observations, policy_actions)
+
+    def get_v(q):
+        return jnp.mean(q, axis=0)
+
+    return get_v(q_pi1), get_v(q_pi2)
+
+
 def dapg_update_actor(
     key: PRNGKey,
     actor: Model,
@@ -15,8 +33,16 @@ def dapg_update_actor(
     step: int,
     temperature: float,
 ) -> Tuple[Model, InfoDict]:
-    # v1, v2 = get_value(key, actor, critic, batch, num_samples, temperature)
-    # v = jnp.minimum(v1, v2)
+    v1, v2 = get_value(key, actor, critic, batch.observations, 1, temperature)
+    v = jnp.minimum(v1, v2)
+
+    dist = actor(batch.next_observations, temperature)
+    next_actions = dist.sample(seed=key)
+    next_q1, next_q2 = critic(batch.next_observations, next_actions)
+    next_q = jnp.minimum(next_q1, next_q2)
+
+    next_v1, next_v2 = get_value(key, actor, critic, batch.observations, 1, temperature)
+    next_v = jnp.minimum(next_v1, next_v2)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
@@ -33,29 +59,26 @@ def dapg_update_actor(
 
         q1, q2 = critic(batch.observations, actions)
         q = jnp.minimum(q1, q2)
-        actor_q_loss = -q
-        bc_loss = -log_probs
-        actor_loss = actor_q_loss.mean() + lambda_1 * (lambda_2**step) * bc_loss.mean()
-        # a = q - v
+        a = q - v
+        next_a = next_q - next_v
 
-        # # we could have used exp(a / beta) here but
-        # # exp(a / beta) is unbiased but high variance,
-        # # softmax(a / beta) is biased but lower variance.
-        # # sum() instead of mean(), because it should be multiplied by batch size.
-        # actor_loss = -(jax.nn.softmax(a / beta) * log_probs).sum()
+        offline_log_probs, online_log_probs = log_probs[::2], log_probs[1::2]
+        online_a = a[1::2]
+        online_next_a = next_a[1::2]
+
+        offline_weight = lambda_1 * (lambda_2**step) * online_next_a.max()
+        actor_q_loss = -online_a * online_log_probs
+        bc_loss = -offline_log_probs
+        actor_loss = actor_q_loss.sum() + offline_weight * bc_loss.sum()
+        # a = q - v
 
         return (
             actor_loss,
             {
                 "actor_loss_mean": actor_loss,
-                "actor_q_loss_mean": actor_q_loss.mean(),
-                "actor_q_loss_min": actor_q_loss.min(),
-                "actor_q_loss_max": actor_q_loss.max(),
-                "actor_q_loss_std": actor_q_loss.std(),
-                "bc_loss_mean": bc_loss.mean(),
-                "bc_loss_min": bc_loss.min(),
-                "bc_loss_max": bc_loss.max(),
-                "bc_loss_std": bc_loss.std(),
+                "actor_loss_min": a.min(),
+                "actor_loss_max": a.max(),
+                "actor_loss_std": a.std(),
                 "updated_states": updated_states,
             },
         )

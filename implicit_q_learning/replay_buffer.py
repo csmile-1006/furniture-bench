@@ -126,17 +126,17 @@ class ReplayBufferStorage:
         self._num_episodes = 0
         self._num_transitions = 0
         for fn in self._replay_dir.glob("*.npz"):
-            _, _, eps_len = fn.stem.split("_")
+            _, _, eps_len, *_ = fn.stem.split("_")
             self._num_episodes += 1
             self._num_transitions += int(eps_len)
 
-    def add_episode(self, episode):
+    def add_episode(self, episode, env_idx, episode_idx):
         eps_idx = self._num_episodes
         eps_len = episode_len(episode)
         tp = "success" if eps_len < self._max_env_steps else "failure"
         self._num_episodes += 1
         self._num_transitions += eps_len
-        eps_fn = f"{tp}_{eps_idx}_{eps_len}.npz"
+        eps_fn = f"{tp}_{eps_idx}_{eps_len}_env{env_idx}_{episode_idx}.npz"
         save_episode(episode, self._replay_dir / eps_fn)
 
 
@@ -223,7 +223,7 @@ class ReplayBuffer(IterableDataset):
         eps_fns = sorted(self._replay_dir.glob("*.npz"), reverse=True)
         fetched_size = 0
         for eps_fn in eps_fns:
-            eps_tp, eps_idx, eps_len = eps_fn.stem.split("_")
+            eps_tp, eps_idx, eps_len, *_ = eps_fn.stem.split("_")
             eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
             if eps_idx % self._num_workers != worker_id:
                 continue
