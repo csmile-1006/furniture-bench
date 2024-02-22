@@ -596,15 +596,19 @@ class Model:
 
     def save(self, save_path: str):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        data = {
+            "params": self.params,
+            "extra_variables": self.extra_variables,
+        }
         with open(save_path, "wb") as f:
-            pickle.dump(self.params, f)
+            pickle.dump(data, f)
             # f.write(flax.serialization.to_bytes(self.params))
 
     def load(self, load_path: str) -> "Model":
         with open(load_path, "rb") as f:
-            params = pickle.load(f)
+            data = pickle.load(f)
             # params = flax.serialization.from_bytes(self.params, f.read())
-        return self.replace(params=params)
+        return self.replace(params=data["params"], extra_variables=data["extra_variables"])
 
 
 MAGIC_PAD_VAL = -1  # Define this according to your needs
