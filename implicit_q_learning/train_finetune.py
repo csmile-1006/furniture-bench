@@ -40,7 +40,7 @@ flags.DEFINE_string("env_name", "FurnitureSimImageFeature-V0/one_leg", "Environm
 flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
 flags.DEFINE_integer("num_gradient_steps", 2, "gradient steps per environment interaction.")
 flags.DEFINE_string("save_dir", "./tmp/", "logging dir.")
-flags.DEFINE_string("ckpt_dir", "./tmp/", "Checkpoint dir.")
+flags.DEFINE_string("ckpt_dir", "", "Checkpoint dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
 flags.DEFINE_integer("ckpt_step", 0, "Specific checkpoint step")
 flags.DEFINE_integer("seed", 42, "Random seed.")
