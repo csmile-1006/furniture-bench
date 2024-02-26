@@ -31,6 +31,7 @@ import furniture_bench.controllers.control_utils as C
 from furniture_bench.envs.initialization_mode import Randomness, str_to_enum
 from furniture_bench.controllers.osc import osc_factory
 from furniture_bench.furniture import furniture_factory
+from furniture_bench.furniture.one_leg import OneLeg
 from furniture_bench.sim_config import sim_config
 from furniture_bench.config import ROBOT_HEIGHT, config
 from furniture_bench.utils.pose import get_mat, rot_mat
@@ -1361,43 +1362,80 @@ class FurnitureSimEnv(gym.Env):
             )  # Skill complete is always 1 when assembled.
         add_phase_noise = self.phase_counter == self.phase_noise
         if not part1.pre_assemble_done:
-            goal_pos, goal_ori, gripper, skill_complete = part1.pre_assemble(
-                ee_pos,
-                ee_quat,
-                gripper_width,
-                self.rb_states,
-                self.part_idxs,
-                self.sim_to_april_mat,
-                self.april_to_robot_mat,
-                self.furniture,
-                add_phase_noise,
-            )
-        elif not part2.pre_assemble_done:
-            goal_pos, goal_ori, gripper, skill_complete = part2.pre_assemble(
-                ee_pos,
-                ee_quat,
-                gripper_width,
-                self.rb_states,
-                self.part_idxs,
-                self.sim_to_april_mat,
-                self.april_to_robot_mat,
-                self.furniture,
-                add_phase_noise,
-            )
-        else:
-            goal_pos, goal_ori, gripper, skill_complete = self.furniture.parts[part_idx2].fsm_step(
-                ee_pos,
-                ee_quat,
-                gripper_width,
-                self.rb_states,
-                self.part_idxs,
-                self.sim_to_april_mat,
-                self.april_to_robot_mat,
-                self.furniture.parts[part_idx1].name,
-                self.furniture,
-                add_phase_noise,
-            )
+            if isinstance(self.furniture, OneLeg):
+                goal_pos, goal_ori, gripper, skill_complete = part1.pre_assemble(
+                    ee_pos,
+                    ee_quat,
+                    gripper_width,
+                    self.rb_states,
+                    self.part_idxs,
+                    self.sim_to_april_mat,
+                    self.april_to_robot_mat,
+                    self.furniture,
+                    add_phase_noise,
+                )
+            else:
+                goal_pos, goal_ori, gripper, skill_complete = part1.pre_assemble(
+                    ee_pos,
+                    ee_quat,
+                    gripper_width,
+                    self.rb_states,
+                    self.part_idxs,
+                    self.sim_to_april_mat,
+                    self.april_to_robot_mat,
+                    self.furniture,
+                )
 
+        elif not part2.pre_assemble_done:
+            if isinstance(self.furniture, OneLeg):
+                goal_pos, goal_ori, gripper, skill_complete = part2.pre_assemble(
+                    ee_pos,
+                    ee_quat,
+                    gripper_width,
+                    self.rb_states,
+                    self.part_idxs,
+                    self.sim_to_april_mat,
+                    self.april_to_robot_mat,
+                    self.furniture,
+                    add_phase_noise,
+                )
+            else:
+                goal_pos, goal_ori, gripper, skill_complete = part2.pre_assemble(
+                    ee_pos,
+                    ee_quat,
+                    gripper_width,
+                    self.rb_states,
+                    self.part_idxs,
+                    self.sim_to_april_mat,
+                    self.april_to_robot_mat,
+                    self.furniture,
+                )
+        else:
+            if isinstance(self.furniture, OneLeg):
+                goal_pos, goal_ori, gripper, skill_complete = self.furniture.parts[part_idx2].fsm_step(
+                    ee_pos,
+                    ee_quat,
+                    gripper_width,
+                    self.rb_states,
+                    self.part_idxs,
+                    self.sim_to_april_mat,
+                    self.april_to_robot_mat,
+                    self.furniture.parts[part_idx1].name,
+                    self.furniture,
+                    add_phase_noise,
+                )
+            else:
+                goal_pos, goal_ori, gripper, skill_complete = self.furniture.parts[part_idx2].fsm_step(
+                    ee_pos,
+                    ee_quat,
+                    gripper_width,
+                    self.rb_states,
+                    self.part_idxs,
+                    self.sim_to_april_mat,
+                    self.april_to_robot_mat,
+                    self.furniture.parts[part_idx1].name,
+                    self.furniture,
+                )
         delta_pos = goal_pos - ee_pos
 
         if skill_complete == 1:
@@ -1417,11 +1455,7 @@ class FurnitureSimEnv(gym.Env):
 
         delta_quat = C.quat_mul(C.quat_conjugate(ee_quat), goal_ori)
         # Add random noise to the action.
-        if (
-            (add_phase_noise or
-            self.furniture.parts[part_idx2].state_no_noise())
-            and np.random.random() < 0.50
-        ):
+        if (add_phase_noise or self.furniture.parts[part_idx2].state_no_noise()) and np.random.random() < 0.50:
             delta_pos = torch.normal(delta_pos, 0.005)
             delta_quat = C.quat_multiply(
                 delta_quat,
