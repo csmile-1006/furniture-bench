@@ -1,29 +1,28 @@
 import isaacgym  # noqa: F401
-import os
 import gc
+import os
 from collections import deque
 from pathlib import Path
 
 import clip
+import flax.linen as nn
 import gym
 import numpy as np
 import tqdm
 import wandb
 import wrappers
-import flax.linen as nn
 from absl import app, flags
+from agents.awac.awac_learner import AWACLearner
+from agents.dapg.dapg_learner import DAPGLearner
+from agents.iql.iql_learner import IQLLearner
+from agents.td3.td3_learner import TD3Learner
 from bpref_v2.data.instruct import get_furniturebench_instruct
 from bpref_v2.data.label_reward_furniturebench import load_reward_model
 from dataset_utils import gaussian_smoothe
 from evaluation import evaluate
-
-from agents.iql.iql_learner import IQLLearner
-from agents.awac.awac_learner import AWACLearner
-from agents.dapg.dapg_learner import DAPGLearner
 from ml_collections import ConfigDict, config_flags
 from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
 from rich.console import Console
-
 from tqdm import trange
 
 from furniture_bench.sim_config import sim_config
@@ -49,7 +48,7 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
-flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql"], "agent type.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3"], "agent type.")
 flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
 flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
 flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
@@ -256,6 +255,7 @@ def make_env(
     env.observation_space.seed(seed)
 
     import random
+
     import torch
 
     torch.manual_seed(seed)
@@ -425,6 +425,13 @@ def main(_):
         )
     elif FLAGS.agent_type == "dapg":
         agent = DAPGLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            **kwargs,
+        )
+    elif FLAGS.agent_type == "td3":
+        agent = TD3Learner(
             FLAGS.seed,
             env.observation_space.sample(),
             env.action_space.sample()[:1],
@@ -617,7 +624,7 @@ def main(_):
             if i != start_step and i % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
+            if False and (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
