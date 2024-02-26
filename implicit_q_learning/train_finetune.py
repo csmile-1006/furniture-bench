@@ -624,7 +624,7 @@ def main(_):
             if i != start_step and i % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if False and (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
+            if (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
