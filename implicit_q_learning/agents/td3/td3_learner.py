@@ -38,17 +38,17 @@ def _update_jit(
     discount: float,
     tau: float,
     alpha: float,
-    temperature: float,
+    expl_noise: float,
     update_policy: bool,
     use_td3_bc: bool,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng)
     new_critic, critic_info = td3_update_critic(
-        key, target_actor, critic, target_critic, None, batch, discount, temperature, backup_entropy=False
+        key, target_actor, critic, target_critic, None, batch, discount, expl_noise, backup_entropy=False
     )
     if update_policy:
         rng, key = jax.random.split(rng)
-        new_actor, actor_info = td3_update_actor(key, actor, new_critic, batch, alpha, temperature, use_td3_bc)
+        new_actor, actor_info = td3_update_actor(key, actor, new_critic, batch, alpha, expl_noise, use_td3_bc)
     else:
         new_actor = actor
         actor_info = {}
@@ -97,6 +97,7 @@ class TD3Learner(object):
         use_sigmareparam: bool = True,
         policy_delay: int = 2,
         alpha: float = 2.5,
+        expl_noise: float = 0.1,
         temperature: float = 1.0,
         use_td3_bc: bool = False,
     ):
@@ -108,6 +109,7 @@ class TD3Learner(object):
         self.discount = discount
         self.policy_delay = policy_delay
         self.alpha = alpha
+        self.expl_noise = expl_noise
         self.temperature = temperature
         self.use_td3_bc = use_td3_bc
 
@@ -270,7 +272,7 @@ class TD3Learner(object):
                 self.discount,
                 self.tau,
                 self.alpha,
-                self.temperature,
+                self.expl_noise,
                 self.step % self.policy_delay == 0,
                 self.use_td3_bc,
             )

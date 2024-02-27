@@ -6,7 +6,7 @@ from networks.common import Batch, InfoDict, Model, Params, PRNGKey
 
 
 def td3_update_actor(
-    key: PRNGKey, actor: Model, critic: Model, batch: Batch, alpha: float, temperature: float, use_td3_bc: bool
+    key: PRNGKey, actor: Model, critic: Model, batch: Batch, alpha: float, expl_noise: float, use_td3_bc: bool
 ) -> Tuple[Model, InfoDict]:
     data_q1, data_q2 = critic(batch.observations, batch.actions)
     data_q = jnp.minimum(data_q1, data_q2)
@@ -15,7 +15,7 @@ def td3_update_actor(
         dist, updated_states = actor.apply(
             actor_params,
             batch.observations,
-            temperature,
+            expl_noise,
             training=True,
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),

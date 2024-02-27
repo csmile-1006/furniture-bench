@@ -19,10 +19,10 @@ def td3_update_critic(
     temp: Model,
     batch: Batch,
     discount: float,
-    temperature: float,
+    expl_noise: float,
     backup_entropy: bool,
 ) -> Tuple[Model, InfoDict]:
-    dist = target_actor(batch.next_observations, temperature)
+    dist = target_actor(batch.next_observations, expl_noise)
     next_actions = dist.sample(seed=key)
     next_log_probs = dist.log_prob(next_actions)
     next_q1, next_q2 = target_critic(batch.next_observations, next_actions)
