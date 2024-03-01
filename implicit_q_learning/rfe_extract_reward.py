@@ -1,16 +1,16 @@
+import datetime
 import io
 import pickle
-import datetime
 from pathlib import Path
 
 import numpy as np
+import scipy
 import torch
 import torchvision.transforms as T
-import scipy
 from absl import app, flags
+from bpref_v2.data.arp_furniturebench_dataset_inmemory_stream import get_failure_skills_and_phases
+from bpref_v2.data.label_reward_furniturebench import load_reward_fn, load_reward_model
 from ml_collections import ConfigDict
-
-from bpref_v2.data.label_reward_furniturebench import load_reward_model, load_reward_fn
 
 FLAGS = flags.FLAGS
 
@@ -132,7 +132,14 @@ def main(_):
                 images[key] = val
 
             skills = np.asarray(x["skills"])
-            actions, skills = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
+            if "success" in file_path.name:
+                actions, skills = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
+            else:
+                actions, phase = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
+                failure_phase = x.get("failure_phase", -1)
+                _, skills = get_failure_skills_and_phases(
+                    skill=skills, phase=phase, task_name=FLAGS.furniture, failure_phase=failure_phase
+                )
             args = ConfigDict()
             args.task_name = FLAGS.furniture
             args.image_keys = "color_image2|color_image1"
