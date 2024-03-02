@@ -72,7 +72,7 @@ def main(_):
 
     # load reward model.
     ckpt_path = Path(FLAGS.ckpt_path).expanduser()
-    reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=ckpt_path)
+    reward_model = load_reward_model(rm_type=FLAGS.rm_type, task_name=FLAGS.furniture, ckpt_path=ckpt_path)
     reward_fn = load_reward_fn(rm_type=FLAGS.rm_type, reward_model=reward_model)
     pvr_model, pvr_transform, feature_dim = load_embedding(rep=FLAGS.pvr_type)
 
