@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import scipy
 import torch
+from rich.console import Console
 import torchvision.transforms as T
 from absl import app, flags
 from bpref_v2.data.arp_furniturebench_dataset_inmemory_stream import get_failure_skills_and_phases
@@ -13,6 +14,7 @@ from bpref_v2.data.label_reward_furniturebench import load_reward_fn, load_rewar
 from ml_collections import ConfigDict
 
 FLAGS = flags.FLAGS
+console = Console()
 
 flags.DEFINE_string("furniture", "one_leg", "Name of furniture.")
 flags.DEFINE_string("demo_dir", "square_table_parts_state", "Demonstration dir.")
@@ -25,7 +27,8 @@ flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
 flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
 flags.DEFINE_string("pvr_type", "liv", "pvr type.")
 flags.DEFINE_integer("window_size", 4, "window size")
-flags.DEFINE_integer("skip_frame", 16, "skip frame")
+flags.DEFINE_integer("skip_frame", 1, "skip frame")
+flags.DEFINE_boolean("save_reward_stats", False, "save reward stats or not.")
 
 
 device = torch.device("cuda")
@@ -81,7 +84,7 @@ def main(_):
     demo_type = [f"_{elem}" for elem in FLAGS.demo_type.split("|")]
     files = []
     for _demo_type in demo_type:
-        print(f"Loading {_demo_type} demos...")
+        console.print(f"Loading {_demo_type} demos...")
         demo_files = sorted(list(dir_path.glob(f"*{_demo_type}.pkl")))
         len_demos = (
             getattr(FLAGS, f"num{_demo_type}_demos")
@@ -99,8 +102,10 @@ def main(_):
     if not FLAGS.out_dir and not out_dir.exists():
         raise ValueError(f"{FLAGS.out_dir} doesn't exist.")
 
+    reward_stats = []
+
     for idx, file_path in files:
-        print(f"Loading [{idx+1}/{len_files}] {file_path}...")
+        console.print(f"Loading [{idx+1}/{len_files}] {file_path}...")
         with open(file_path, "rb") as f:
             x = pickle.load(f)
             tp = file_path.stem.split("_")[-1].split(".")[0]
@@ -115,7 +120,8 @@ def main(_):
                 dst_dataset.get("multimodal_rewards_ckpt_path", None) is not None
                 and dst_dataset.get("multimodal_rewards_ckpt_path").item() == FLAGS.ckpt_path
             ):
-                print(f"Already labeled with {FLAGS.ckpt_path}")
+                console.print(f"Already labeled with {FLAGS.ckpt_path}")
+                reward_stats.append(dst_dataset["multimodal_rewards"])
                 continue
 
             if len(x["observations"]) == len(x["actions"]):
@@ -167,6 +173,7 @@ def main(_):
             # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
             rewards = rewards[1:].tolist()
             rewards = np.asarray(rewards + rewards[-1:]).astype(np.float32)
+            reward_stats.append(rewards)
 
             path = out_dir / f"{tp}_{idx}_{rewards.shape[0]}.npz"
 
@@ -182,7 +189,20 @@ def main(_):
             dst_dataset["timestamp"] = datetime.datetime.now().timestamp()
             dst_dataset["multimodal_rewards_ckpt_path"] = FLAGS.ckpt_path
             save_episode(dst_dataset, path)
-            print(f"Re-saved at {path}")
+            console.print(f"Re-saved at {path}")
+
+    if FLAGS.save_reward_stats:
+        console.print("save reward stats.")
+        reward_stats = np.concatenate(reward_stats, axis=0)
+        stat_file = {
+            "mean": np.mean(reward_stats),
+            "std": np.std(reward_stats),
+            "var": np.var(reward_stats),
+            "min": np.min(reward_stats),
+            "max": np.max(reward_stats),
+        }
+        console.print(stat_file)
+        save_episode(stat_file, out_dir / "stats.npz")
 
 
 if __name__ == "__main__":
