@@ -367,11 +367,13 @@ def main(_):
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
             / FLAGS.env_name.split("/")[-1]
-            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-c0.0@0.0-supc0.2-ep0.5-demo100-newsupcon-negepic"
+            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-c0.0@0.0-supc0.2-ep0.5-demo100-hierarchical-shaped-learnablelogit10"
             / "s0"
             / "best_model.pkl"
         )
-        reward_model = load_reward_model(rm_type=FLAGS.rm_type, ckpt_path=rm_ckpt_path)
+        reward_model = load_reward_model(
+            rm_type=FLAGS.rm_type, task_name=FLAGS.env_name.split("/")[-1], ckpt_path=rm_ckpt_path
+        )
 
         args = ConfigDict()
         args.task_name = FLAGS.env_name.split("/")[-1]
