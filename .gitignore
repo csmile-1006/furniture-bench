@@ -139,3 +139,4 @@ log
 
 checkpoints
 cache
+eval_rollouts/

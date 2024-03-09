@@ -1,17 +1,23 @@
+import isaacgym  # noqa: F401
 import os
+from pathlib import Path
 
+import flax.linen as nn
 import gym
-
+import numpy as np
+import wrappers
 from absl import app, flags
+from agents.awac.awac_learner import AWACLearner
+from agents.dapg.dapg_learner import DAPGLearner
+from agents.iql.iql_learner import IQLLearner
+from agents.td3.td3_learner import TD3Learner
+from evaluation import evaluate_with_save
 from ml_collections import config_flags
-from furniture_bench.utils.checkpoint import download_ckpt_if_not_exists
+from rich.console import Console
 
 from furniture_bench.sim_config import sim_config
 
-import wrappers
-from evaluation import evaluate
-from learner import Learner
-
+console = Console()
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
@@ -27,8 +33,14 @@ flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("from_skill", int(0), "Skill to start from.")
 flags.DEFINE_integer("skill", int(-1), "Skill to evaluate.")
 flags.DEFINE_integer("high_random_idx", int(0), "High random idx.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3"], "agent type.")
 
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
+
+flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
+flags.DEFINE_integer("skip_frame", 4, "how often skip frame.")
+flags.DEFINE_integer("reward_window_size", 4, "Number of frames in context window in reward model.")
+flags.DEFINE_integer("reward_skip_frame", 4, "how often skip frame in reward model.")
 
 flags.DEFINE_boolean("image", True, "Image-based model")
 flags.DEFINE_boolean("record", True, "Record video")
@@ -48,55 +60,56 @@ config_flags.DEFINE_config_file(
 def make_env(
     env_name: str,
     seed: int,
-    use_encoder: bool,
-    record: bool,
-    from_skill: int,
-    skill: int,
     randomness: str,
-    high_random_idx: int,
     encoder_type: str,
-    headless: bool,
-    device_id: int,
-) -> gym.Env:
+    reward_model: nn.Module = None,
+):
+    #  -> Tuple[gym.Env, D4RLDataset]:
+    record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
         import furniture_bench  # noqa: F401
 
         env_id, furniture_name = env_name.split("/")
-        record_dir = os.path.join(FLAGS.save_dir, env_name, "sim_record_test", f"{FLAGS.run_name}.{FLAGS.seed}")
         env = gym.make(
             env_id,
             num_envs=FLAGS.num_envs,
             furniture=furniture_name,
-            use_encoder=use_encoder,
-            use_all_cam=False,
-            record=record,
-            record_every=1,
-            record_dir=record_dir,
-            resize_img=True,
-            disable_env_checker=True,
-            from_skill=from_skill,
-            skill=skill,
-            high_random_idx=high_random_idx,
-            randomness=randomness,
             encoder_type=encoder_type,
-            headless=headless,
+            reward_encoder_type=encoder_type,
+            headless=True,
+            record=True,
+            resize_img=True,
+            randomness=randomness,
+            record_every=3,
+            record_dir=record_dir,
+            compute_device_id=FLAGS.device_id,
+            graphics_device_id=FLAGS.device_id,
+            window_size=FLAGS.reward_window_size,
+            skip_frame=FLAGS.reward_skip_frame,
             max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
-            compute_device_id=device_id,
-            graphics_device_id=device_id,
+            reward_model=reward_model,
         )
     else:
         env = gym.make(env_name)
 
     env = wrappers.SinglePrecision(env)
-    env = wrappers.FrameStackWrapper(env, num_frames=4, skip_frame=16)
+    env = wrappers.FrameStackWrapper(env, num_frames=FLAGS.window_size, skip_frame=FLAGS.skip_frame)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
 
-    print("Observation space", env.observation_space)
-    print("Action space", env.action_space)
+    import random
+
+    import torch
+
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+    console.print("Observation space", env.observation_space)
+    console.print("Action space", env.action_space)
 
     return env
 
@@ -106,8 +119,8 @@ def main(_):
 
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
-    os.makedirs(FLAGS.save_dir, exist_ok=True)
-    os.makedirs(os.path.join(FLAGS.save_dir, FLAGS.env_name, "eval"), exist_ok=True)
+    ep_dir = os.path.join(FLAGS.save_dir, FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}", "episode")
+    os.makedirs(ep_dir, exist_ok=True)
 
     if "Sim" in FLAGS.env_name:
         import isaacgym  # noqa: F401
@@ -115,33 +128,48 @@ def main(_):
     env = make_env(
         FLAGS.env_name,
         FLAGS.seed,
-        use_encoder=FLAGS.use_encoder,
-        record=FLAGS.record,
-        from_skill=FLAGS.from_skill,
-        skill=FLAGS.skill,
-        high_random_idx=FLAGS.high_random_idx,
-        randomness=FLAGS.randomness,
-        encoder_type=FLAGS.encoder_type,
-        headless=FLAGS.headless,
-        device_id=FLAGS.device_id,
+        FLAGS.randomness,
+        FLAGS.encoder_type,
+        reward_model=None,
     )
 
     kwargs = dict(FLAGS.config)
-    agent = Learner(
-        FLAGS.seed,
-        env.observation_space.sample(),
-        env.action_space.sample()[:1],
-        max_steps=FLAGS.max_steps,
-        **kwargs,
-        use_encoder=FLAGS.use_encoder,
-    )
+    if FLAGS.agent_type == "iql":
+        agent = IQLLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            max_steps=FLAGS.max_steps,
+            **kwargs,
+        )
+    elif FLAGS.agent_type == "awac":
+        agent = AWACLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            **kwargs,
+        )
+    elif FLAGS.agent_type == "dapg":
+        agent = DAPGLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            **kwargs,
+        )
+    elif FLAGS.agent_type == "td3":
+        agent = TD3Learner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            **kwargs,
+        )
+    else:
+        raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")
 
-    download_ckpt_if_not_exists(os.path.join(FLAGS.ckpt_dir, "ckpt"), FLAGS.run_name, FLAGS.seed)
-
-    ckpt_dir = os.path.join(FLAGS.ckpt_dir, FLAGS.env_name, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
+    ckpt_dir = os.path.join(FLAGS.ckpt_dir, f"{FLAGS.run_name}.{FLAGS.seed}")
     agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
 
-    evaluate(agent, env, FLAGS.eval_episodes, FLAGS.temperature)
+    evaluate_with_save(agent, env, FLAGS.eval_episodes, FLAGS.temperature, Path(ep_dir))
 
 
 if __name__ == "__main__":
