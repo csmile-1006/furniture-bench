@@ -6,12 +6,12 @@ from pathlib import Path
 import numpy as np
 import scipy
 import torch
-from rich.console import Console
 import torchvision.transforms as T
 from absl import app, flags
 from bpref_v2.data.arp_furniturebench_dataset_inmemory_stream import get_failure_skills_and_phases
 from bpref_v2.data.label_reward_furniturebench import load_reward_fn, load_reward_model
 from ml_collections import ConfigDict
+from rich.console import Console
 
 FLAGS = flags.FLAGS
 console = Console()
@@ -24,10 +24,13 @@ flags.DEFINE_integer("num_failure_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
 flags.DEFINE_string("ckpt_path", "", "ckpt path of reward model.")
 flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
-flags.DEFINE_string("rm_type", "ARP-V2", "reward model type.")
+flags.DEFINE_string("rm_type", "RFE", "reward model type.")
 flags.DEFINE_string("pvr_type", "liv", "pvr type.")
 flags.DEFINE_integer("window_size", 4, "window size")
 flags.DEFINE_integer("skip_frame", 1, "skip frame")
+flags.DEFINE_boolean("reset_label", False, "use this option for resetting rewards labeled in advance.")
+flags.DEFINE_boolean("predict_phase", False, "use phase prediction or not.")
+flags.DEFINE_boolean("smoothe", False, "smoothe reward or not.")
 flags.DEFINE_boolean("save_reward_stats", False, "save reward stats or not.")
 
 
@@ -36,6 +39,25 @@ device = torch.device("cuda")
 
 def gaussian_smoothe(rewards, sigma=3.0):
     return scipy.ndimage.gaussian_filter1d(rewards, sigma=sigma, mode="nearest")
+
+
+def exponential_moving_average(a, alpha=0.3):
+    """
+    Compute the Exponential Moving Average of a numpy array.
+
+    :param a: Numpy array of values to compute the EMA for.
+    :param alpha: Smoothing factor in the range [0,1].
+                  The closer to 1, the more weight given to recent values.
+    :return: Numpy array containing the EMA of the input array.
+    """
+    ema = np.zeros_like(a)  # Initialize EMA array with the same shape as input
+    ema[0] = a[0]  # Set the first value of EMA to the first value of the input array
+
+    # Compute EMA for each point after the first
+    for i in range(1, len(a)):
+        ema[i] = alpha * a[i] + (1 - alpha) * ema[i - 1]
+
+    return ema
 
 
 def save_episode(episode, fn):
@@ -65,8 +87,16 @@ def load_embedding(rep="vip"):
         model = load_liv()
         transform = T.Compose([T.ToTensor()])
         feature_dim = 1024
+
+    if rep == "clip":
+        import clip
+
+        model, transform = clip.load("ViT-B/16")
+        feature_dim = 512
+
     model.eval()
-    model = model.module.to(device)
+    if rep in ["vip", "r3m", "liv"]:
+        model = model.to(device)
     return model, transform, feature_dim
 
 
@@ -117,7 +147,8 @@ def main(_):
 
             # first check whether it is already labeled.
             if (
-                dst_dataset.get("multimodal_rewards_ckpt_path", None) is not None
+                FLAGS.reset_label
+                and dst_dataset.get("multimodal_rewards_ckpt_path", None) is not None
                 and dst_dataset.get("multimodal_rewards_ckpt_path").item() == FLAGS.ckpt_path
             ):
                 console.print(f"Already labeled with {FLAGS.ckpt_path}")
@@ -137,15 +168,21 @@ def main(_):
                 val = np.transpose(val, (0, 2, 3, 1))
                 images[key] = val
 
-            skills = np.asarray(x["skills"])
-            if "success" in file_path.name:
-                actions, skills = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
+            if not FLAGS.predict_phase:
+                skills = np.asarray(x["skills"])
+                # actions, skills = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
+                if "success" in file_path.name:
+                    actions, skills = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
+                else:
+                    actions, phase = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
+                    failure_phase = x.get("failure_phase", -1)
+                    _, skills = get_failure_skills_and_phases(
+                        skill=skills, phase=phase, task_name=FLAGS.furniture, failure_phase=failure_phase
+                    )
             else:
-                actions, phase = x["actions"], np.cumsum(np.where(skills > 0.0, skills, 0.0))
-                failure_phase = x.get("failure_phase", -1)
-                _, skills = get_failure_skills_and_phases(
-                    skill=skills, phase=phase, task_name=FLAGS.furniture, failure_phase=failure_phase
-                )
+                skills = np.asarray([0 for _ in range(length)])
+                actions = np.asarray([0 for _ in range(length)])
+
             args = ConfigDict()
             args.task_name = FLAGS.furniture
             args.image_keys = "color_image2|color_image1"
@@ -167,9 +204,12 @@ def main(_):
                 device=device,
                 batch_size=FLAGS.batch_size,
                 get_text_feature=True,
+                predict_phase=FLAGS.predict_phase,
             )
             rewards = output["rewards"]
-            rewards = gaussian_smoothe(rewards)
+            if FLAGS.smoothe:
+                # rewards = gaussian_smoothe(rewards)
+                rewards = exponential_moving_average(rewards)
             # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
             rewards = rewards[1:].tolist()
             rewards = np.asarray(rewards + rewards[-1:]).astype(np.float32)
