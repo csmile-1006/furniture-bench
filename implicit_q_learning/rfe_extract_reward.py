@@ -3,13 +3,14 @@ import io
 import pickle
 from pathlib import Path
 
+import jax
 import numpy as np
-import scipy
 import torch
 import torchvision.transforms as T
 from absl import app, flags
 from bpref_v2.data.arp_furniturebench_dataset_inmemory_stream import get_failure_skills_and_phases
 from bpref_v2.data.label_reward_furniturebench import load_reward_fn, load_reward_model
+from dataset_utils import exponential_moving_average
 from ml_collections import ConfigDict
 from rich.console import Console
 
@@ -35,29 +36,6 @@ flags.DEFINE_boolean("save_reward_stats", False, "save reward stats or not.")
 
 
 device = torch.device("cuda")
-
-
-def gaussian_smoothe(rewards, sigma=3.0):
-    return scipy.ndimage.gaussian_filter1d(rewards, sigma=sigma, mode="nearest")
-
-
-def exponential_moving_average(a, alpha=0.3):
-    """
-    Compute the Exponential Moving Average of a numpy array.
-
-    :param a: Numpy array of values to compute the EMA for.
-    :param alpha: Smoothing factor in the range [0,1].
-                  The closer to 1, the more weight given to recent values.
-    :return: Numpy array containing the EMA of the input array.
-    """
-    ema = np.zeros_like(a)  # Initialize EMA array with the same shape as input
-    ema[0] = a[0]  # Set the first value of EMA to the first value of the input array
-
-    # Compute EMA for each point after the first
-    for i in range(1, len(a)):
-        ema[i] = alpha * a[i] + (1 - alpha) * ema[i - 1]
-
-    return ema
 
 
 def save_episode(episode, fn):
@@ -88,15 +66,18 @@ def load_embedding(rep="vip"):
         transform = T.Compose([T.ToTensor()])
         feature_dim = 1024
 
-    if rep == "clip":
+    if rep.startswith("clip"):
         import clip
 
-        model, transform = clip.load("ViT-B/16")
-        feature_dim = 512
+        if rep == "clip_vit_b16":
+            model, transform = clip.load("ViT-B/16")
+            feature_dim = 512
+        if rep == "clip_vit_l14":
+            model, transform = clip.load("ViT-L/14")
+            feature_dim = 768
 
     model.eval()
-    if rep in ["vip", "r3m", "liv"]:
-        model = model.to(device)
+    model = model.to(device)
     return model, transform, feature_dim
 
 
@@ -147,7 +128,7 @@ def main(_):
 
             # first check whether it is already labeled.
             if (
-                FLAGS.reset_label
+                not FLAGS.reset_label
                 and dst_dataset.get("multimodal_rewards_ckpt_path", None) is not None
                 and dst_dataset.get("multimodal_rewards_ckpt_path").item() == FLAGS.ckpt_path
             ):
@@ -211,8 +192,7 @@ def main(_):
                 # rewards = gaussian_smoothe(rewards)
                 rewards = exponential_moving_average(rewards)
             # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
-            rewards = rewards[1:].tolist()
-            rewards = np.asarray(rewards + rewards[-1:]).astype(np.float32)
+            rewards = rewards[1:]
             reward_stats.append(rewards)
 
             path = out_dir / f"{tp}_{idx}_{rewards.shape[0]}.npz"
@@ -230,6 +210,8 @@ def main(_):
             dst_dataset["multimodal_rewards_ckpt_path"] = FLAGS.ckpt_path
             save_episode(dst_dataset, path)
             console.print(f"Re-saved at {path}")
+        if idx % 10 == 0:
+            jax.clear_caches()
 
     if FLAGS.save_reward_stats:
         console.print("save reward stats.")

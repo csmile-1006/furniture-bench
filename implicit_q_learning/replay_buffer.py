@@ -13,6 +13,8 @@ import numpy as np
 import torch
 from torch.utils.data import IterableDataset
 
+from dataset_utils import exponential_moving_average
+
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
 SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 784}
 
@@ -93,6 +95,8 @@ def load_episode(
             _min, _max = reward_stat["min"], reward_stat["max"]
             rewards = (episode["multimodal_rewards"] - _min) / (_max - _min)
             rewards = rewards / lambda_mr
+            rewards = rewards + (episode["rewards"] / lambda_mr)
+            rewards = np.asarray(exponential_moving_average(rewards))
 
             # our_reward = episode["multimodal_rewards"] / lambda_mr
             # next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())

@@ -17,6 +17,25 @@ def gaussian_smoothe(rewards, sigma=3.0):
     return scipy.ndimage.gaussian_filter1d(rewards, sigma=sigma, mode="nearest")
 
 
+def exponential_moving_average(a, alpha=0.3):
+    """
+    Compute the Exponential Moving Average of a numpy array.
+
+    :param a: Numpy array of values to compute the EMA for.
+    :param alpha: Smoothing factor in the range [0,1].
+                  The closer to 1, the more weight given to recent values.
+    :return: Numpy array containing the EMA of the input array.
+    """
+    ema = np.zeros_like(a)  # Initialize EMA array with the same shape as input
+    ema[0] = a[0]  # Set the first value of EMA to the first value of the input array
+
+    # Compute EMA for each point after the first
+    for i in range(1, len(a)):
+        ema[i] = alpha * a[i] + (1 - alpha) * ema[i - 1]
+
+    return ema
+
+
 def split_into_trajectories(observations, actions, rewards, masks, dones_float, next_observations):
     trajs = [[]]
 

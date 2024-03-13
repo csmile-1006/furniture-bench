@@ -86,5 +86,5 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
 
     def _extract_img_feature(self, layer, image):
         with torch.no_grad():
-            vip_image = layer(image)
-        return vip_image
+            image_feat = layer(image)
+        return image_feat

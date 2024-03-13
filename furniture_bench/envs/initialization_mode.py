@@ -1,4 +1,5 @@
 """Define task initialization modes for FurnitureBench."""
+
 from enum import Enum
 
 
@@ -49,9 +50,21 @@ def load_embedding(encoder_type, device_id):
 
         img_emb_layer = load_liv().module
         embedding_dim = 1024
+    elif encoder_type.startswith("clip"):
+        import clip
+
+        if encoder_type == "clip_vit_b16":
+            img_emb_layer, _ = clip.load("ViT-B/16")
+            embedding_dim = 512
+        if encoder_type == "clip_vit_l14":
+            img_emb_layer, _ = clip.load("ViT-L/14")
+            embedding_dim = 768
     else:
         raise ValueError(f"Unknown encoder type: {encoder_type}")
+
     img_emb_layer.requires_grad_(False)
     img_emb_layer.eval()
     img_emb_layer = img_emb_layer.to(device_id)
+    if encoder_type.startswith("clip"):
+        img_emb_layer = img_emb_layer.encode_image
     return img_emb_layer, embedding_dim

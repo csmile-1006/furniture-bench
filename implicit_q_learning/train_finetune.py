@@ -1,5 +1,5 @@
 import isaacgym  # noqa: F401
-import gc
+
 import os
 from collections import deque
 from pathlib import Path
@@ -16,9 +16,8 @@ from agents.awac.awac_learner import AWACLearner
 from agents.dapg.dapg_learner import DAPGLearner
 from agents.iql.iql_learner import IQLLearner
 from agents.td3.td3_learner import TD3Learner
-from bpref_v2.data.instruct import get_furniturebench_instruct
-from bpref_v2.data.label_reward_furniturebench import load_reward_model
-from dataset_utils import gaussian_smoothe
+from bpref_v2.data.instruct import CLASS_TO_PHASE, get_furniturebench_instruct
+from bpref_v2.data.label_reward_furniturebench import _postprocess_phases, load_reward_model
 from evaluation import evaluate
 from ml_collections import ConfigDict, config_flags
 from replay_buffer import Batch, ReplayBufferStorage, make_replay_loader
@@ -105,11 +104,12 @@ def compute_multimodal_reward(reward_model, **kwargs):
     get_video_feature = kwargs.get("get_video_feature", False)
     get_text_feature = kwargs.get("get_text_feature", False)
     img_features = {}
-    insts = [
-        clip.tokenize(get_furniturebench_instruct(task_name, phase, output_type="all")).detach().cpu().numpy()
+    insts = {
+        phase: clip.tokenize(get_furniturebench_instruct(task_name, phase, output_type="all")).detach().cpu().numpy()
         for phase in range(TASK_TO_PHASE[task_name])
-    ]
-
+    }
+    # deal with failure instructions.
+    insts[999] = clip.tokenize(get_furniturebench_instruct(task_name, 999, output_type="all")).detach().cpu().numpy()
     for ik in image_keys:
         img_features[ik] = np.stack([images[idx][ik] for idx in range(len(trajectories["actions"]))])
     image_shape, action_dim = img_features[image_keys[0]][0].shape, 8
@@ -152,37 +152,44 @@ def compute_multimodal_reward(reward_model, **kwargs):
         stacked_timesteps = np.asarray(stacked_timesteps)
         stacked_attn_masks = np.asarray(stacked_attn_masks)
 
-        rewards, video_features, text_features = [], [], []
+        rewards, phases, video_features, text_features = [], [], [], []
+        cls2phase = CLASS_TO_PHASE[task_name]
         batch_size = 32
-        for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
+        for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="predict phase per batch"):
             _range = range(i, min(i + batch_size, len_demos))
             batch = {
                 "image": {ik: stacked_images[ik][_range] for ik in image_keys},
                 "timestep": stacked_timesteps[_range],
                 "attn_mask": stacked_attn_masks[_range],
+                # "action": stacked_actions[_range],
             }
-            phases = reward_model.get_phase(batch)
-            batch["instruct"] = np.stack([insts[phase] for phase in phases])  # noqa: F821
-            reward_output = reward_model.get_reward(
+            phase = list(np.array(reward_model.get_phase(batch)))
+            phases.extend(phase)
+
+        processed_phases = _postprocess_phases(phases)
+        for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
+            _range = range(i, min(i + batch_size, len_demos))
+            batch = {
+                "instruct": np.stack([insts[cls2phase[p]] for p in processed_phases[_range]]),
+                "image": {ik: stacked_images[ik][_range] for ik in image_keys},
+                "timestep": stacked_timesteps[_range],
+                "attn_mask": stacked_attn_masks[_range],
+                # "action": stacked_actions[_range],
+            }
+            output = reward_model.get_reward(
                 batch, get_video_feature=get_video_feature, get_text_feature=get_text_feature
             )
-            rewards.extend(reward_output["rewards"])
+            rewards.extend(output["rewards"])
             if get_video_feature:
-                video_features.extend(reward_output["video_features"])
+                video_features.extend(output["video_features"])
             if get_text_feature:
-                text_features.extend(reward_output["text_features"])
-            del batch
+                text_features.extend(output["text_features"])
 
-        del reward_output
-
-        output = {
-            "rewards": gaussian_smoothe(np.asarray(rewards)),
-        }
+        output = {"rewards": np.asarray(rewards), "processed_phases": np.asarray(processed_phases)}
         if get_video_feature:
             output["video_features"] = np.asarray(video_features)
         if get_text_feature:
             output["text_features"] = np.asarray(text_features)
-        gc.collect()
         return output
 
     output = _get_reward(img_features=img_features)
@@ -190,7 +197,6 @@ def compute_multimodal_reward(reward_model, **kwargs):
     multimodal_rewards = output["rewards"][1:].tolist()
     multimodal_rewards = np.asarray(multimodal_rewards + multimodal_rewards[-1:]).astype(np.float32)
     final_rewards = multimodal_rewards * lambda_mr
-    del insts
     return {
         "rewards": final_rewards,
         "text_features": output.get("text_features", []),
@@ -318,32 +324,14 @@ def combine(one_dict, other_dict):
 
 def _initialize_traj_dict():
     trajectories = {
-        env_idx: {
-            key: []
-            for key in [
-                "observations",
-                "actions",
-                "rewards",
-                "terminals",
-                "next_observations",
-            ]
-        }
+        env_idx: {key: [] for key in ["observations", "actions", "rewards", "terminals", "next_observations", "phases"]}
         for env_idx in range(FLAGS.num_envs)
     }
     return trajectories
 
 
 def _reset_traj_dict():
-    return {
-        key: []
-        for key in [
-            "observations",
-            "actions",
-            "rewards",
-            "terminals",
-            "next_observations",
-        ]
-    }
+    return {key: [] for key in ["observations", "actions", "rewards", "terminals", "next_observations", "phases"]}
 
 
 def main(_):
@@ -367,9 +355,9 @@ def main(_):
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
             / FLAGS.env_name.split("/")[-1]
-            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-c0.0@0.0-supc0.2-ep0.5-demo100-hierarchical-shaped-learnablelogit10"
+            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-supc1.0-ep0.2-demo100-hier-shaped-newsupcon-failneg-supcliv-vitb16-vipl"
             / "s0"
-            / "best_model.pkl"
+            / "best_phase_model.pkl"
         )
         reward_model = load_reward_model(
             rm_type=FLAGS.rm_type, task_name=FLAGS.env_name.split("/")[-1], ckpt_path=rm_ckpt_path
@@ -531,6 +519,7 @@ def main(_):
     observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
     start_training = FLAGS.num_pretraining_steps + env.furniture.max_env_steps * FLAGS.num_envs
     offline_replay_iter, online_replay_iter = None, None
+    num_episodes = 0
 
     if FLAGS.use_bc:
         agent.prepare_online_step()
@@ -562,6 +551,7 @@ def main(_):
                             trajectories=trajectories[env_idx], reward_model=reward_model, args=args
                         )
                         trajectories[env_idx]["multimodal_rewards"] = output["rewards"]
+                        trajectories[env_idx]["phases"] = output["processed_phases"]
                         if "text_feature" in env.observation_space.keys():
                             for idx in range(output["rewards"]):
                                 trajectories[env_idx]["observations"][idx]["text_feature"] = output["text_features"][
@@ -571,7 +561,8 @@ def main(_):
                                     "text_features"
                                 ][min(idx + 1, len(output["rewards"]) - 1)]
                         info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
-                        del output
+                        if num_episodes % 5 * FLAGS.num_envs == 0:
+                            jax.clear_caches()
                     replay_storage.add_episode(
                         trajectories[env_idx],
                         env_idx,
@@ -583,8 +574,8 @@ def main(_):
                     done[env_idx] = False
                     for k, v in info[f"episode_{env_idx}"].items():
                         wandb.log({f"training/{k}": v}, step=i + env_idx)
-                    del trajectories[env_idx]
                     trajectories[env_idx] = _reset_traj_dict()
+                    num_episodes += 1
 
             if i > start_training:
                 if offline_replay_iter is None and online_replay_iter is None:
