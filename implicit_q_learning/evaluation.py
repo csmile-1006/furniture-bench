@@ -6,7 +6,6 @@ import gym
 import numpy as np
 from tqdm import trange
 from pathlib import Path
-from replay_buffer import save_episode
 
 
 def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: float = 0.00) -> Dict[str, float]:
@@ -46,7 +45,7 @@ def evaluate_with_save(
     observation, done = env.reset(), np.zeros((env._num_envs), dtype=bool)
     for env_idx in range(min(env._num_envs, num_episodes)):
         episodes[env_idx]["observations"].append(
-            {key: observation[key][env_idx] for key in ["color_image1", "color_image2"]}
+            {key: observation[key][env_idx, -1] for key in ["color_image1", "color_image2"]}
         )
     while ep < num_episodes:
         action = agent.sample_actions(observation, temperature=temperature)
@@ -54,15 +53,16 @@ def evaluate_with_save(
         total_step += min(env._num_envs, num_episodes)
         for env_idx in range(min(env._num_envs, num_episodes)):
             episodes[env_idx]["observations"].append(
-                {key: observation[key][env_idx] for key in ["color_image1", "color_image2"]}
+                {key: observation[key][env_idx, -1] for key in ["color_image1", "color_image2"]}
             )
             episodes[env_idx]["actions"].append(action[env_idx])
             if done[env_idx].item() is True:
-                save_episode(episodes[env_idx], save_dir / f"episode_{ep}.npz")
+                tp = "success" if info[f"episode_{env_idx}"]["success"] else "failure"
+                pickle.dump(episodes[env_idx], (save_dir / f"episode_{ep}_{tp}.pkl").open("wb"))
                 new_ob = env.reset_env(env_idx)
                 episodes[env_idx] = {key: [] for key in ["observations", "actions"]}
                 episodes[env_idx]["observations"].append(
-                    {key: observation[key][env_idx] for key in ["color_image1", "color_image2"]}
+                    {key: observation[key][env_idx, -1] for key in ["color_image1", "color_image2"]}
                 )
                 for key in observation:
                     observation[key][env_idx] = new_ob[key]
