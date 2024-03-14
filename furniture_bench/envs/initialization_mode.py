@@ -43,42 +43,43 @@ def load_embedding(encoder_type, device_id):
     elif encoder_type == "vip":
         from vip import load_vip
 
-        img_emb_layer = load_vip().module
+        model = load_vip().module
         embedding_dim = 1024
     elif encoder_type == "liv":
         from liv import load_liv
 
-        img_emb_layer = load_liv().module
+        model = load_liv().module
         embedding_dim = 1024
     elif encoder_type.startswith("clip"):
         import clip
 
         if encoder_type == "clip_vit_b16":
-            clip_model, _ = clip.load("ViT-B/16")
+            model, _ = clip.load("ViT-B/16")
             embedding_dim = 512
         if encoder_type == "clip_vit_l14":
-            clip_model, _ = clip.load("ViT-L/14")
+            model, _ = clip.load("ViT-L/14")
             embedding_dim = 768
     else:
         raise ValueError(f"Unknown encoder type: {encoder_type}")
 
+    model.requires_grad_(False)
+    model.eval()
+    model = model.to(device_id)
+
     if encoder_type.startswith("clip"):
-        from torchvision import Compose, Normalize
+        import torchvision.transforms as T
 
-        clip_model.requires_grad_(False)
-        clip_model.eval()
-        clip_model = clip_model.to(device_id)
-
-        transform = Compose(
+        transform = T.Compose(
             [
-                Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+                T.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
             ]
         )
 
         def img_emb_layer(x):
-            return clip_model.encode_image(transform(x))
+            return model.encode_image(transform(x / 255.0))
     else:
-        img_emb_layer.requires_grad_(False)
-        img_emb_layer.eval()
-        img_emb_layer = img_emb_layer.to(device_id)
+
+        def img_emb_layer(x):
+            return model(x / 255.0)
+
     return img_emb_layer, embedding_dim
