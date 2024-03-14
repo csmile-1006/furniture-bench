@@ -157,18 +157,12 @@ def main(_):
                 with torch.no_grad():
                     # Use batch size.
                     for _l in range(0, length, FLAGS.batch_size):
-                        img1_feature[_l : _l + FLAGS.batch_size] = (
-                            encoder(img1[_l : _l + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224))
-                            .cpu()
-                            .detach()
-                            .numpy()
-                        )
-                        img2_feature[_l : _l + FLAGS.batch_size] = (
-                            encoder(img2[_l : _l + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224))
-                            .cpu()
-                            .detach()
-                            .numpy()
-                        )
+                        _img1 = img1[_l : _l + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224)
+                        _img2 = img2[_l : _l + FLAGS.batch_size].to(device).reshape(-1, 3, 224, 224)
+                        if FLAGS.use_liv:
+                            _img1, _img2 = _img1 / 255.0, _img2 / 255.0
+                        img1_feature[_l : _l + FLAGS.batch_size] = encoder(_img1).cpu().detach().numpy()
+                        img2_feature[_l : _l + FLAGS.batch_size] = encoder(_img2).cpu().detach().numpy()
 
             stacked_timesteps = []
             timestep_stacks = {key: deque([], maxlen=FLAGS.window_size) for key in range(FLAGS.skip_frame)}

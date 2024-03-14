@@ -77,7 +77,7 @@ def load_embedding(encoder_type, device_id):
 
         def img_emb_layer(x):
             return model.encode_image(transform(x / 255.0))
-    else:
+    elif encoder_type in ["liv"]:
 
         def img_emb_layer(x):
             return model(x / 255.0)
