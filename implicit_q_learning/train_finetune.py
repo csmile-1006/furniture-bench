@@ -341,7 +341,7 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     os.makedirs(FLAGS.save_dir, exist_ok=True)
-    wandb_dir = os.path.join(FLAGS.save_dir, "wandb", FLAGS.env_name, f"{FLAGS.run_name}_{FLAGS.seed}")
+    wandb_dir = os.path.join(FLAGS.save_dir, "wandb", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     ft_ckpt_dir = os.path.join(FLAGS.save_dir, "ft_ckpt", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     buffer_dir = os.path.join(FLAGS.save_dir, "buffer", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
