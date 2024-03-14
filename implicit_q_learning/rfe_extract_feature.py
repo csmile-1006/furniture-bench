@@ -5,7 +5,6 @@ from collections import deque
 
 import numpy as np
 import torch
-import torchvision.transforms as T
 import scipy
 from absl import app, flags
 
@@ -21,7 +20,6 @@ flags.DEFINE_integer("num_success_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("num_failure_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
 flags.DEFINE_string("demo_type", "success", "type of demonstrations.")
-flags.DEFINE_string("pvr_type", "liv", "pvr type.")
 flags.DEFINE_integer("window_size", 4, "window size")
 flags.DEFINE_integer("skip_frame", 16, "skip frame")
 
@@ -41,39 +39,12 @@ def save_episode(episode, fn):
             f.write(bs.read())
 
 
-def load_embedding(rep="vip"):
-    if rep == "vip":
-        from vip import load_vip
-
-        model = load_vip()
-        transform = T.Compose([T.Resize(256), T.CenterCrop(224), T.ToTensor()])
-        feature_dim = 1024
-    if rep == "r3m":
-        from r3m import load_r3m
-
-        model = load_r3m("resnet50")
-        transform = T.Compose([T.Resize(256), T.CenterCrop(224), T.ToTensor()])
-        feature_dim = 2048
-    if rep == "liv":
-        from liv import load_liv
-
-        model = load_liv()
-        transform = T.Compose([T.ToTensor()])
-        feature_dim = 1024
-    model.eval()
-    model = model.module.to(device)
-    return model, transform, feature_dim
-
-
 def main(_):
     if FLAGS.num_threads > 0:
         print(f"Setting torch.num_threads to {FLAGS.num_threads}")
         torch.set_num_threads(FLAGS.num_threads)
 
     demo_dir = FLAGS.demo_dir
-
-    # load reward model.
-    pvr_model, pvr_transform, feature_dim = load_embedding(rep=FLAGS.pvr_type)
 
     dir_path = Path(demo_dir)
 
@@ -102,14 +73,14 @@ def main(_):
         encoder.to("cuda")
         device = torch.device("cuda")
 
-    demo_type = [f"_{elem}" for elem in FLAGS.demo_type.split("|")]
+    demo_type = FLAGS.demo_type.split("|")
     files = []
     for _demo_type in demo_type:
         print(f"Loading {_demo_type} demos...")
-        demo_files = sorted(list(dir_path.glob(f"*{_demo_type}.pkl")))
+        demo_files = sorted(list(dir_path.glob(f"*_{_demo_type}.pkl")))
         len_demos = (
-            getattr(FLAGS, f"num{_demo_type}_demos")
-            if getattr(FLAGS, f"num{_demo_type}_demos") > 0
+            getattr(FLAGS, f"num_{_demo_type}_demos")
+            if getattr(FLAGS, f"num_{_demo_type}_demos") > 0
             else len(demo_files)
         )
         files.extend([(idx, path) for idx, path in enumerate(demo_files[:len_demos])])
