@@ -197,10 +197,13 @@ def compute_multimodal_reward(reward_model, **kwargs):
     multimodal_rewards = output["rewards"][1:].tolist()
     multimodal_rewards = np.asarray(multimodal_rewards + multimodal_rewards[-1:]).astype(np.float32)
     final_rewards = multimodal_rewards * lambda_mr
-    return {
-        "rewards": final_rewards,
-        "text_features": output.get("text_features", []),
-    }
+    output.update(
+        {
+            "rewards": final_rewards,
+            "text_features": output.get("text_features", []),
+        }
+    )
+    return output
 
 
 def load_reward_stat(data_path):
