@@ -94,12 +94,11 @@ flags.DEFINE_string(
 def compute_multimodal_reward(reward_model, **kwargs):
     trajectories, args = kwargs["trajectories"], kwargs["args"]
     images = trajectories["observations"]
-    task_name, image_keys, window_size, skip_frame, lambda_mr = (
+    task_name, image_keys, window_size, skip_frame = (
         args.task_name,
         args.image_keys.split("|"),
         args.window_size,
         args.skip_frame,
-        args.lambda_mr,
     )
     get_video_feature = kwargs.get("get_video_feature", False)
     get_text_feature = kwargs.get("get_text_feature", False)
@@ -196,10 +195,9 @@ def compute_multimodal_reward(reward_model, **kwargs):
     # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
     multimodal_rewards = output["rewards"][1:].tolist()
     multimodal_rewards = np.asarray(multimodal_rewards + multimodal_rewards[-1:]).astype(np.float32)
-    final_rewards = multimodal_rewards * lambda_mr
     output.update(
         {
-            "rewards": final_rewards,
+            "rewards": multimodal_rewards,
             "text_features": output.get("text_features", []),
         }
     )

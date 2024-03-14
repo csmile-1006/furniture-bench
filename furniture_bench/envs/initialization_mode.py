@@ -54,17 +54,31 @@ def load_embedding(encoder_type, device_id):
         import clip
 
         if encoder_type == "clip_vit_b16":
-            img_emb_layer, _ = clip.load("ViT-B/16")
+            clip_model, _ = clip.load("ViT-B/16")
             embedding_dim = 512
         if encoder_type == "clip_vit_l14":
-            img_emb_layer, _ = clip.load("ViT-L/14")
+            clip_model, _ = clip.load("ViT-L/14")
             embedding_dim = 768
     else:
         raise ValueError(f"Unknown encoder type: {encoder_type}")
 
-    img_emb_layer.requires_grad_(False)
-    img_emb_layer.eval()
-    img_emb_layer = img_emb_layer.to(device_id)
     if encoder_type.startswith("clip"):
-        img_emb_layer = img_emb_layer.encode_image
+        from torchvision import Compose, Normalize
+
+        clip_model.requires_grad_(False)
+        clip_model.eval()
+        clip_model = clip_model.to(device_id)
+
+        transform = Compose(
+            [
+                Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+            ]
+        )
+
+        def img_emb_layer(x):
+            return clip_model.encode_image(transform(x))
+    else:
+        img_emb_layer.requires_grad_(False)
+        img_emb_layer.eval()
+        img_emb_layer = img_emb_layer.to(device_id)
     return img_emb_layer, embedding_dim
