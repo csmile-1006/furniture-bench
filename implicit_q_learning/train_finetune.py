@@ -291,11 +291,13 @@ def make_offline_loader(env, data_path, batch_size):
             "failure": FLAGS.num_failure_demos,
         },
         obs_keys=tuple(
-            [
-                key
-                for key in env.observation_space.spaces.keys()
-                if key not in ["robot_state", "color_image1", "color_image2"]
-            ]
+            sorted(
+                [
+                    key
+                    for key in env.observation_space.spaces.keys()
+                    if key not in ["robot_state", "color_image1", "color_image2"]
+                ]
+            )
         ),
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
@@ -500,11 +502,13 @@ def main(_):
         buffer_type="online",
         reward_type=FLAGS.reward_type,
         obs_keys=tuple(
-            [
-                key
-                for key in env.observation_space.spaces.keys()
-                if key not in ["robot_state", "color_image1", "color_image2"]
-            ]
+            sorted(
+                [
+                    key
+                    for key in env.observation_space.spaces.keys()
+                    if key not in ["robot_state", "color_image1", "color_image2"]
+                ]
+            )
         ),
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,

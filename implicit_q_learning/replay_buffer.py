@@ -57,8 +57,9 @@ def load_episode(
     skip_frame=4,
     lambda_mr=1.0,
     reward_stat: dict = None,
+    smoothe: bool = False,
 ):
-    observations, next_observations, timesteps, next_timesteps = [], [], [], []
+    observations, next_observations, timesteps = [], [], []
     with fn.open("rb") as f:
         episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
@@ -71,7 +72,6 @@ def load_episode(
             next_observations.append(
                 np.concatenate([episode["next_observations"][i][key] for key in obs_keys], axis=-1)
             )
-            next_timesteps.append(stacked_timesteps[min(i + 1, eps_len - 1)])
             if (
                 np.linalg.norm(
                     episode["observations"][i + 1]["robot_state"] - episode["next_observations"][i]["robot_state"]
@@ -96,7 +96,8 @@ def load_episode(
             rewards = (episode["multimodal_rewards"] - _min) / (_max - _min)
             rewards = rewards / lambda_mr
             rewards = rewards + (episode["rewards"] / lambda_mr)
-            rewards = np.asarray(exponential_moving_average(rewards))
+            if smoothe:
+                rewards = np.asarray(exponential_moving_average(rewards))
 
             # our_reward = episode["multimodal_rewards"] / lambda_mr
             # next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())
@@ -112,7 +113,6 @@ def load_episode(
         masks=1.0 - episode["terminals"],
         dones_float=dones_float,
         next_observations=np.asarray(next_observations),
-        next_timesteps=np.asarray(next_timesteps),
     )
 
 
@@ -161,6 +161,7 @@ class ReplayBuffer(IterableDataset):
         skip_frame: int = 4,
         lambda_mr: float = 1.0,
         reward_stat: dict = None,
+        smoothe: bool = False,
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -180,6 +181,7 @@ class ReplayBuffer(IterableDataset):
         self._obs_keys = obs_keys
         self._lambda_mr = lambda_mr
         self._reward_stat = reward_stat
+        self._smoothe = smoothe
 
     def _sample_episode(self):
         eps_fn = random.choice(self._episode_fns)
@@ -247,12 +249,28 @@ class ReplayBuffer(IterableDataset):
         self._samples_since_last_fetch += 1
         return self.__sample()
 
+    def _split_observations(self, obs):
+        if obs.shape[-1] == self._embedding_dim * 2:
+            image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
+            return dict(image1=image1, image2=image2)
+        elif obs.shape[-1] == self._embedding_dim * 2 + 14:
+            image1, image2, robot_state = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
+            return dict(image1=image1, image2=image2, robot_state=robot_state)
+        elif obs.shape[-1] == self._embedding_dim * 3:
+            image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
+            return dict(image1=image1, image2=image2, text_feature=text_feature)
+        elif obs.shape[-1] == self._embedding_dim * 2 + 14:
+            image1, image2, robot_state, text_feature = np.split(
+                obs, [self._embedding_dim, self._embedding_dim * 2, self._embedding_dim * 12 + 14], axis=-1
+            )
+            return dict(image1=image1, image2=image2, robot_state=robot_state, text_feature=text_feature)
+
     def __sample(self):
         episode = self._sample_episode()
-        idx = np.random.randint(0, episode_len(episode) - 1 - self._nstep)
+        idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
         obs = episode["observations"][episode["timesteps"][idx]]
         action = episode["actions"][idx]
-        next_obs = episode["observations"][episode["next_timesteps"][idx + self._nstep]]
+        next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -260,18 +278,8 @@ class ReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        if obs.shape[-1] == self._embedding_dim * 2:
-            image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
-            next_image1, next_image2 = np.split(next_obs, [self._embedding_dim], axis=-1)
-            observation = dict(image1=image1, image2=image2)
-            next_observation = dict(image1=next_image1, image2=next_image2)
-        else:
-            image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
-            next_image1, next_image2, next_text_feature = np.split(
-                next_obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1
-            )
-            observation = dict(image1=image1, image2=image2, text_feature=text_feature)
-            next_observation = dict(image1=next_image1, image2=next_image2, text_feature=next_text_feature)
+        observation = self._split_observations(obs)
+        next_observation = self._split_observations(next_obs)
 
         return Batch(
             observations=observation,
@@ -304,6 +312,7 @@ class OfflineReplayBuffer(IterableDataset):
         skip_frame: int = 4,
         lambda_mr: float = 1.0,
         reward_stat: dict = None,
+        smoothe: bool = False,
     ):
         self._replay_dir = replay_dir
         self._size = 0
@@ -324,6 +333,7 @@ class OfflineReplayBuffer(IterableDataset):
         self._skip_frame = skip_frame
         self._lambda_mr = lambda_mr
         self._reward_stat = reward_stat
+        self._smoothe = smoothe
         self._try_fetch()
 
     def _sample_episode(self):
@@ -379,12 +389,28 @@ class OfflineReplayBuffer(IterableDataset):
                 if not self._store_episode(eps_fn):
                     break
 
+    def _split_observations(self, obs):
+        if obs.shape[-1] == self._embedding_dim * 2:
+            image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
+            return dict(image1=image1, image2=image2)
+        elif obs.shape[-1] == self._embedding_dim * 2 + 14:
+            image1, image2, robot_state = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
+            return dict(image1=image1, image2=image2, robot_state=robot_state)
+        elif obs.shape[-1] == self._embedding_dim * 3:
+            image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
+            return dict(image1=image1, image2=image2, text_feature=text_feature)
+        elif obs.shape[-1] == self._embedding_dim * 2 + 14:
+            image1, image2, robot_state, text_feature = np.split(
+                obs, [self._embedding_dim, self._embedding_dim * 2, self._embedding_dim * 12 + 14], axis=-1
+            )
+            return dict(image1=image1, image2=image2, robot_state=robot_state, text_feature=text_feature)
+
     def _sample(self):
         episode = self._sample_episode()
-        idx = np.random.randint(0, episode_len(episode) - 1 - self._nstep)
+        idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
         obs = episode["observations"][episode["timesteps"][idx]]
         action = episode["actions"][idx]
-        next_obs = episode["observations"][episode["next_timesteps"][idx + self._nstep]]
+        next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -392,18 +418,8 @@ class OfflineReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        if obs.shape[-1] == self._embedding_dim * 2:
-            image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
-            next_image1, next_image2 = np.split(next_obs, [self._embedding_dim], axis=-1)
-            observation = dict(image1=image1, image2=image2)
-            next_observation = dict(image1=next_image1, image2=next_image2)
-        else:
-            image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
-            next_image1, next_image2, next_text_feature = np.split(
-                next_obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1
-            )
-            observation = dict(image1=image1, image2=image2, text_feature=text_feature)
-            next_observation = dict(image1=next_image1, image2=next_image2, text_feature=next_text_feature)
+        observation = self._split_observations(obs)
+        next_observation = self._split_observations(next_obs)
 
         return Batch(
             observations=observation,
