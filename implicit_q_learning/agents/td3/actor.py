@@ -20,14 +20,16 @@ def td3_update_actor(
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),
         )
-        actions = dist.sample(seed=key)
-        q1, q2 = critic(batch.observations, actions)
+        sampled_actions = dist.sample(seed=key)
+        q1, q2 = critic(batch.observations, sampled_actions)
         q = jnp.minimum(q1, q2)
         actor_q_loss = -q.mean()
 
         if use_td3_bc:
-            log_probs = dist.log_prob(actions)
-            bc_loss = -log_probs.mean()
+            log_probs = dist.log_prob(jnp.clip(batch.actions, -1 + 1e-5, 1 - 1e-5))
+            offline_log_probs = log_probs[::2]
+            bc_loss = -offline_log_probs.mean()
+            # bc_loss = -log_probs.mean()
             lamb = alpha / abs(data_q.mean())
 
             actor_loss = lamb * actor_q_loss + bc_loss
