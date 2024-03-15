@@ -205,17 +205,27 @@ def compute_multimodal_reward(reward_model, **kwargs):
 
 
 def load_reward_stat(data_path):
-    stat_path = data_path / "stats.npz"
+    stat_path = data_path / "reward_stats.npz"
     if stat_path.exists():
-        print(f"load stat file from {stat_path}.")
+        print(f"load reward stat file from {stat_path}.")
         reward_stat = np.load(stat_path)
         reward_stat = {key: reward_stat[key] for key in reward_stat}
-        # print("no stat file in this folder.")
-        # reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
     else:
         print("no stat file in this folder.")
         reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
     return reward_stat
+
+
+def load_action_stat(data_path):
+    stat_path = data_path / "action_stats.npz"
+    if stat_path.exists():
+        print(f"load action stat file from {stat_path}.")
+        action_stat = np.load(stat_path)
+        action_stat = {key: action_stat[key] for key in action_stat}
+    else:
+        print("no stat file in this folder.")
+        action_stat = {"low": np.full((8,), -1, dtype=np.float32), "high": np.ones((8,), dtype=np.float32)}
+    return action_stat
 
 
 def make_env(
@@ -224,6 +234,7 @@ def make_env(
     randomness: str,
     encoder_type: str,
     reward_model: nn.Module = None,
+    action_stat: dict = None,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -255,6 +266,7 @@ def make_env(
 
     env = wrappers.SinglePrecision(env)
     env = wrappers.FrameStackWrapper(env, num_frames=FLAGS.window_size, skip_frame=FLAGS.skip_frame)
+    env = wrappers.ActionUnnormalizeWrapper(env, action_stat)
     env = wrappers.EpisodeMonitor(env)
 
     env.seed(seed)
@@ -302,6 +314,7 @@ def make_offline_loader(env, data_path, batch_size):
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
+        action_stat=load_action_stat(Path(data_path)),
         reward_stat=load_reward_stat(Path(data_path)) if FLAGS.reward_type == "ours" else None,
     )
 
@@ -375,12 +388,15 @@ def main(_):
 
         reward_stat = load_reward_stat(Path(FLAGS.data_path))
 
+    action_stat = load_action_stat(Path(FLAGS.data_path))
+
     env = make_env(
         FLAGS.env_name,
         FLAGS.seed,
         FLAGS.randomness,
         FLAGS.encoder_type,
         reward_model=reward_model,
+        action_stat=action_stat,
     )
     if getattr(env.unwrapped, "compute_text_feature", None):
         env.unwrapped.compute_text_feature()
@@ -513,6 +529,7 @@ def main(_):
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
+        action_stat=action_stat,
         reward_stat=reward_stat if FLAGS.reward_type == "ours" else None,
     )
 
@@ -531,7 +548,6 @@ def main(_):
     with online_pbar:
         while i <= steps:
             action = agent.sample_actions(observation, temperature=FLAGS.temperature)
-            action = np.clip(action, -1, 1)
             next_observation, reward, done, info = env.step(action)
             for j in range(action.shape[0]):
                 if action[j][6] < 0:

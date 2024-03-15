@@ -161,6 +161,7 @@ class ReplayBuffer(IterableDataset):
         skip_frame: int = 4,
         lambda_mr: float = 1.0,
         reward_stat: dict = None,
+        action_stat: dict = None,
         smoothe: bool = False,
     ):
         self._replay_dir = replay_dir
@@ -181,6 +182,7 @@ class ReplayBuffer(IterableDataset):
         self._obs_keys = obs_keys
         self._lambda_mr = lambda_mr
         self._reward_stat = reward_stat
+        self._action_stat = action_stat
         self._smoothe = smoothe
 
     def _sample_episode(self):
@@ -269,7 +271,11 @@ class ReplayBuffer(IterableDataset):
         episode = self._sample_episode()
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
         obs = episode["observations"][episode["timesteps"][idx]]
+
+        # action normalization!
         action = episode["actions"][idx]
+        action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
+
         next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
@@ -312,6 +318,7 @@ class OfflineReplayBuffer(IterableDataset):
         skip_frame: int = 4,
         lambda_mr: float = 1.0,
         reward_stat: dict = None,
+        action_stat: dict = None,
         smoothe: bool = False,
     ):
         self._replay_dir = replay_dir
@@ -332,6 +339,7 @@ class OfflineReplayBuffer(IterableDataset):
         self._window_size = window_size
         self._skip_frame = skip_frame
         self._lambda_mr = lambda_mr
+        self._action_stat = action_stat
         self._reward_stat = reward_stat
         self._smoothe = smoothe
         self._try_fetch()
@@ -409,7 +417,11 @@ class OfflineReplayBuffer(IterableDataset):
         episode = self._sample_episode()
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
         obs = episode["observations"][episode["timesteps"][idx]]
+
+        # action normalization!
         action = episode["actions"][idx]
+        action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
+
         next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])

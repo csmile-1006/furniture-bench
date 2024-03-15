@@ -3,3 +3,4 @@ from wrappers.single_precision import SinglePrecision
 from wrappers.flatten import Flatten
 from wrappers.frame_stack_wrapper import FrameStackWrapper
 from wrappers.wandb_video import WANDBVideo
+from wrappers.action_unnormalize_wrapper import ActionUnnormalizeWrapper

@@ -181,8 +181,8 @@ class AWACLearner(object):
             action_dim,
             num_modes=10,
             dropout_rate=dropout_rate,
-            std_min=1e-4,
-            std_max=3e-2,
+            std_min=1e-1,
+            std_max=1e-0,
             use_tanh=False,
             obs_keys=obs_keys,
         )
