@@ -34,15 +34,16 @@ def td3_update_actor(
 
             actor_loss = lamb * actor_q_loss + bc_loss
             return actor_loss, {
+                "lamb": lamb,
                 "actor_loss": actor_loss,
                 "actor_q_loss": actor_q_loss,
                 "actor_q_loss_min": -q.min(),
                 "actor_q_loss_max": -q.max(),
                 "actor_q_loss_std": -q.std(),
                 "bc_loss": bc_loss,
-                "bc_loss_min": -log_probs.min(),
-                "bc_loss_max": -log_probs.max(),
-                "bc_loss_std": -log_probs.std(),
+                "bc_loss_min": -offline_log_probs.min(),
+                "bc_loss_max": -offline_log_probs.max(),
+                "bc_loss_std": -offline_log_probs.std(),
                 "updated_states": updated_states,
             }
         else:
