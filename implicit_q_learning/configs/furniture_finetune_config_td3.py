@@ -16,7 +16,7 @@ def get_config():
     config.discount = 0.99
     config.policy_delay = 2
     config.alpha = 2.5
-    config.use_td3_bc = True
+    config.use_td3_bc = False
     config.expl_noise = 0.1
 
     config.dropout_rate = None

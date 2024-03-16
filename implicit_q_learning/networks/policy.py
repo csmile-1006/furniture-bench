@@ -96,8 +96,7 @@ class NormalTanhMixturePolicy(nn.Module):
         scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseScales")(
             outputs
         )
-        scales = nn.softplus(scales) + self.std_min
-        scales = jnp.clip(scales, self.std_min, self.std_max)
+        scales = (self.std_max - self.std_min) * nn.sigmoid(scales) + self.std_min
 
         if not self.use_tanh:
             means = nn.tanh(means)
@@ -109,7 +108,6 @@ class NormalTanhMixturePolicy(nn.Module):
         scales = jnp.reshape(scales, shape)
 
         components_distribution = tfd.Normal(loc=mu, scale=scales * temperature)
-        # components_distribution = tfd.Independent(components_distribution, 1)
 
         dist = tfd.MixtureSameFamily(
             mixture_distribution=tfd.Categorical(logits=logits), components_distribution=components_distribution
