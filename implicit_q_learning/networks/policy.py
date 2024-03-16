@@ -93,9 +93,9 @@ class NormalTanhMixturePolicy(nn.Module):
             bias_init=nn.initializers.normal(stddev=1.0),
             name="OutputDenseMean",
         )(outputs)
-        scales = nn.Dense(
-            self.action_dim * self.num_modes, kernel_init=nn.initializers.zeros, name="OutputDenseScales"
-        )(outputs)
+        scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseScales")(
+            outputs
+        )
         scales = nn.softplus(scales) + self.std_min
         scales = jnp.clip(scales, self.std_min, self.std_max)
 
