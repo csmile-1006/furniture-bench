@@ -34,7 +34,7 @@ class NormalTanhPolicy(nn.Module):
     def __call__(
         self,
         features: Dict[str, jnp.ndarray],
-        temperature: float = 1.0,
+        expl_noise: float = 1.0,
         training: bool = False,
     ) -> tfd.Distribution:
         outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=0.0, name="OutputMLP")(
@@ -53,7 +53,7 @@ class NormalTanhPolicy(nn.Module):
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)
 
-        base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=stds * temperature)
+        base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=stds * expl_noise)
         if self.tanh_squash_distribution:
             return tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh())
         else:
@@ -71,7 +71,7 @@ class NormalTanhMixturePolicy(nn.Module):
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
     @nn.compact
-    def __call__(self, features: jnp.ndarray, temperature: float = 1.0, training: bool = False) -> tfd.Distribution:
+    def __call__(self, features: jnp.ndarray, expl_noise: float = 1.0, training: bool = False) -> tfd.Distribution:
         # obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
         outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
             features, training=training
@@ -100,7 +100,7 @@ class NormalTanhMixturePolicy(nn.Module):
         mu = jnp.reshape(means, shape)
         scales = jnp.reshape(scales, shape)
 
-        components_distribution = tfd.Normal(loc=mu, scale=scales * temperature)
+        components_distribution = tfd.Normal(loc=mu, scale=scales * expl_noise)
 
         dist = tfd.MixtureSameFamily(
             mixture_distribution=tfd.Categorical(logits=logits), components_distribution=components_distribution
@@ -118,9 +118,9 @@ def _sample_actions(
     actor_def: nn.Module,
     actor_params: Params,
     observations: np.ndarray,
-    temperature: float = 1.0,
+    expl_noise: float = 1.0,
 ) -> Tuple[PRNGKey, jnp.ndarray]:
-    dist = actor_def.apply(actor_params, observations, temperature)
+    dist = actor_def.apply(actor_params, observations, expl_noise)
     rng, key = jax.random.split(rng)
     return rng, dist.sample(seed=key)
 
@@ -130,6 +130,6 @@ def sample_actions(
     actor_def: nn.Module,
     actor_params: Params,
     observations: np.ndarray,
-    temperature: float = 1.0,
+    expl_noise: float = 1.0,
 ) -> Tuple[PRNGKey, jnp.ndarray]:
-    return _sample_actions(rng, actor_def, actor_params, observations, temperature)
+    return _sample_actions(rng, actor_def, actor_params, observations, expl_noise)

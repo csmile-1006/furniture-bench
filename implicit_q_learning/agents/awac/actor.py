@@ -8,16 +8,16 @@ from agents.awac.critic import get_value
 
 
 def awac_update_actor(
-    key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, beta: float, temperature: float
+    key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, beta: float, expl_noise: float
 ) -> Tuple[Model, InfoDict]:
-    v1, v2 = get_value(key, actor, critic, batch, num_samples, temperature)
+    v1, v2 = get_value(key, actor, critic, batch, num_samples, expl_noise)
     v = jnp.minimum(v1, v2)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
             actor_params,
             batch.observations,
-            temperature,
+            expl_noise,
             training=True,
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),

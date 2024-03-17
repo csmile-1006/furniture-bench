@@ -6,9 +6,9 @@ from networks.common import Batch, InfoDict, Model, Params, PRNGKey
 
 
 def get_value(
-    key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, temperature: float
+    key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, expl_noise: float
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    dist = actor(batch.observations, temperature)
+    dist = actor(batch.observations, expl_noise)
 
     policy_actions = dist.sample(seed=key)
 
@@ -37,10 +37,10 @@ def awac_update_critic(
     temp: Model,
     batch: Batch,
     discount: float,
-    temperature: float,
+    expl_noise: float,
     backup_entropy: bool,
 ) -> Tuple[Model, InfoDict]:
-    dist = actor(batch.next_observations, temperature)
+    dist = actor(batch.next_observations, expl_noise)
     next_actions = dist.sample(seed=key)
     next_log_probs = dist.log_prob(next_actions)
     next_q1, next_q2 = target_critic(batch.next_observations, next_actions)
