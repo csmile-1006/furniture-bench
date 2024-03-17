@@ -19,6 +19,7 @@ def get_config():
     config.use_td3_bc = True
     config.expl_noise = 0.1
     config.bc_weight = 1.0
+    config.detach_actor = False
 
     config.dropout_rate = None
 

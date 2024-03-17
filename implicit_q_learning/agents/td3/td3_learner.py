@@ -103,6 +103,7 @@ class TD3Learner(object):
         expl_noise: float = 0.1,
         bc_weight: float = 1.0,
         use_td3_bc: bool = False,
+        detach_actor: bool = False,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -115,6 +116,7 @@ class TD3Learner(object):
         self.expl_noise = expl_noise
         self.bc_weight = bc_weight
         self.use_td3_bc = use_td3_bc
+        self.detach_actor = detach_actor
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, target_critic_key = jax.random.split(rng, 4)
@@ -249,9 +251,9 @@ class TD3Learner(object):
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
         self.critic = _share_encoder(source=self.actor, target=self.critic)
-        # if use_bc:
-        #     print("detach transformer encoder of BC actor.")
-        #     self.actor.apply_fn.disable_gradient()
+        if self.detach_actor:
+            print("detach transformer encoder of BC actor.")
+            self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
         self.step += 1
