@@ -17,6 +17,7 @@ def get_config():
     config.target_update_period = 1
 
     config.dropout_rate = None
+    config.detach_actor = False
 
     config.tau = 0.005  # For soft target updates.
 

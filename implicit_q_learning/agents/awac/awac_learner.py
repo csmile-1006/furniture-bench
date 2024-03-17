@@ -91,6 +91,7 @@ class AWACLearner(object):
         target_update_period: int = 1,
         beta: float = 1.0,
         temperature: float = 1.0,
+        detach_actor: bool = False,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -102,6 +103,7 @@ class AWACLearner(object):
         self.num_samples = num_samples
         self.beta = beta
         self.temperature = temperature
+        self.detach_actor = detach_actor
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, target_critic_key = jax.random.split(rng, 4)
@@ -181,8 +183,8 @@ class AWACLearner(object):
             action_dim,
             num_modes=10,
             dropout_rate=dropout_rate,
-            std_min=1e-2,
-            std_max=5e-1,
+            std_min=1e-1,
+            std_max=1e-0,
             use_tanh=False,
             obs_keys=obs_keys,
         )
@@ -233,9 +235,9 @@ class AWACLearner(object):
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
         self.critic = _share_encoder(source=self.actor, target=self.critic)
-        # if use_bc:
-        #     print("detach transformer encoder of BC actor.")
-        #     self.actor.apply_fn.disable_gradient()
+        if self.detach_actor:
+            print("detach transformer encoder of BC actor.")
+            self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
         self.step += 1
