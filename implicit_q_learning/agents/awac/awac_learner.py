@@ -38,12 +38,12 @@ def _update_jit(
     tau: float,
     num_samples: int,
     beta: float,
-    temperature: float,
+    expl_noise: float,
     update_target: bool,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng)
     new_critic, critic_info = awac_update_critic(
-        key, actor, critic, target_critic, None, batch, discount, temperature, backup_entropy=False
+        key, actor, critic, target_critic, None, batch, discount, expl_noise, backup_entropy=False
     )
     if update_target:
         new_target_critic = target_update(new_critic, target_critic, tau)
@@ -51,7 +51,7 @@ def _update_jit(
         new_target_critic = target_critic
 
     rng, key = jax.random.split(rng)
-    new_actor, actor_info = awac_update_actor(key, actor, new_critic, batch, num_samples, beta, temperature)
+    new_actor, actor_info = awac_update_actor(key, actor, new_critic, batch, num_samples, beta, expl_noise)
 
     return (
         rng,
@@ -90,7 +90,7 @@ class AWACLearner(object):
         use_sigmareparam: bool = True,
         target_update_period: int = 1,
         beta: float = 1.0,
-        temperature: float = 1.0,
+        expl_noise: float = 1.0,
         detach_actor: bool = False,
     ):
         """
@@ -102,7 +102,7 @@ class AWACLearner(object):
         self.discount = discount
         self.num_samples = num_samples
         self.beta = beta
-        self.temperature = temperature
+        self.expl_noise = expl_noise
         self.detach_actor = detach_actor
 
         rng = jax.random.PRNGKey(seed)
@@ -223,11 +223,11 @@ class AWACLearner(object):
         self.rng = rng
         self.step = 1
 
-    def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
         self.rng = rng
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
@@ -260,7 +260,7 @@ class AWACLearner(object):
                 self.tau,
                 self.num_samples,
                 self.beta,
-                self.temperature,
+                self.expl_noise,
                 self.step % self.target_update_period == 0,
             )
             self.critic = new_critic
@@ -269,7 +269,7 @@ class AWACLearner(object):
         self.rng = new_rng
         self.actor = new_actor
 
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 

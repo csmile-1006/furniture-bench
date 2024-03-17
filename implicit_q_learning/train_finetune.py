@@ -80,7 +80,7 @@ flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
-flags.DEFINE_float("temperature", 1.0, "Temperature for stochastic actor.")
+flags.DEFINE_float("expl_noise", 1.0, "expl_noise for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
 flags.DEFINE_string("rm_type", "RFE", "type of reward model.")
 flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
@@ -547,7 +547,7 @@ def main(_):
         agent.prepare_online_step()
     with online_pbar:
         while i <= steps:
-            action = agent.sample_actions(observation, temperature=FLAGS.temperature)
+            action = agent.sample_actions(observation, expl_noise=FLAGS.expl_noise)
             next_observation, reward, done, info = env.step(action)
             for j in range(action.shape[0]):
                 if action[j][6] < 0:
