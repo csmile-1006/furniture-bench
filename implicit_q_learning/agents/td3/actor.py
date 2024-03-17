@@ -6,10 +6,18 @@ from networks.common import Batch, InfoDict, Model, Params, PRNGKey
 
 
 def td3_update_actor(
-    key: PRNGKey, actor: Model, critic: Model, batch: Batch, alpha: float, expl_noise: float, use_td3_bc: bool
+    key: PRNGKey,
+    actor: Model,
+    critic: Model,
+    batch: Batch,
+    alpha: float,
+    expl_noise: float,
+    use_td3_bc: bool,
+    temperature: float,
+    bc_weight: float,
 ) -> Tuple[Model, InfoDict]:
-    data_q1, data_q2 = critic(batch.observations, batch.actions)
-    data_q = jnp.minimum(data_q1, data_q2)
+    # data_q1, data_q2 = critic(batch.observations, batch.actions)
+    # data_q = jnp.minimum(data_q1, data_q2)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
@@ -30,11 +38,13 @@ def td3_update_actor(
             offline_log_probs = log_probs[::2]
             bc_loss = -offline_log_probs.mean()
             # bc_loss = -log_probs.mean()
-            lamb = alpha / abs(data_q.mean())
+            actor_loss = actor_q_loss + bc_weight * bc_loss
 
-            actor_loss = lamb * actor_q_loss + bc_loss
+            # lamb = alpha / abs(data_q.mean())
+            # actor_loss = lamb * actor_q_loss + bc_loss
+
             return actor_loss, {
-                "lamb": lamb,
+                # "lamb": lamb,
                 "actor_loss": actor_loss,
                 "actor_q_loss": actor_q_loss,
                 "actor_q_loss_min": -q.min(),

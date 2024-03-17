@@ -18,6 +18,7 @@ def get_config():
     config.alpha = 2.5
     config.use_td3_bc = True
     config.expl_noise = 0.1
+    config.bc_weight = 1.0
 
     config.dropout_rate = None
 

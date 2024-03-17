@@ -41,6 +41,7 @@ def _update_jit(
     expl_noise: float,
     update_policy: bool,
     use_td3_bc: bool,
+    bc_weight: float,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng)
     new_critic, critic_info = td3_update_critic(
@@ -48,7 +49,9 @@ def _update_jit(
     )
     if update_policy:
         rng, key = jax.random.split(rng)
-        new_actor, actor_info = td3_update_actor(key, actor, new_critic, batch, alpha, expl_noise, use_td3_bc)
+        new_actor, actor_info = td3_update_actor(
+            key, actor, new_critic, batch, alpha, expl_noise, use_td3_bc, bc_weight=bc_weight
+        )
     else:
         new_actor = actor
         actor_info = {}
@@ -98,7 +101,7 @@ class TD3Learner(object):
         policy_delay: int = 2,
         alpha: float = 2.5,
         expl_noise: float = 0.1,
-        temperature: float = 1.0,
+        bc_weight: float = 1.0,
         use_td3_bc: bool = False,
     ):
         """
@@ -110,7 +113,7 @@ class TD3Learner(object):
         self.policy_delay = policy_delay
         self.alpha = alpha
         self.expl_noise = expl_noise
-        self.temperature = temperature
+        self.bc_weight = bc_weight
         self.use_td3_bc = use_td3_bc
 
         rng = jax.random.PRNGKey(seed)
@@ -174,28 +177,28 @@ class TD3Learner(object):
             )
 
         action_dim = actions.shape[-1]
-        # actor_cls = partial(
-        #     policy.NormalTanhPolicy,
-        #     hidden_dims,
-        #     action_dim,
-        #     log_std_scale=1e-3,
-        #     log_std_min=-5.0,
-        #     dropout_rate=dropout_rate,
-        #     state_dependent_std=False,
-        #     tanh_squash_distribution=False,
-        #     obs_keys=obs_keys,
-        # )
         actor_cls = partial(
-            policy.NormalTanhMixturePolicy,
+            policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            num_modes=10,
-            dropout_rate=dropout_rate,
             std_min=1e-1,
             std_max=1e-0,
-            use_tanh=False,
+            dropout_rate=dropout_rate,
+            state_dependent_std=False,
+            tanh_squash_distribution=False,
             obs_keys=obs_keys,
         )
+        # actor_cls = partial(
+        #     policy.NormalTanhMixturePolicy,
+        #     hidden_dims,
+        #     action_dim,
+        #     num_modes=10,
+        #     dropout_rate=dropout_rate,
+        #     std_min=1e-1,
+        #     std_max=1e-0,
+        #     use_tanh=False,
+        #     obs_keys=obs_keys,
+        # )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
@@ -234,11 +237,11 @@ class TD3Learner(object):
         self.rng = rng
         self.step = 1
 
-    def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
         self.rng = rng
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
@@ -283,7 +286,7 @@ class TD3Learner(object):
         self.rng = new_rng
         self.actor = new_actor
 
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 
