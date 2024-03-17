@@ -22,11 +22,8 @@ def awac_update_actor(
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),
         )
-        lim = 1 - 1e-5
-        actions = jnp.clip(batch.actions, -lim, lim)
-        log_probs = dist.log_prob(actions)
-
-        q1, q2 = critic(batch.observations, actions)
+        log_probs = dist.log_prob(batch.actions)
+        q1, q2 = critic(batch.observations, batch.actions)
         q = jnp.minimum(q1, q2)
         a = q - v
 

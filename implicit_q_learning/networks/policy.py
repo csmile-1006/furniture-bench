@@ -25,21 +25,18 @@ class NormalTanhPolicy(nn.Module):
     state_dependent_std: bool = True
     dropout_rate: Optional[float] = None
     log_std_scale: float = 1.0
-    log_std_min: Optional[float] = None
-    log_std_max: Optional[float] = None
+    std_min: Optional[float] = None
+    std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
     @nn.compact
     def __call__(
         self,
-        # observations: Dict[str, jnp.ndarray],
         features: Dict[str, jnp.ndarray],
         temperature: float = 1.0,
         training: bool = False,
     ) -> tfd.Distribution:
-        # obs = self.encoder_cls(name="encoder")(observations, deterministic=not training)[:, -1]
-        # outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate, name="OutputMLP")(
         outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=0.0, name="OutputMLP")(
             features, training=training
         )
@@ -47,20 +44,16 @@ class NormalTanhPolicy(nn.Module):
         means = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseMean")(outputs)
 
         if self.state_dependent_std:
-            log_stds = nn.Dense(
-                self.action_dim, kernel_init=default_init(self.log_std_scale), name="OutputDenseLogStd"
-            )(outputs)
+            stds = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseLogStd")(outputs)
         else:
-            log_stds = self.param("OutputLogStd", nn.initializers.zeros, (self.action_dim,))
+            stds = self.param("OutputLogStd", nn.initializers.zeros, (self.action_dim,))
 
-        log_std_min = self.log_std_min or LOG_STD_MIN
-        log_std_max = self.log_std_max or LOG_STD_MAX
-        log_stds = jnp.clip(log_stds, log_std_min, log_std_max)
+        stds = (self.std_max - self.std_min) * nn.sigmoid(stds) + self.std_min
 
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)
 
-        base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds) * temperature)
+        base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=stds * temperature)
         if self.tanh_squash_distribution:
             return tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh())
         else:
