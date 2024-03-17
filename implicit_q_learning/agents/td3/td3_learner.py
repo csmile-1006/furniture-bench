@@ -239,11 +239,11 @@ class TD3Learner(object):
         self.rng = rng
         self.step = 1
 
-    def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
         self.rng = rng
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
