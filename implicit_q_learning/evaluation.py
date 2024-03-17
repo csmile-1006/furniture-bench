@@ -8,13 +8,13 @@ from tqdm import trange
 from pathlib import Path
 
 
-def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: float = 0.00) -> Dict[str, float]:
+def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, expl_noise: float = 0.00) -> Dict[str, float]:
     stats = {"return": [], "length": [], "success": [], "spl": []}
     ep, total_step = 0, 0
     pbar = trange(num_episodes, desc="evaluation", ncols=0)
     observation, done = env.reset(), np.zeros((env._num_envs), dtype=bool)
     while ep < num_episodes:
-        action = agent.sample_actions(observation, temperature=temperature)
+        action = agent.sample_actions(observation, expl_noise=expl_noise)
         observation, _, done, info = env.step(action)
         total_step += min(env._num_envs, num_episodes)
         for env_idx in range(min(env._num_envs, num_episodes)):
@@ -36,7 +36,7 @@ def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, temperature: flo
 
 
 def evaluate_with_save(
-    agent: nn.Module, env: gym.Env, num_episodes: int, temperature: float = 0.00, save_dir: Path = None
+    agent: nn.Module, env: gym.Env, num_episodes: int, expl_noise: float = 0.00, save_dir: Path = None
 ) -> Dict[str, float]:
     stats = {"return": [], "length": [], "success": [], "spl": []}
     episodes = {env_idx: {key: [] for key in ["observations", "actions"]} for env_idx in range(env._num_envs)}
@@ -48,7 +48,7 @@ def evaluate_with_save(
             {key: observation[key][env_idx, -1] for key in ["color_image1", "color_image2"]}
         )
     while ep < num_episodes:
-        action = agent.sample_actions(observation, temperature=temperature)
+        action = agent.sample_actions(observation, expl_noise=expl_noise)
         observation, _, done, info = env.step(action)
         total_step += min(env._num_envs, num_episodes)
         for env_idx in range(min(env._num_envs, num_episodes)):

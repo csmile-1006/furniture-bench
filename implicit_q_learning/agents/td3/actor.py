@@ -13,7 +13,6 @@ def td3_update_actor(
     alpha: float,
     expl_noise: float,
     use_td3_bc: bool,
-    temperature: float,
     bc_weight: float,
 ) -> Tuple[Model, InfoDict]:
     # data_q1, data_q2 = critic(batch.observations, batch.actions)

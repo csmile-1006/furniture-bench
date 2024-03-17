@@ -280,6 +280,7 @@ class TD3Learner(object):
                 self.expl_noise,
                 self.step % self.policy_delay == 0,
                 self.use_td3_bc,
+                self.bc_weight,
             )
             self.critic = new_critic
             self.target_critic = new_target_critic
