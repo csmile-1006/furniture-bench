@@ -44,11 +44,12 @@ class NormalTanhPolicy(nn.Module):
         means = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseMean")(outputs)
 
         if self.state_dependent_std:
-            stds = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseLogStd")(outputs)
+            stds = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseStd")(outputs)
         else:
-            stds = self.param("OutputLogStd", nn.initializers.zeros, (self.action_dim,))
+            stds = self.param("OutputStd", nn.initializers.zeros, (self.action_dim,))
 
-        stds = (self.std_max - self.std_min) * nn.sigmoid(stds) + self.std_min
+        stds = nn.tanh(stds)
+        stds = (self.log_std_max - self.log_std_min) * stds * 0.5 * (stds + 1) + self.log_std_min
 
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)

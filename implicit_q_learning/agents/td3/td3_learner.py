@@ -186,7 +186,7 @@ class TD3Learner(object):
             std_min=1e-1,
             std_max=1e-0,
             dropout_rate=dropout_rate,
-            state_dependent_std=False,
+            state_dependent_std=True,
             tanh_squash_distribution=False,
             obs_keys=obs_keys,
         )
