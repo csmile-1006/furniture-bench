@@ -23,8 +23,8 @@ def td3_update_actor(
         dist, updated_states = actor.apply(
             actor_params,
             batch.observations,
-            # expl_noise,
-            0.0,
+            expl_noise,
+            # 0.0,
             training=True,
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),
