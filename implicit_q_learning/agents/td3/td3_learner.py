@@ -44,7 +44,7 @@ def _update_jit(
     bc_weight: float,
     offline_batch_size: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
-    actor = _share_encoder(source=critic, target=actor)
+    # actor = _share_encoder(source=critic, target=actor)
     rng, key = jax.random.split(rng)
     new_critic, critic_info = td3_update_critic(
         key, target_actor, critic, target_critic, None, batch, discount, expl_noise, backup_entropy=False
