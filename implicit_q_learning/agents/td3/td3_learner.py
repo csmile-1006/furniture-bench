@@ -44,7 +44,7 @@ def _update_jit(
     bc_weight: float,
     offline_batch_size: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
-    # actor = _share_encoder(source=critic, target=actor)
+    actor = _share_encoder(source=critic, target=actor)
     rng, key = jax.random.split(rng)
     new_critic, critic_info = td3_update_critic(
         key, target_actor, critic, target_critic, None, batch, discount, expl_noise, backup_entropy=False
@@ -191,28 +191,28 @@ class TD3Learner(object):
             )
 
         action_dim = actions.shape[-1]
-        actor_cls = partial(
-            policy.NormalTanhPolicy,
-            hidden_dims,
-            action_dim,
-            std_min=1e-1,
-            std_max=1e-0,
-            dropout_rate=dropout_rate,
-            state_dependent_std=True,
-            tanh_squash_distribution=False,
-            obs_keys=obs_keys,
-        )
         # actor_cls = partial(
-        #     policy.NormalTanhMixturePolicy,
+        #     policy.NormalTanhPolicy,
         #     hidden_dims,
         #     action_dim,
-        #     num_modes=10,
-        #     dropout_rate=dropout_rate,
         #     std_min=1e-1,
         #     std_max=1e-0,
-        #     use_tanh=False,
+        #     dropout_rate=dropout_rate,
+        #     state_dependent_std=True,
+        #     tanh_squash_distribution=False,
         #     obs_keys=obs_keys,
         # )
+        actor_cls = partial(
+            policy.NormalTanhMixturePolicy,
+            hidden_dims,
+            action_dim,
+            num_modes=10,
+            dropout_rate=dropout_rate,
+            std_min=1e-1,
+            std_max=1e-0,
+            use_tanh=False,
+            obs_keys=obs_keys,
+        )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
