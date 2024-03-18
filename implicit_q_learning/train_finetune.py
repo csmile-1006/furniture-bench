@@ -326,11 +326,11 @@ def combine(one_dict, other_dict):
     for k, v in one_dict.items():
         if isinstance(v, dict):
             combined[k] = combine(v, other_dict[k])
-        elif v.shape[0] == other_dict[k].shape[0]:
-            tmp = np.empty((v.shape[0] + other_dict[k].shape[0], *v.shape[1:]), dtype=v.dtype)
-            tmp[0::2] = v
-            tmp[1::2] = other_dict[k]
-            combined[k] = tmp
+        # elif v.shape[0] == other_dict[k].shape[0]:
+        #     tmp = np.empty((v.shape[0] + other_dict[k].shape[0], *v.shape[1:]), dtype=v.dtype)
+        #     tmp[0::2] = v
+        #     tmp[1::2] = other_dict[k]
+        #     combined[k] = tmp
         else:
             tmp = np.concatenate([v, other_dict[k]], axis=0)
             combined[k] = tmp
@@ -417,6 +417,11 @@ def main(_):
     )
     wandb.config.update(FLAGS)
 
+    offline_batch_size = int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
+    online_batch_size = FLAGS.batch_size - offline_batch_size
+    if FLAGS.agent_type == "dapg":
+        assert offline_batch_size == online_batch_size, "DAPG requires the same batch size for offline and online."
+
     if FLAGS.agent_type == "iql":
         agent = IQLLearner(
             FLAGS.seed,
@@ -445,6 +450,7 @@ def main(_):
             env.observation_space.sample(),
             env.action_space.sample()[:1],
             **kwargs,
+            offline_batch_size=offline_batch_size,
         )
     else:
         raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")
@@ -495,12 +501,6 @@ def main(_):
                     wandb.log({f"offline-evaluation/{k}": v}, step=i)
                 env.unset_eval_flag()
         agent.save(ckpt_dir, i)
-
-    # raise
-    offline_batch_size = int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
-    online_batch_size = FLAGS.batch_size - offline_batch_size
-    if FLAGS.agent_type == "dapg":
-        assert offline_batch_size == online_batch_size, "DAPG requires the same batch size for offline and online."
 
     offline_loader = make_offline_loader(env, FLAGS.data_path, offline_batch_size)
     replay_storage = ReplayBufferStorage(
@@ -605,13 +605,14 @@ def main(_):
                     offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
                     offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                     combined = combine(offline_batch, online_batch)
-                    batch = Batch(
-                        observations=combined["observations"],
-                        actions=combined["actions"],
-                        rewards=combined["rewards"],
-                        masks=combined["masks"],
-                        next_observations=combined["next_observations"],
-                    )
+                    batch = Batch(**combined)
+                    # batch = Batch(
+                    #     observations=combined["observations"],
+                    #     actions=combined["actions"],
+                    #     rewards=combined["rewards"],
+                    #     masks=combined["masks"],
+                    #     next_observations=combined["next_observations"],
+                    # )
                     if "antmaze" in FLAGS.env_name:
                         batch = Batch(
                             observations=batch.observations,
@@ -620,14 +621,14 @@ def main(_):
                             masks=batch.masks,
                             next_observations=batch.next_observations,
                         )
-                    if "Furniture" in FLAGS.env_name and FLAGS.reward_type == "sparse":
-                        batch = Batch(
-                            observations=batch.observations,
-                            actions=batch.actions,
-                            rewards=batch.rewards - 1,
-                            masks=batch.masks,
-                            next_observations=batch.next_observations,
-                        )
+                    # if "Furniture" in FLAGS.env_name and FLAGS.reward_type == "sparse":
+                    #     batch = Batch(
+                    #         observations=batch.observations,
+                    #         actions=batch.actions,
+                    #         rewards=batch.rewards - 1,
+                    #         masks=batch.masks,
+                    #         next_observations=batch.next_observations,
+                    #     )
                     update_info = agent.update(batch, update_bc=False)
 
                     if i % FLAGS.log_interval == 0:

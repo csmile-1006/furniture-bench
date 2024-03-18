@@ -27,7 +27,7 @@ def _share_encoder(source, target):
     return target.replace(params=new_params)
 
 
-@partial(jax.jit, static_argnames=("update_policy", "use_td3_bc"))
+@partial(jax.jit, static_argnames=("update_policy", "use_td3_bc", "offline_batch_size"))
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
@@ -42,6 +42,7 @@ def _update_jit(
     update_policy: bool,
     use_td3_bc: bool,
     bc_weight: float,
+    offline_batch_size: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng)
     new_critic, critic_info = td3_update_critic(
@@ -50,7 +51,15 @@ def _update_jit(
     if update_policy:
         rng, key = jax.random.split(rng)
         new_actor, actor_info = td3_update_actor(
-            key, actor, new_critic, batch, alpha, expl_noise, use_td3_bc, bc_weight=bc_weight
+            key,
+            actor,
+            new_critic,
+            batch,
+            alpha,
+            expl_noise,
+            use_td3_bc,
+            bc_weight=bc_weight,
+            offline_batch_size=offline_batch_size,
         )
     else:
         new_actor = actor
@@ -104,6 +113,7 @@ class TD3Learner(object):
         bc_weight: float = 1.0,
         use_td3_bc: bool = False,
         detach_actor: bool = False,
+        offline_batch_size: int = 128,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -117,6 +127,7 @@ class TD3Learner(object):
         self.bc_weight = bc_weight
         self.use_td3_bc = use_td3_bc
         self.detach_actor = detach_actor
+        self.offline_batch_size = offline_batch_size
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, target_critic_key = jax.random.split(rng, 4)
@@ -281,6 +292,7 @@ class TD3Learner(object):
                 self.step % self.policy_delay == 0,
                 self.use_td3_bc,
                 self.bc_weight,
+                self.offline_batch_size,
             )
             self.critic = new_critic
             self.target_critic = new_target_critic

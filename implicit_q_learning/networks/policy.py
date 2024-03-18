@@ -49,7 +49,7 @@ class NormalTanhPolicy(nn.Module):
             stds = self.param("OutputStd", nn.initializers.zeros, (self.action_dim,))
 
         stds = nn.tanh(stds)
-        stds = (self.log_std_max - self.log_std_min) * stds * 0.5 * (stds + 1) + self.log_std_min
+        stds = (self.std_max - self.std_min) * stds * 0.5 * (stds + 1) + self.std_min
 
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)

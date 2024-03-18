@@ -14,6 +14,7 @@ def td3_update_actor(
     expl_noise: float,
     use_td3_bc: bool,
     bc_weight: float,
+    offline_batch_size: int,
 ) -> Tuple[Model, InfoDict]:
     # data_q1, data_q2 = critic(batch.observations, batch.actions)
     # data_q = jnp.minimum(data_q1, data_q2)
@@ -33,10 +34,9 @@ def td3_update_actor(
         actor_q_loss = -q.mean()
 
         if use_td3_bc:
-            log_probs = dist.log_prob(jnp.clip(batch.actions, -1 + 1e-5, 1 - 1e-5))
-            offline_log_probs = log_probs[::2]
+            log_probs = dist.log_prob(batch.actions)
+            offline_log_probs = log_probs[:offline_batch_size]
             bc_loss = -offline_log_probs.mean()
-            # bc_loss = -log_probs.mean()
             actor_loss = actor_q_loss + bc_weight * bc_loss
 
             # lamb = alpha / abs(data_q.mean())
