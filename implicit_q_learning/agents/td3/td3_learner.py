@@ -261,12 +261,10 @@ class TD3Learner(object):
 
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
-        print("no action.")
-        return
-        # self.critic = _share_encoder(source=self.actor, target=self.critic)
-        # if self.detach_actor:
-        #     print("detach transformer encoder of BC actor.")
-        #     self.actor.apply_fn.disable_gradient()
+        self.critic = _share_encoder(source=self.actor, target=self.critic)
+        if self.detach_actor:
+            print("detach transformer encoder of BC actor.")
+            self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
         self.step += 1
