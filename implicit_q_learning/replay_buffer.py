@@ -13,10 +13,11 @@ import numpy as np
 import torch
 from torch.utils.data import IterableDataset
 
-from dataset_utils import exponential_moving_average
+from dataset_utils import exponential_moving_average, transform_phases
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
 SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 784}
+PHASE_TO_REWARD = {"one_leg": {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: -1}}
 
 
 def episode_len(episode):
@@ -50,6 +51,7 @@ def _get_stacked_timesteps(length, window_size, skip_frame):
 
 def load_episode(
     fn,
+    furniture="one_leg",
     reward_type="sparse",
     discount=0.99,
     obs_keys=("image1", "image2"),
@@ -98,6 +100,10 @@ def load_episode(
             rewards = rewards + (episode["rewards"] / lambda_mr)
             if smoothe:
                 rewards = np.asarray(exponential_moving_average(rewards))
+        elif reward_type == "ours_shaped":
+            phases = episode["phases"]
+            rewards = [PHASE_TO_REWARD[furniture][p] for p in phases]
+            rewards = transform_phases(rewards + (episode["rewards"] / lambda_mr))
 
             # our_reward = episode["multimodal_rewards"] / lambda_mr
             # next_our_reward = np.asarray(our_reward[1:].tolist() + our_reward[-1:].tolist())
@@ -147,6 +153,7 @@ class ReplayBufferStorage:
 class ReplayBuffer(IterableDataset):
     def __init__(
         self,
+        furniture,
         replay_dir,
         max_size,
         num_workers,
@@ -164,6 +171,7 @@ class ReplayBuffer(IterableDataset):
         action_stat: dict = None,
         smoothe: bool = False,
     ):
+        self._furniture = furniture
         self._replay_dir = replay_dir
         self._size = 0
         self._max_size = max_size
@@ -193,6 +201,7 @@ class ReplayBuffer(IterableDataset):
         try:
             episode = load_episode(
                 eps_fn,
+                furniture=self._furniture,
                 reward_type=self._reward_type,
                 discount=self._discount,
                 obs_keys=self._obs_keys,
@@ -303,6 +312,7 @@ class ReplayBuffer(IterableDataset):
 class OfflineReplayBuffer(IterableDataset):
     def __init__(
         self,
+        furniture,
         replay_dir,
         max_size,
         num_workers,
@@ -321,6 +331,7 @@ class OfflineReplayBuffer(IterableDataset):
         action_stat: dict = None,
         smoothe: bool = False,
     ):
+        self._furniture = furniture
         self._replay_dir = replay_dir
         self._size = 0
         self._max_size = max_size
@@ -352,6 +363,7 @@ class OfflineReplayBuffer(IterableDataset):
         try:
             episode = load_episode(
                 eps_fn,
+                furniture=self._furniture,
                 reward_type=self._reward_type,
                 discount=self._discount,
                 obs_keys=self._obs_keys,
@@ -453,6 +465,7 @@ def _worker_init_fn(worker_id):
 
 
 def make_replay_loader(
+    furniture,
     replay_dir,
     max_size,
     batch_size,
@@ -469,6 +482,7 @@ def make_replay_loader(
 
     if buffer_type == "online":
         iterable = ReplayBuffer(
+            furniture,
             replay_dir,
             max_size_per_worker,
             num_workers,
@@ -481,6 +495,7 @@ def make_replay_loader(
         )
     elif buffer_type == "offline":
         iterable = OfflineReplayBuffer(
+            furniture,
             replay_dir,
             max_size_per_worker,
             num_workers,

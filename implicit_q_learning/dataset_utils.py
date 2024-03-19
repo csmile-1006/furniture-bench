@@ -36,6 +36,35 @@ def exponential_moving_average(a, alpha=0.3):
     return ema
 
 
+def transform_phases(phases):
+    phases = np.asarray(phases)
+    change_points = []
+    for idx in range(len(phases) - 1):
+        if phases[idx + 1] != phases[idx]:
+            change_points.append(idx + 1)
+
+    change_points.insert(0, 0)
+    change_points.append(len(phases) - 1)
+
+    outputs = []
+    for idx in range(len(change_points) - 1):
+        linear_terms = step_to_linear(phases[range(change_points[idx], change_points[idx + 1] + 1)])
+        if idx < len(change_points) - 2:
+            linear_terms = linear_terms[:-1]
+        outputs.extend(linear_terms)
+
+    return outputs
+
+
+def step_to_linear(_list):
+    output = []
+    step_size = 1 / len(_list)
+    delta = _list[-1] - _list[0]
+    for i in range(len(_list)):
+        output.append(_list[0] + i * step_size * delta)
+    return output
+
+
 def split_into_trajectories(observations, actions, rewards, masks, dones_float, next_observations):
     trajs = [[]]
 

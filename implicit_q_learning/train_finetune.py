@@ -74,7 +74,9 @@ flags.DEFINE_integer("reward_window_size", 4, "Number of frames in context windo
 flags.DEFINE_integer("reward_skip_frame", 2, "how often skip frame in reward model.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_string("reward_encoder_type", "", "vip or r3m or liv")
-flags.DEFINE_enum("reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion"], "reward type")
+flags.DEFINE_enum(
+    "reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion", "ours_shaped"], "reward type"
+)
 flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
@@ -287,8 +289,9 @@ def make_env(
     return env
 
 
-def make_offline_loader(env, data_path, batch_size):
+def make_offline_loader(furniture, env, data_path, batch_size):
     return make_replay_loader(
+        furniture=furniture,
         replay_dir=Path(data_path).expanduser(),
         max_size=1e6,
         batch_size=batch_size,
@@ -315,7 +318,7 @@ def make_offline_loader(env, data_path, batch_size):
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
         action_stat=load_action_stat(Path(data_path)),
-        reward_stat=load_reward_stat(Path(data_path)) if FLAGS.reward_type == "ours" else None,
+        reward_stat=load_reward_stat(Path(data_path)) if "ours" in FLAGS.reward_type else None,
     )
 
 
@@ -366,7 +369,7 @@ def main(_):
     os.makedirs(eval_dir, exist_ok=True)
 
     reward_model = None
-    if FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
+    if "ours" in FLAGS.reward_type and FLAGS.rm_ckpt_path != "":
         # load reward model.
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
@@ -458,7 +461,7 @@ def main(_):
     def batch_to_jax(y):
         return jax.tree_util.tree_map(lambda x: x.numpy(), y)
 
-    offline_loader = make_offline_loader(env, FLAGS.data_path, FLAGS.batch_size)
+    offline_loader = make_offline_loader(str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, FLAGS.batch_size)
     if FLAGS.ckpt_dir != "":
         console.print(
             f"load trained checkpoints trained with {FLAGS.num_pretraining_steps} steps from {FLAGS.ckpt_dir}"
@@ -502,12 +505,13 @@ def main(_):
                 env.unset_eval_flag()
         agent.save(ckpt_dir, i)
 
-    offline_loader = make_offline_loader(env, FLAGS.data_path, offline_batch_size)
+    offline_loader = make_offline_loader(str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, offline_batch_size)
     replay_storage = ReplayBufferStorage(
         replay_dir=Path(buffer_dir).expanduser(),
         max_env_steps=env.furniture.max_env_steps,
     )
     online_loader = make_replay_loader(
+        furniture=FLAGS.env_name.split("/")[-1],
         replay_dir=Path(buffer_dir).expanduser(),
         max_size=FLAGS.replay_buffer_size,
         batch_size=online_batch_size,
@@ -530,7 +534,7 @@ def main(_):
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
         action_stat=action_stat,
-        reward_stat=reward_stat if FLAGS.reward_type == "ours" else None,
+        reward_stat=reward_stat if "ours" in FLAGS.reward_type else None,
     )
 
     start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps + 1
@@ -567,7 +571,7 @@ def main(_):
                 trajectories[env_idx]["terminals"].append(done[env_idx])
 
                 if done[env_idx]:
-                    if np.any(done) and FLAGS.reward_type == "ours" and FLAGS.rm_ckpt_path != "":
+                    if np.any(done) and "ours" in FLAGS.reward_type and FLAGS.rm_ckpt_path != "":
                         output = compute_multimodal_reward(
                             trajectories=trajectories[env_idx], reward_model=reward_model, args=args
                         )
