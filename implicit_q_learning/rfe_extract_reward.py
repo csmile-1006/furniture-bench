@@ -141,8 +141,8 @@ def main(_):
                 x["observations"].append(x["observations"][-1])
             length = len(x["observations"])
 
-            img1 = [x["observations"][_l]["color_image1"] for _l in range(length)]
-            img2 = [x["observations"][_l]["color_image2"] for _l in range(length)]
+            img1 = [x["observations"][_l]["color_image1"] for _l in range(1, length)]
+            img2 = [x["observations"][_l]["color_image2"] for _l in range(1, length)]
             images = {key: val for key, val in [("color_image2", img2), ("color_image1", img1)]}
             for key, val in images.items():
                 val = np.asarray(val)
@@ -192,7 +192,7 @@ def main(_):
                 # rewards = gaussian_smoothe(rewards)
                 rewards = exponential_moving_average(rewards)
             # You have to move one step forward to get the reward for the first action. (r(s,a,s') = r(s'))
-            rewards = rewards[1:]
+            # rewards = rewards[1:]
             reward_stats.append(rewards)
 
             path = out_dir / f"{tp}_{idx}_{rewards.shape[0]}.npz"
@@ -208,6 +208,7 @@ def main(_):
                 ]
             dst_dataset["timestamp"] = datetime.datetime.now().timestamp()
             dst_dataset["multimodal_rewards_ckpt_path"] = FLAGS.ckpt_path
+            dst_dataset["phases"] = skills if not FLAGS.predict_phase else output["processed_phases"]
             save_episode(dst_dataset, path)
             console.print(f"Re-saved at {path}")
         if idx % 10 == 0:
