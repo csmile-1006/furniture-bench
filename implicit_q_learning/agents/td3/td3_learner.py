@@ -190,28 +190,28 @@ class TD3Learner(object):
             )
 
         action_dim = actions.shape[-1]
-        # actor_cls = partial(
-        #     policy.NormalTanhPolicy,
-        #     hidden_dims,
-        #     action_dim,
-        #     std_min=1e-1,
-        #     std_max=1e-0,
-        #     dropout_rate=dropout_rate,
-        #     state_dependent_std=True,
-        #     tanh_squash_distribution=False,
-        #     obs_keys=obs_keys,
-        # )
         actor_cls = partial(
-            policy.NormalTanhMixturePolicy,
+            policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            num_modes=10,
-            dropout_rate=dropout_rate,
             std_min=1e-1,
             std_max=1e-0,
-            use_tanh=False,
+            dropout_rate=dropout_rate,
+            state_dependent_std=True,
+            tanh_squash_distribution=False,
             obs_keys=obs_keys,
         )
+        # actor_cls = partial(
+        #     policy.NormalTanhMixturePolicy,
+        #     hidden_dims,
+        #     action_dim,
+        #     num_modes=10,
+        #     dropout_rate=dropout_rate,
+        #     std_min=1e-1,
+        #     std_max=1e-0,
+        #     use_tanh=False,
+        #     obs_keys=obs_keys,
+        # )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
@@ -261,10 +261,12 @@ class TD3Learner(object):
 
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
-        self.critic = _share_encoder(source=self.actor, target=self.critic)
-        if self.detach_actor:
-            print("detach transformer encoder of BC actor.")
-            self.actor.apply_fn.disable_gradient()
+        print("no action.")
+        return
+        # self.critic = _share_encoder(source=self.actor, target=self.critic)
+        # if self.detach_actor:
+        #     print("detach transformer encoder of BC actor.")
+        #     self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
         self.step += 1
