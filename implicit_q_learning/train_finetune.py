@@ -237,9 +237,9 @@ def make_env(
     encoder_type: str,
     reward_model: nn.Module = None,
     action_stat: dict = None,
+    record_dir: str = None,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
-    record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     if "Furniture" in env_name:
         import furniture_bench  # noqa: F401
 
@@ -393,11 +393,15 @@ def main(_):
 
     action_stat = load_action_stat(Path(FLAGS.data_path))
 
+    record_dir = os.path.join(
+        FLAGS.save_dir, "sim_record", FLAGS.env_name.split("/")[-1], f"{FLAGS.run_name}.{FLAGS.seed}"
+    )
     env = make_env(
         FLAGS.env_name,
         FLAGS.seed,
         FLAGS.randomness,
         FLAGS.encoder_type,
+        record_dir=record_dir,
         reward_model=reward_model,
         action_stat=action_stat,
     )
