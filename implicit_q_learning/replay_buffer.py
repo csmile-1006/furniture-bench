@@ -103,7 +103,7 @@ def load_episode(
         elif reward_type == "ours_shaped":
             phases = episode["phases"]
             rewards = [PHASE_TO_REWARD[furniture][p] for p in phases]
-            rewards = np.asarray(rewards)
+            rewards = np.asarray(rewards, dtype=np.float32)
             # rewards = transform_phases(rewards + (episode["rewards"] / lambda_mr))
 
             # our_reward = episode["multimodal_rewards"] / lambda_mr
