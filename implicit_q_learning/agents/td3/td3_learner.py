@@ -256,8 +256,7 @@ class TD3Learner(object):
             variables.update(self.actor.extra_variables)
         rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
         self.rng = rng
-        actions = np.asarray(actions)
-        return actions
+        return np.array(actions)
 
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
