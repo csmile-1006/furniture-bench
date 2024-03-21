@@ -66,7 +66,6 @@ def load_episode(
         episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
         eps_len = episode_len(episode)
-        dones_float = np.zeros_like(episode["terminals"], dtype=np.float32)
         stacked_timesteps = _get_stacked_timesteps(eps_len, window_size, skip_frame)
         for i in range(eps_len):
             observations.append(np.concatenate([episode["observations"][i][key] for key in obs_keys], axis=-1))
@@ -74,17 +73,6 @@ def load_episode(
             next_observations.append(
                 np.concatenate([episode["next_observations"][i][key] for key in obs_keys], axis=-1)
             )
-            if (
-                np.linalg.norm(
-                    episode["observations"][i + 1]["robot_state"] - episode["next_observations"][i]["robot_state"]
-                )
-                > 1e-6
-                or episode["terminals"][i] == 1.0
-            ):
-                dones_float[i] = 1
-            else:
-                dones_float[i] = 0
-
         if reward_type == "sparse":
             rewards = episode["rewards"]
         elif reward_type == "step":
@@ -118,7 +106,7 @@ def load_episode(
         actions=episode["actions"],
         rewards=rewards,
         masks=1.0 - episode["terminals"],
-        dones_float=dones_float,
+        dones_float=episode["terminals"],
         next_observations=np.asarray(next_observations),
     )
 
