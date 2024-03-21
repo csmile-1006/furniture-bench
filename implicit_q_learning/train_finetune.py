@@ -16,6 +16,7 @@ from agents.awac.awac_learner import AWACLearner
 from agents.dapg.dapg_learner import DAPGLearner
 from agents.iql.iql_learner import IQLLearner
 from agents.td3.td3_learner import TD3Learner
+from agents.bc.bc_learner import BCLearner
 from bpref_v2.data.instruct import CLASS_TO_PHASE, get_furniturebench_instruct
 from bpref_v2.data.label_reward_furniturebench import _postprocess_phases, load_reward_model
 from evaluation import evaluate
@@ -47,7 +48,7 @@ flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
-flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3"], "agent type.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "bc"], "agent type.")
 flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
 flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
 flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
@@ -298,7 +299,7 @@ def make_offline_loader(furniture, env, data_path, batch_size):
         num_workers=FLAGS.num_workers,
         save_snapshot=True,
         nstep=FLAGS.n_step,
-        discount=FLAGS.config.discount,
+        discount=FLAGS.config.get("discount", 1.0),
         buffer_type="offline",
         reward_type=FLAGS.reward_type,
         num_demos={
@@ -459,6 +460,14 @@ def main(_):
             **kwargs,
             offline_batch_size=offline_batch_size,
         )
+    elif FLAGS.agent_type == "bc":
+        agent = BCLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            **kwargs,
+            max_steps=FLAGS.max_steps,
+        )
     else:
         raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")
 
@@ -522,7 +531,7 @@ def main(_):
         num_workers=FLAGS.num_workers,
         save_snapshot=FLAGS.save_snapshot,
         nstep=FLAGS.n_step,
-        discount=FLAGS.config.discount,
+        discount=FLAGS.config.get("discount", 1.0),
         buffer_type="online",
         reward_type=FLAGS.reward_type,
         obs_keys=tuple(
@@ -614,13 +623,6 @@ def main(_):
                     offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                     combined = combine(offline_batch, online_batch)
                     batch = Batch(**combined)
-                    # batch = Batch(
-                    #     observations=combined["observations"],
-                    #     actions=combined["actions"],
-                    #     rewards=combined["rewards"],
-                    #     masks=combined["masks"],
-                    #     next_observations=combined["next_observations"],
-                    # )
                     if "antmaze" in FLAGS.env_name:
                         batch = Batch(
                             observations=batch.observations,
@@ -629,14 +631,6 @@ def main(_):
                             masks=batch.masks,
                             next_observations=batch.next_observations,
                         )
-                    # if "Furniture" in FLAGS.env_name and FLAGS.reward_type == "sparse":
-                    #     batch = Batch(
-                    #         observations=batch.observations,
-                    #         actions=batch.actions,
-                    #         rewards=batch.rewards - 1,
-                    #         masks=batch.masks,
-                    #         next_observations=batch.next_observations,
-                    #     )
                     update_info = agent.update(batch, update_bc=False)
 
                     if i % FLAGS.log_interval == 0:
