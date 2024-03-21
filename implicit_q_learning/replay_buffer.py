@@ -279,7 +279,7 @@ class ReplayBuffer(IterableDataset):
 
     def __sample(self):
         episode = self._sample_episode()
-        idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
+        idx = np.random.randint(0, episode_len(episode) - self._nstep)
         obs = episode["observations"][episode["timesteps"][idx]]
 
         # action normalization!
@@ -432,7 +432,7 @@ class OfflineReplayBuffer(IterableDataset):
 
     def _sample(self):
         episode = self._sample_episode()
-        idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
+        idx = np.random.randint(0, episode_len(episode) - self._nstep)
         obs = episode["observations"][episode["timesteps"][idx]]
 
         # action normalization!
