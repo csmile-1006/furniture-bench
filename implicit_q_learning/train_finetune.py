@@ -457,6 +457,7 @@ def main(_):
             env.observation_space.sample(),
             env.action_space.sample()[:1],
             **kwargs,
+            max_steps=FLAGS.max_steps,
             offline_batch_size=offline_batch_size,
         )
     else:

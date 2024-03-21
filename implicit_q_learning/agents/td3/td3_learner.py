@@ -8,11 +8,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.td3.actor import td3_update_actor
+from agents.td3.actor import td3_update_actor, bc_update_actor
 from agents.td3.critic import td3_update_critic, target_update
-from agents.iql.iql_learner import _update_bc_jit
 from networks import multiplexer, policy, value_net
-from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
+from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder, Params
 
 
 def _share_encoder(source, target):
@@ -27,6 +26,42 @@ def _share_encoder(source, target):
     return target.replace(params=new_params)
 
 
+@partial(jax.jit)
+def _update_bc_jit(
+    rng: PRNGKey,
+    actor: Model,
+    batch: Batch,
+) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
+    key, rng = jax.random.split(rng)
+    new_actor, actor_info = bc_update_actor(key, actor, batch)
+
+    return (
+        rng,
+        new_actor,
+        actor_info,
+    )
+
+
+@partial(jax.jit, static_argnames=("actor_def"))
+def _sample_actions(
+    actor_def: nn.Module,
+    actor_params: Params,
+    observations: np.ndarray,
+    expl_noise: float = 1.0,
+) -> Tuple[PRNGKey, jnp.ndarray]:
+    actions = actor_def.apply(actor_params, observations, expl_noise)
+    return actions
+
+
+def sample_actions(
+    actor_def: nn.Module,
+    actor_params: Params,
+    observations: np.ndarray,
+    expl_noise: float = 1.0,
+) -> Tuple[PRNGKey, jnp.ndarray]:
+    return _sample_actions(actor_def, actor_params, observations, expl_noise)
+
+
 @partial(jax.jit, static_argnames=("update_policy", "use_td3_bc", "offline_batch_size"))
 def _update_jit(
     rng: PRNGKey,
@@ -38,7 +73,6 @@ def _update_jit(
     discount: float,
     tau: float,
     alpha: float,
-    expl_noise: float,
     update_policy: bool,
     use_td3_bc: bool,
     bc_weight: float,
@@ -46,7 +80,7 @@ def _update_jit(
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng)
     new_critic, critic_info = td3_update_critic(
-        key, target_actor, critic, target_critic, None, batch, discount, expl_noise, backup_entropy=False
+        key, target_actor, critic, target_critic, None, batch, discount, backup_entropy=False
     )
     if update_policy:
         rng, key = jax.random.split(rng)
@@ -56,7 +90,6 @@ def _update_jit(
             new_critic,
             batch,
             alpha,
-            expl_noise,
             use_td3_bc,
             bc_weight=bc_weight,
             offline_batch_size=offline_batch_size,
@@ -109,11 +142,14 @@ class TD3Learner(object):
         use_sigmareparam: bool = True,
         policy_delay: int = 2,
         alpha: float = 2.5,
-        expl_noise: float = 0.1,
+        expl_noise_init: float = 0.1,
+        expl_noise_last: float = 0.01,
+        expl_noise_clip: float = 0.1,
         bc_weight: float = 1.0,
         use_td3_bc: bool = False,
         detach_actor: bool = False,
         offline_batch_size: int = 128,
+        max_steps: int = 1_000_000,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -123,11 +159,16 @@ class TD3Learner(object):
         self.discount = discount
         self.policy_delay = policy_delay
         self.alpha = alpha
-        self.expl_noise = expl_noise
         self.bc_weight = bc_weight
         self.use_td3_bc = use_td3_bc
         self.detach_actor = detach_actor
         self.offline_batch_size = offline_batch_size
+
+        self.expl_noise_init = expl_noise_init
+        self.expl_noise_last = expl_noise_last
+        self.expl_noise_clip = expl_noise_clip
+
+        self.max_steps = max_steps
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, target_critic_key = jax.random.split(rng, 4)
@@ -190,17 +231,18 @@ class TD3Learner(object):
             )
 
         action_dim = actions.shape[-1]
-        actor_cls = partial(
-            policy.NormalTanhPolicy,
-            hidden_dims,
-            action_dim,
-            std_min=1e-1,
-            std_max=1e-0,
-            dropout_rate=dropout_rate,
-            state_dependent_std=True,
-            tanh_squash_distribution=False,
-            obs_keys=obs_keys,
-        )
+        actor_cls = partial(policy.MSEPolicy, hidden_dims, action_dim, dropout_rate=dropout_rate)
+        # actor_cls = partial(
+        #     policy.NormalTanhPolicy,
+        #     hidden_dims,
+        #     action_dim,
+        #     std_min=1e-1,
+        #     std_max=1e-0,
+        #     dropout_rate=dropout_rate,
+        #     state_dependent_std=True,
+        #     tanh_squash_distribution=False,
+        #     obs_keys=obs_keys,
+        # )
         # actor_cls = partial(
         #     policy.NormalTanhMixturePolicy,
         #     hidden_dims,
@@ -250,13 +292,22 @@ class TD3Learner(object):
         self.rng = rng
         self.step = 1
 
+    def _compute_stddev(self, expl_noise):
+        mix = np.clip(self.step / self.max_steps, 0.0, 1.0)
+        stddev = (1.0 - mix) * self.expl_noise_init + mix * self.expl_noise_last
+        return stddev * expl_noise
+
     def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
-        self.rng = rng
-        return np.array(actions)
+        actions = sample_actions(self.actor.apply_fn, variables, observations, expl_noise)
+        stddev = self._compute_stddev(expl_noise)
+        actions = np.asarray(actions)
+        actions = actions + np.clip(
+            np.random.normal(size=actions.shape) * stddev, -self.expl_noise_clip, self.expl_noise_clip
+        )
+        return np.clip(actions, -1, 1)
 
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
@@ -287,7 +338,6 @@ class TD3Learner(object):
                 self.discount,
                 self.tau,
                 self.alpha,
-                self.expl_noise,
                 self.step % self.policy_delay == 0,
                 self.use_td3_bc,
                 self.bc_weight,
@@ -302,6 +352,7 @@ class TD3Learner(object):
 
         info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
+        info["stddev"] = self._compute_stddev(1.0)
         return info
 
     def save(self, ckpt_dir, step):

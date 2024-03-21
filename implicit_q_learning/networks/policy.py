@@ -19,6 +19,21 @@ LOG_STD_MIN = -10.0
 LOG_STD_MAX = 2.0
 
 
+class MSEPolicy(nn.Module):
+    hidden_dims: Sequence[int]
+    action_dim: int
+    dropout_rate: Optional[float] = None
+
+    @nn.compact
+    def __call__(self, features: jnp.ndarray, temperature: float = 1.0, training: bool = False) -> jnp.ndarray:
+        outputs = MLP(self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate)(
+            features, training=training
+        )
+
+        actions = nn.Dense(self.action_dim, kernel_init=default_init())(outputs)
+        return nn.tanh(actions)
+
+
 class NormalTanhPolicy(nn.Module):
     hidden_dims: Sequence[int]
     action_dim: int

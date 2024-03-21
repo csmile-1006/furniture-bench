@@ -17,9 +17,12 @@ def get_config():
     config.policy_delay = 2
     config.alpha = 2.5
     config.use_td3_bc = True
-    config.expl_noise = 0.1
     config.bc_weight = 1.0
     config.detach_actor = True
+
+    config.expl_noise_init = 0.2
+    config.expl_noise_last = 0.02
+    config.expl_noise_clip = 0.06
 
     config.dropout_rate = None
 
