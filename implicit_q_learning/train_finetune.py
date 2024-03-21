@@ -228,7 +228,7 @@ def load_action_stat(data_path):
         action_stat = {key: action_stat[key] for key in action_stat}
     else:
         print("no stat file in this folder.")
-        action_stat = {"low": np.full((8,), -1, dtype=np.float32), "high": np.ones((8,), dtype=np.float32)}
+        action_stat = {"low": np.full((7,), -1, dtype=np.float32), "high": np.ones((7,), dtype=np.float32)}
     return action_stat
 
 
