@@ -8,30 +8,18 @@ import numpy as np
 import jax.numpy as jnp
 from tqdm import tqdm
 import scipy
+from scipy.spatial.transform import Rotation
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
 SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 784}
 
 
 def quat_to_theta(quat):
-    x2, x3, x4, x1 = quat
-    theta1 = np.arccos(x1 / np.sqrt(x4**2 + x3**2 + x2**2 + x1**2))
-    theta2 = np.arccos(x2 / np.sqrt(x4**2 + x3**2 + x2**2))
-    theta3 = np.arccos(x3 / np.sqrt(x4**2 + x3**2))
-    if x4 < 0:
-        theta3 = 2 * np.pi - theta3
-    thetas = np.hstack([theta1, theta2, theta3])
-    return thetas
+    return Rotation.from_quat(quat).as_euler("xyz", degrees=False)
 
 
 def theta_to_quat(thetas):
-    theta1, theta2, theta3 = thetas
-    x1 = np.cos(theta1)
-    x2 = np.sin(theta1) * np.cos(theta2)
-    x3 = np.sin(theta1) * np.sin(theta2) * np.cos(theta3)
-    x4 = np.sin(theta1) * np.sin(theta2) * np.sin(theta3)
-    quat = np.hstack([x2, x3, x4, x1])
-    return quat
+    return Rotation.from_euler("xyz", thetas).as_quat()
 
 
 def gaussian_smoothe(rewards, sigma=3.0):
