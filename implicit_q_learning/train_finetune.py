@@ -85,6 +85,7 @@ flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
 flags.DEFINE_float("expl_noise", 1.0, "expl_noise for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
+flags.DEFINE_boolean("filter_trajectories", False, "filter trajectory.")
 flags.DEFINE_string("rm_type", "RFE", "type of reward model.")
 flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
 flags.DEFINE_string(
@@ -229,6 +230,25 @@ def load_action_stat(data_path):
         print("no stat file in this folder.")
         action_stat = {"low": np.full((7,), -1, dtype=np.float32), "high": np.ones((7,), dtype=np.float32)}
     return action_stat
+
+
+def filter_trajectories(trajectories):
+    phase_predicted = trajectories.get("phases", None)  # phase predicted by reward model.
+    if phase_predicted is None:
+        return trajectories, np.sum(trajectories["rewards"]) > 0
+
+    fail_cnt = 0
+    fail_threshold = 10
+    succ_idx = len(trajectories["phases"]) - 1
+    for i in range(len(trajectories["phases"])):
+        if trajectories["phases"][i] == TASK_TO_PHASE[FLAGS.env_name.split("/")[-1]]:
+            fail_cnt += 1
+            if fail_cnt >= fail_threshold:
+                break
+        else:
+            succ_idx = i
+            fail_cnt = 0
+    return {key: val[:succ_idx] for key, val in trajectories.items()}, True
 
 
 def make_env(
@@ -602,11 +622,26 @@ def main(_):
                         info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
                         if num_episodes % 5 * FLAGS.num_envs == 0:
                             jax.clear_caches()
-                    replay_storage.add_episode(
-                        trajectories[env_idx],
-                        env_idx,
-                        env.episode_cnts[env_idx],
-                    )
+
+                    if i > start_training + FLAGS.num_envs:
+                        trajs, insert_traj = (
+                            filter_trajectories(trajectories[env_idx])
+                            if FLAGS.filter_trajectories
+                            else (trajectories[env_idx], True)
+                        )
+
+                        if insert_traj:
+                            replay_storage.add_episode(
+                                trajs,
+                                env_idx,
+                                env.episode_cnts[env_idx],
+                            )
+                    else:
+                        replay_storage.add_episode(
+                            trajectories[env_idx],
+                            env_idx,
+                            env.episode_cnts[env_idx],
+                        )
                     new_ob = env.reset_env(env_idx)
                     for key in next_observation:
                         next_observation[key][env_idx] = new_ob[key]
