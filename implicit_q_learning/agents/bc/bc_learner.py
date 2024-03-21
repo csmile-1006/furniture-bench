@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agent.iql.iql_learner import _update_bc_jit
+from agents.iql.iql_learner import _update_bc_jit
 from networks import multiplexer, policy
 from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, TransformerEncoder
 
