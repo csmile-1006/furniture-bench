@@ -1,52 +1,16 @@
 """Implementations of algorithms for continuous control."""
 
 from functools import partial
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Optional, Sequence
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.bc.actor import bc_update_actor
+from agent.iql.iql_learner import _update_bc_jit
 from networks import multiplexer, policy
-from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder, Params
-
-
-@partial(jax.jit)
-def _update_bc_jit(
-    rng: PRNGKey,
-    actor: Model,
-    batch: Batch,
-) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    key, rng = jax.random.split(rng)
-    new_actor, actor_info = bc_update_actor(key, actor, batch)
-
-    return (
-        rng,
-        new_actor,
-        actor_info,
-    )
-
-
-@partial(jax.jit, static_argnames=("actor_def"))
-def _sample_actions(
-    actor_def: nn.Module,
-    actor_params: Params,
-    observations: np.ndarray,
-    expl_noise: float = 1.0,
-) -> Tuple[PRNGKey, jnp.ndarray]:
-    actions = actor_def.apply(actor_params, observations, expl_noise)
-    return actions
-
-
-def sample_actions(
-    actor_def: nn.Module,
-    actor_params: Params,
-    observations: np.ndarray,
-    expl_noise: float = 1.0,
-) -> Tuple[PRNGKey, jnp.ndarray]:
-    return _sample_actions(actor_def, actor_params, observations, expl_noise)
+from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, TransformerEncoder
 
 
 class BCLearner(object):
@@ -126,18 +90,17 @@ class BCLearner(object):
             )
 
         action_dim = actions.shape[-1]
-        actor_cls = partial(policy.MSEPolicy, hidden_dims, action_dim, dropout_rate=dropout_rate)
-        # actor_cls = partial(
-        #     policy.NormalTanhPolicy,
-        #     hidden_dims,
-        #     action_dim,
-        #     std_min=1e-1,
-        #     std_max=1e-0,
-        #     dropout_rate=dropout_rate,
-        #     state_dependent_std=True,
-        #     tanh_squash_distribution=False,
-        #     obs_keys=obs_keys,
-        # )
+        actor_cls = partial(
+            policy.NormalTanhPolicy,
+            hidden_dims,
+            action_dim,
+            std_min=1e-1,
+            std_max=1e-0,
+            dropout_rate=dropout_rate,
+            state_dependent_std=True,
+            tanh_squash_distribution=False,
+            obs_keys=obs_keys,
+        )
         # actor_cls = partial(
         #     policy.NormalTanhMixturePolicy,
         #     hidden_dims,
@@ -174,13 +137,9 @@ class BCLearner(object):
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        actions = sample_actions(self.actor.apply_fn, variables, observations, expl_noise)
-        stddev = self._compute_stddev(expl_noise)
-        actions = np.asarray(actions)
-        actions = actions + np.clip(
-            np.random.normal(size=actions.shape) * stddev, -self.expl_noise_clip, self.expl_noise_clip
-        )
-        return np.clip(actions, -1, 1)
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
+        self.rng = rng
+        return np.array(actions)
 
     def prepare_online_step(self):
         print("Nothing to do.")
