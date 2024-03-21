@@ -275,7 +275,7 @@ def make_env(
             record=True,
             resize_img=True,
             randomness=randomness,
-            record_every=3,
+            record_every=1,
             record_dir=record_dir,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
