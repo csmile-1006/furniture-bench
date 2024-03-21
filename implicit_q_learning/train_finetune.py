@@ -248,7 +248,7 @@ def filter_trajectories(trajectories):
         else:
             succ_idx = i
             fail_cnt = 0
-    return {key: val[:succ_idx] for key, val in trajectories.items()}, True
+    return {key: val[:succ_idx] for key, val in trajectories.items()}, succ_idx > 0
 
 
 def make_env(
