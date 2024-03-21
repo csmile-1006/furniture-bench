@@ -22,7 +22,7 @@ PHASE_TO_REWARD = {"one_leg": {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: -1}}
 
 def episode_len(episode):
     # subtract -1 because the dummy last transition
-    return np.asarray(next(iter(episode.values()))).shape[0] - 1
+    return np.asarray(next(iter(episode.values()))).shape[0]
 
 
 def save_episode(episode, fn):
