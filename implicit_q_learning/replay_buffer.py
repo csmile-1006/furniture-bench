@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch.utils.data import IterableDataset
 
-from dataset_utils import exponential_moving_average, transform_phases
+from dataset_utils import exponential_moving_average, transform_phases, quat_to_theta
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
 SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 784}
@@ -284,6 +284,10 @@ class ReplayBuffer(IterableDataset):
 
         # action normalization!
         action = episode["actions"][idx]
+        # Online trajectory will include action with theta, so we don't need to convert it to quat
+        # delta_pose, delta_quat, gripper_pose = action[:3], action[3:7], action[7:]
+        # delta_theta = quat_to_theta(delta_quat)
+        # action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
         action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
 
         next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
@@ -433,6 +437,9 @@ class OfflineReplayBuffer(IterableDataset):
 
         # action normalization!
         action = episode["actions"][idx]
+        delta_pose, delta_quat, gripper_pose = action[:3], action[3:7], action[7:]
+        delta_theta = quat_to_theta(delta_quat)
+        action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
         action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
 
         next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
