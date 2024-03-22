@@ -20,9 +20,9 @@ def get_config():
     config.bc_weight = 1.0
     config.detach_actor = True
 
-    config.expl_noise_init = 0.2
-    config.expl_noise_last = 0.02
-    config.expl_noise_clip = 0.06
+    config.expl_noise_init = 0.1
+    config.expl_noise_last = 0.01
+    config.expl_noise_clip = 0.03
 
     config.dropout_rate = None
 
