@@ -252,7 +252,7 @@ def filter_trajectories(trajectories):
         else:
             succ_idx = i
             fail_cnt = 0
-    return {key: val[:succ_idx] for key, val in trajectories.items()}, succ_idx > 0
+    return {key: val[:succ_idx] for key, val in trajectories.items()}, succ_idx > 10
 
 
 def make_env(
@@ -558,7 +558,7 @@ def main(_):
         max_size=FLAGS.replay_buffer_size,
         batch_size=online_batch_size,
         num_workers=FLAGS.num_workers,
-        save_snapshot=FLAGS.save_snapshot,
+        save_snapshot=FLAGS.save_snapshot or FLAGS.prefill_replay_buffer,
         nstep=FLAGS.n_step,
         discount=FLAGS.config.get("discount", 1.0),
         buffer_type="online",
