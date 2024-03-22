@@ -307,6 +307,11 @@ def make_env(
     torch.manual_seed(seed)
     random.seed(seed)
     np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = False
 
     console.print("Observation space", env.observation_space)
     console.print("Action space", env.action_space)
@@ -451,8 +456,6 @@ def main(_):
 
     offline_batch_size = int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
     online_batch_size = FLAGS.batch_size - offline_batch_size
-    if FLAGS.agent_type == "dapg":
-        assert offline_batch_size == online_batch_size, "DAPG requires the same batch size for offline and online."
 
     if FLAGS.agent_type == "iql":
         agent = IQLLearner(
@@ -475,6 +478,7 @@ def main(_):
             env.observation_space.sample(),
             env.action_space.sample()[:1],
             **kwargs,
+            offline_batch_size=offline_batch_size,
         )
     elif FLAGS.agent_type == "td3":
         agent = TD3Learner(
