@@ -186,6 +186,7 @@ class ReplayBuffer(IterableDataset):
         self._action_stat = action_stat
         self._smoothe = smoothe
         if prefill_replay_buffer:
+            print(f"prefill replay buffer with {self._num_demos}")
             self._offline_replay_dir = offline_replay_dir
             self._try_offline_fetch()
 
