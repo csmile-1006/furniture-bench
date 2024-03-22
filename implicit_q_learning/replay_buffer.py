@@ -152,6 +152,7 @@ class ReplayBuffer(IterableDataset):
         save_snapshot=False,
         reward_type: str = "sparse",
         embedding_dim: int = 1024,
+        num_demos: dict = None,
         obs_keys: Sequence[str] = ("image1", "image2"),
         window_size: int = 4,
         skip_frame: int = 4,
@@ -159,6 +160,8 @@ class ReplayBuffer(IterableDataset):
         reward_stat: dict = None,
         action_stat: dict = None,
         smoothe: bool = False,
+        prefill_replay_buffer: bool = False,
+        offline_replay_dir: str = None,
     ):
         self._furniture = furniture
         self._replay_dir = replay_dir
@@ -174,6 +177,7 @@ class ReplayBuffer(IterableDataset):
         self._save_snapshot = save_snapshot
         self._reward_type = reward_type
         self._embedding_dim = embedding_dim
+        self._num_demos = num_demos
         self._window_size = window_size
         self._skip_frame = skip_frame
         self._obs_keys = obs_keys
@@ -181,6 +185,9 @@ class ReplayBuffer(IterableDataset):
         self._reward_stat = reward_stat
         self._action_stat = action_stat
         self._smoothe = smoothe
+        if prefill_replay_buffer:
+            self._offline_replay_dir = offline_replay_dir
+            self._try_offline_fetch()
 
     def _sample_episode(self):
         eps_fn = random.choice(self._episode_fns)
@@ -217,6 +224,24 @@ class ReplayBuffer(IterableDataset):
         if not self._save_snapshot:
             eps_fn.unlink(missing_ok=True)
         return True
+
+    def _try_offline_fetch(self):
+        try:
+            worker_id = torch.utils.data.get_worker_info().id
+        except Exception:
+            worker_id = 0
+        for key, num_demo in self._num_demos.items():
+            eps_fns = sorted(self._offline_replay_dir.glob(f"{key}_*.npz"), reverse=True)
+            for eps_fn in eps_fns[:num_demo]:
+                eps_tp, eps_idx, eps_len = eps_fn.stem.split("_")
+                eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
+                assert eps_tp == key, f"{eps_fn} is not {key}."
+                if eps_idx % self._num_workers != worker_id:
+                    continue
+                if eps_fn in self._episodes.keys():
+                    break
+                if not self._store_episode(eps_fn):
+                    break
 
     def _try_fetch(self):
         if self._samples_since_last_fetch < self._fetch_every:
@@ -420,7 +445,7 @@ class OfflineReplayBuffer(IterableDataset):
 
     def _sample(self):
         episode = self._sample_episode()
-        idx = np.random.randint(0, episode_len(episode) - self._nstep)
+        idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
         obs = episode["observations"][episode["timesteps"][idx]]
 
         # action normalization!
