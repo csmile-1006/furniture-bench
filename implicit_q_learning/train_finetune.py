@@ -85,6 +85,7 @@ flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
 flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
 flags.DEFINE_float("expl_noise", 1.0, "expl_noise for stochastic actor.")
 flags.DEFINE_string("randomness", "low", "randomness of env.")
+flags.DEFINE_boolean("prefill_replay_buffer", False, "prefill replay buffer.")
 flags.DEFINE_boolean("filter_trajectories", False, "filter trajectory.")
 flags.DEFINE_string("rm_type", "RFE", "type of reward model.")
 flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
@@ -237,9 +238,12 @@ def filter_trajectories(trajectories):
     if phase_predicted is None:
         return trajectories, np.sum(trajectories["rewards"]) > 0
 
+    if np.sum(trajectories["rewards"]) > 0:
+        return trajectories, True
+
     fail_cnt = 0
     fail_threshold = 10
-    succ_idx = len(trajectories["phases"]) - 1
+    succ_idx = 0
     for i in range(len(trajectories["phases"])):
         if trajectories["phases"][i] == TASK_TO_PHASE[FLAGS.env_name.split("/")[-1]]:
             fail_cnt += 1
@@ -568,6 +572,8 @@ def main(_):
         lambda_mr=FLAGS.lambda_mr,
         action_stat=action_stat,
         reward_stat=reward_stat if "ours" in FLAGS.reward_type else None,
+        prefill_replay_buffer=FLAGS.prefill_replay_buffer,
+        offline_replay_dir=Path(FLAGS.data_path).expanduser(),
     )
 
     start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps + 1
@@ -604,7 +610,7 @@ def main(_):
                 trajectories[env_idx]["terminals"].append(done[env_idx])
 
                 if done[env_idx]:
-                    if np.any(done) and "ours" in FLAGS.reward_type and FLAGS.rm_ckpt_path != "":
+                    if "ours" in FLAGS.reward_type and FLAGS.rm_ckpt_path != "":
                         output = compute_multimodal_reward(
                             trajectories=trajectories[env_idx], reward_model=reward_model, args=args
                         )
@@ -622,7 +628,7 @@ def main(_):
                         if num_episodes % 5 * FLAGS.num_envs == 0:
                             jax.clear_caches()
 
-                    if i > start_training + FLAGS.num_envs:
+                    if i > start_training + FLAGS.num_envs or FLAGS.prefill_replay_buffer:
                         trajs, insert_traj = (
                             filter_trajectories(trajectories[env_idx])
                             if FLAGS.filter_trajectories
