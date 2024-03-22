@@ -29,6 +29,22 @@ def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, In
     return new_actor, info
 
 
+def get_value(
+    key: PRNGKey, actor: Model, critic: Model, observations: jnp.ndarray, num_samples: int, expl_noise: float
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    policy_actions = actor(observations, expl_noise)
+
+    n_observations = {}
+    for k, v in observations.items():
+        n_observations[k] = jnp.repeat(v[jnp.newaxis], num_samples, axis=0).reshape(-1, *v.shape[1:])
+    q_pi1, q_pi2 = critic(n_observations, policy_actions)
+
+    def get_v(q):
+        return jnp.mean(q, axis=0)
+
+    return get_v(q_pi1), get_v(q_pi2)
+
+
 def td3_update_actor(
     key: PRNGKey,
     actor: Model,
@@ -39,8 +55,8 @@ def td3_update_actor(
     bc_weight: float,
     offline_batch_size: int,
 ) -> Tuple[Model, InfoDict]:
-    # data_q1, data_q2 = critic(batch.observations, batch.actions)
-    # data_q = jnp.minimum(data_q1, data_q2)
+    v1, v2 = get_value(key, actor, critic, batch.observations, 1)
+    v = jnp.minimum(v1, v2)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         predicted_actions, updated_states = actor.apply(
@@ -52,7 +68,8 @@ def td3_update_actor(
         )
         q1, q2 = critic(batch.observations, predicted_actions)
         q = jnp.minimum(q1, q2)
-        actor_q_loss = -q.mean()
+        a = q - v
+        actor_q_loss = -a.mean()
 
         if use_td3_bc:
             offline_predicted_actions = predicted_actions[:offline_batch_size]
@@ -63,10 +80,10 @@ def td3_update_actor(
             return actor_loss, {
                 # "lamb": lamb,
                 "actor_loss": actor_loss,
-                "actor_q_loss": actor_q_loss,
-                "actor_q_loss_min": -q.min(),
-                "actor_q_loss_max": -q.max(),
-                "actor_q_loss_std": -q.std(),
+                "adv_mean": a.mean(),
+                "adv_min": a.min(),
+                "adv_max": a.max(),
+                "adv_std": a.std(),
                 "bc_loss": bc_loss,
                 "bc_loss_min": offline_mse.min(),
                 "bc_loss_max": offline_mse.max(),
@@ -77,9 +94,10 @@ def td3_update_actor(
             actor_loss = actor_q_loss
             return actor_loss, {
                 "actor_loss": actor_loss,
-                "actor_loss_min": -q.min(),
-                "actor_loss_max": -q.max(),
-                "actor_loss_std": -q.std(),
+                "adv_mean": a.mean(),
+                "adv_min": a.min(),
+                "adv_max": a.max(),
+                "adv_std": a.std(),
                 "updated_states": updated_states,
             }
 

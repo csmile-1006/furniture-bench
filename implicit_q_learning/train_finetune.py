@@ -579,6 +579,10 @@ def main(_):
         reward_stat=reward_stat if "ours" in FLAGS.reward_type else None,
         prefill_replay_buffer=FLAGS.prefill_replay_buffer,
         offline_replay_dir=Path(FLAGS.data_path).expanduser(),
+        num_demos={
+            "success": FLAGS.num_success_demos,
+            "failure": FLAGS.num_failure_demos,
+        },
     )
 
     start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps + 1

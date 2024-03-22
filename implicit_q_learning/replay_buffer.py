@@ -298,9 +298,10 @@ class ReplayBuffer(IterableDataset):
         # action normalization!
         action = episode["actions"][idx]
         # Online trajectory will include action with theta, so we don't need to convert it to quat
-        # delta_pose, delta_quat, gripper_pose = action[:3], action[3:7], action[7:]
-        # delta_theta = quat_to_theta(delta_quat)
-        # action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
+        if action.shape[-1] == 8:
+            delta_pose, delta_quat, gripper_pose = action[:3], action[3:7], action[7:]
+            delta_theta = quat_to_theta(delta_quat)
+            action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
         action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
 
         next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
@@ -512,6 +513,7 @@ def make_replay_loader(
             fetch_every=1000,
             save_snapshot=save_snapshot,
             reward_type=reward_type,
+            num_demos=num_demos,
             **kwargs,
         )
     elif buffer_type == "offline":
