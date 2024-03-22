@@ -6,9 +6,9 @@ from networks.common import Batch, InfoDict, Model, Params, PRNGKey
 
 
 def get_value(
-    key: PRNGKey, actor: Model, critic: Model, observations: jnp.ndarray, num_samples: int, temperature: float
+    key: PRNGKey, actor: Model, critic: Model, observations: jnp.ndarray, num_samples: int, expl_noise: float
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    dist = actor(observations, temperature)
+    dist = actor(observations, expl_noise)
 
     policy_actions = dist.sample(seed=key)
 
@@ -31,54 +31,51 @@ def dapg_update_actor(
     lambda_1: float,
     lambda_2: float,
     step: int,
-    temperature: float,
+    expl_noise: float,
+    offline_batch_size: float,
 ) -> Tuple[Model, InfoDict]:
-    v1, v2 = get_value(key, actor, critic, batch.observations, 1, temperature)
+    v1, v2 = get_value(key, actor, critic, batch.observations, 1, expl_noise)
     v = jnp.minimum(v1, v2)
-
-    dist = actor(batch.next_observations, temperature)
-    next_actions = dist.sample(seed=key)
-    next_q1, next_q2 = critic(batch.next_observations, next_actions)
-    next_q = jnp.minimum(next_q1, next_q2)
-
-    next_v1, next_v2 = get_value(key, actor, critic, batch.observations, 1, temperature)
-    next_v = jnp.minimum(next_v1, next_v2)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
             actor_params,
             batch.observations,
-            temperature,
+            expl_noise,
             training=True,
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),
         )
-        lim = 1 - 1e-5
-        actions = jnp.clip(batch.actions, -lim, lim)
-        log_probs = dist.log_prob(actions)
+        sampled_actions = dist.sample(seed=key)
+        actions = batch.actions
 
-        q1, q2 = critic(batch.observations, actions)
+        q1, q2 = critic(batch.observations, sampled_actions)
         q = jnp.minimum(q1, q2)
         a = q - v
-        next_a = next_q - next_v
 
-        offline_log_probs, online_log_probs = log_probs[::2], log_probs[1::2]
-        online_a = a[1::2]
-        online_next_a = next_a[1::2]
+        online_a = a[offline_batch_size:]
+        actor_q_loss = -online_a
 
-        offline_weight = lambda_1 * (lambda_2**step) * online_next_a.max()
-        actor_q_loss = -online_a * online_log_probs
-        bc_loss = -offline_log_probs
-        actor_loss = actor_q_loss.sum() + offline_weight * bc_loss.sum()
-        # a = q - v
+        log_probs = dist.log_prob(actions)
+        offline_log_probs = log_probs[:offline_batch_size]
+        offline_weight = lambda_1 * (lambda_2**step) * online_a.max()
+        bc_loss = -offline_weight * offline_log_probs
+
+        actor_loss = actor_q_loss.mean() + bc_loss.mean()
 
         return (
             actor_loss,
             {
-                "actor_loss_mean": actor_loss,
-                "actor_loss_min": a.min(),
-                "actor_loss_max": a.max(),
-                "actor_loss_std": a.std(),
+                "bc_loss_mean": bc_loss.mean(),
+                "bc_loss_min": bc_loss.min(),
+                "bc_loss_max": bc_loss.max(),
+                "bc_loss_std": bc_loss.std(),
+                "actor_loss": actor_loss,
+                "actor_q_loss_mean": actor_q_loss.mean(),
+                "actor_q_loss_min": actor_q_loss.min(),
+                "actor_q_loss_max": actor_q_loss.max(),
+                "actor_q_loss_std": actor_q_loss.std(),
+                "offline_weight": offline_weight,
                 "updated_states": updated_states,
             },
         )

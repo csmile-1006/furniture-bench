@@ -24,14 +24,10 @@ def dapg_update_critic(
 ) -> Tuple[Model, InfoDict]:
     dist = actor(batch.next_observations, temperature)
     next_actions = dist.sample(seed=key)
-    next_log_probs = dist.log_prob(next_actions)
     next_q1, next_q2 = target_critic(batch.next_observations, next_actions)
     next_q = jnp.minimum(next_q1, next_q2)
 
     target_q = batch.rewards + discount * batch.masks * next_q
-
-    if backup_entropy:
-        target_q -= discount * batch.masks * temp() * next_log_probs
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         (q1, q2), updated_states = critic.apply(

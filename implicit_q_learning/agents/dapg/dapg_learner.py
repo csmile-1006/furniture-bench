@@ -27,7 +27,7 @@ def _share_encoder(source, target):
     return target.replace(params=new_params)
 
 
-@partial(jax.jit, static_argnames=("update_target", "num_samples"))
+@partial(jax.jit, static_argnames=("update_target", "offline_batch_size"))
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
@@ -39,12 +39,13 @@ def _update_jit(
     lambda_1: float,
     lambda_2: float,
     step: int,
-    temperature: float,
+    expl_noise: float,
     update_target: bool,
+    offline_batch_size: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng)
     new_critic, critic_info = dapg_update_critic(
-        key, actor, critic, target_critic, None, batch, discount, temperature, backup_entropy=False
+        key, actor, critic, target_critic, None, batch, discount, expl_noise, backup_entropy=False
     )
     if update_target:
         new_target_critic = target_update(new_critic, target_critic, tau)
@@ -52,7 +53,9 @@ def _update_jit(
         new_target_critic = target_critic
 
     rng, key = jax.random.split(rng)
-    new_actor, actor_info = dapg_update_actor(key, actor, new_critic, batch, lambda_1, lambda_2, step, temperature)
+    new_actor, actor_info = dapg_update_actor(
+        key, actor, new_critic, batch, lambda_1, lambda_2, step, expl_noise, offline_batch_size
+    )
 
     return (
         rng,
@@ -91,7 +94,9 @@ class DAPGLearner(object):
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
         target_update_period: int = 1,
-        temperature: float = 1.0,
+        expl_noise: float = 1.0,
+        detach_actor: bool = False,
+        offline_batch_size: int = 128,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -102,7 +107,9 @@ class DAPGLearner(object):
         self.discount = discount
         self.lambda_1 = lambda_1
         self.lambda_2 = lambda_2
-        self.temperature = temperature
+        self.expl_noise = expl_noise
+        self.detach_actor = detach_actor
+        self.offline_batch_size = offline_batch_size
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, target_critic_key = jax.random.split(rng, 4)
@@ -165,28 +172,28 @@ class DAPGLearner(object):
             )
 
         action_dim = actions.shape[-1]
-        # actor_cls = partial(
-        #     policy.NormalTanhPolicy,
-        #     hidden_dims,
-        #     action_dim,
-        #     log_std_scale=1e-3,
-        #     log_std_min=-5.0,
-        #     dropout_rate=dropout_rate,
-        #     state_dependent_std=False,
-        #     tanh_squash_distribution=False,
-        #     obs_keys=obs_keys,
-        # )
         actor_cls = partial(
-            policy.NormalTanhMixturePolicy,
+            policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            num_modes=10,
+            std_min=1e-1,
+            std_max=1e-0,
             dropout_rate=dropout_rate,
-            std_min=1e-4,
-            std_max=3e-2,
-            use_tanh=False,
+            state_dependent_std=True,
+            tanh_squash_distribution=False,
             obs_keys=obs_keys,
         )
+        # actor_cls = partial(
+        #     policy.NormalTanhMixturePolicy,
+        #     hidden_dims,
+        #     action_dim,
+        #     num_modes=10,
+        #     dropout_rate=dropout_rate,
+        #     std_min=1e-4,
+        #     std_max=3e-2,
+        #     use_tanh=False,
+        #     obs_keys=obs_keys,
+        # )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
@@ -222,11 +229,11 @@ class DAPGLearner(object):
         self.rng = rng
         self.step = 1
 
-    def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
         self.rng = rng
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
@@ -234,9 +241,9 @@ class DAPGLearner(object):
     def prepare_online_step(self):
         print("transfer pre-trained transformer encoder from BC actor.")
         self.critic = _share_encoder(source=self.actor, target=self.critic)
-        # if use_bc:
-        #     print("detach transformer encoder of BC actor.")
-        #     self.actor.apply_fn.disable_gradient()
+        if self.detach_actor:
+            print("detach transformer encoder of BC actor.")
+            self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
         if update_bc:
@@ -259,8 +266,9 @@ class DAPGLearner(object):
                 self.lambda_1,
                 self.lambda_2,
                 self.step,
-                self.temperature,
+                self.expl_noise,
                 self.step % self.target_update_period == 0,
+                self.offline_batch_size,
             )
             self.critic = new_critic
             self.target_critic = new_target_critic
@@ -268,7 +276,7 @@ class DAPGLearner(object):
         self.rng = new_rng
         self.actor = new_actor
 
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         self.step += 1
         return info

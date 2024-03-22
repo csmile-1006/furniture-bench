@@ -21,7 +21,8 @@ def get_config():
     config.tau = 0.005  # For soft target updates.
 
     config.lambda_1 = 0.1
-    config.lambda_2 = 0.99
+    config.lambda_2 = 1.0
+    config.detach_actor = False
 
     # transformer setup
     config.emb_dim = 256
