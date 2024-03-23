@@ -10,7 +10,7 @@ def get_config():
 
     config.hidden_dims = (512, 256, 256, 256)
 
-    config.detach_actor = True
+    config.detach_actor = False
 
     config.expl_noise_init = 0.2
     config.expl_noise_last = 0.02
