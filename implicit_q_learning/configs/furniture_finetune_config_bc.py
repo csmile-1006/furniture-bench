@@ -12,10 +12,6 @@ def get_config():
 
     config.detach_actor = False
 
-    config.expl_noise_init = 0.2
-    config.expl_noise_last = 0.02
-    config.expl_noise_clip = 0.06
-
     config.dropout_rate = None
 
     # transformer setup

@@ -1,16 +1,32 @@
 """Implementations of algorithms for continuous control."""
 
 from functools import partial
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence, Tuple
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.iql.iql_learner import _update_bc_jit
+from agents.bc.actor import bc_update_actor
 from networks import multiplexer, policy
-from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, TransformerEncoder
+from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
+
+
+@partial(jax.jit)
+def _update_bc_jit(
+    rng: PRNGKey,
+    actor: Model,
+    batch: Batch,
+) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
+    key, rng = jax.random.split(rng)
+    new_actor, actor_info = bc_update_actor(key, actor, batch)
+
+    return (
+        rng,
+        new_actor,
+        actor_info,
+    )
 
 
 class BCLearner(object):
@@ -33,9 +49,6 @@ class BCLearner(object):
         normalize_inputs: bool = True,
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
-        expl_noise_init: float = 0.1,
-        expl_noise_last: float = 0.01,
-        expl_noise_clip: float = 0.1,
         detach_actor: bool = False,
         max_steps: int = 1_000_000,
     ):
@@ -44,11 +57,6 @@ class BCLearner(object):
         """
 
         self.detach_actor = detach_actor
-
-        self.expl_noise_init = expl_noise_init
-        self.expl_noise_last = expl_noise_last
-        self.expl_noise_clip = expl_noise_clip
-
         self.max_steps = max_steps
 
         rng = jax.random.PRNGKey(seed)
@@ -128,11 +136,6 @@ class BCLearner(object):
         self.rng = rng
         self.step = 1
 
-    def _compute_stddev(self, expl_noise):
-        mix = np.clip(self.step / self.max_steps, 0.0, 1.0)
-        stddev = (1.0 - mix) * self.expl_noise_init + mix * self.expl_noise_last
-        return stddev * expl_noise
-
     def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
@@ -155,7 +158,6 @@ class BCLearner(object):
 
         info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
-        info["stddev"] = self._compute_stddev(1.0)
         return info
 
     def save(self, ckpt_dir, step):
