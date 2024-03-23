@@ -34,9 +34,6 @@ def td3_update_actor(
     bc_weight: float,
     offline_batch_size: int,
 ) -> Tuple[Model, InfoDict]:
-    v1, v2 = get_value(key, actor, critic, batch.observations, 1, expl_noise)
-    v = jnp.minimum(v1, v2)
-
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
             actor_params,
@@ -49,8 +46,7 @@ def td3_update_actor(
         sampled_actions = dist.sample(seed=key)
         q1, q2 = critic(batch.observations, sampled_actions)
         q = jnp.minimum(q1, q2)
-        a = q - v
-        actor_q_loss = -a.mean()
+        actor_q_loss = -q.mean()
 
         if use_td3_bc:
             log_probs = dist.log_prob(batch.actions)
@@ -64,11 +60,11 @@ def td3_update_actor(
             return actor_loss, {
                 # "lamb": lamb,
                 "actor_loss": actor_loss,
-                "adv_mean": a.mean(),
-                "adv_min": a.min(),
-                "adv_max": a.max(),
-                "adv_std": a.std(),
-                "bc_loss": bc_loss,
+                "actor_q_mean": -q.mean(),
+                "actor_q_min": -q.min(),
+                "actor_q_max": -q.max(),
+                "actor_q_std": -q.std(),
+                "bc_loss": -offline_log_probs.mean(),
                 "bc_loss_min": -offline_log_probs.min(),
                 "bc_loss_max": -offline_log_probs.max(),
                 "bc_loss_std": -offline_log_probs.std(),
@@ -78,10 +74,10 @@ def td3_update_actor(
             actor_loss = actor_q_loss
             return actor_loss, {
                 "actor_loss": actor_loss,
-                "adv_mean": a.mean(),
-                "adv_min": a.min(),
-                "adv_max": a.max(),
-                "adv_std": a.std(),
+                "actor_q_mean": -q.mean(),
+                "actor_q_min": -q.min(),
+                "actor_q_max": -q.max(),
+                "actor_q_std": -q.std(),
                 "updated_states": updated_states,
             }
 
