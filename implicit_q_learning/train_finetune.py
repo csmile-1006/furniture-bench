@@ -242,7 +242,7 @@ def filter_trajectories(trajectories):
         return trajectories, True
 
     fail_cnt = 0
-    fail_threshold = 10
+    fail_threshold = 5
     succ_idx = 0
     for i in range(len(trajectories["phases"])):
         if trajectories["phases"][i] == TASK_TO_PHASE[FLAGS.env_name.split("/")[-1]]:
@@ -252,7 +252,7 @@ def filter_trajectories(trajectories):
         else:
             succ_idx = i
             fail_cnt = 0
-    return {key: val[:succ_idx] for key, val in trajectories.items()}, succ_idx > 10
+    return {key: val[:succ_idx] for key, val in trajectories.items()}, succ_idx > fail_threshold
 
 
 def make_env(
