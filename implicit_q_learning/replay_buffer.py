@@ -303,7 +303,9 @@ class ReplayBuffer(IterableDataset):
             delta_pose, delta_quat, gripper_pose = action[:3], action[3:7], action[7:]
             delta_theta = quat_to_theta(delta_quat)
             action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
-        action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
+            action = (
+                2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
+            )
 
         next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
         reward = np.zeros_like(episode["rewards"][idx])
