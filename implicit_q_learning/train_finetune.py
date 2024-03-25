@@ -419,9 +419,7 @@ def main(_):
 
     action_stat = load_action_stat(Path(FLAGS.data_path))
 
-    record_dir = os.path.join(
-        FLAGS.save_dir, "sim_record", FLAGS.env_name.split("/")[-1], f"{FLAGS.run_name}.{FLAGS.seed}"
-    )
+    record_dir = os.path.join(FLAGS.save_dir, "sim_record", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
     set_seed(FLAGS.seed)
     env = make_env(
         FLAGS.env_name,
