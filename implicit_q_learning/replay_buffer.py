@@ -267,7 +267,8 @@ class ReplayBuffer(IterableDataset):
             eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
             if eps_idx % self._num_workers != worker_id:
                 continue
-            if eps_fn in self._episodes.keys():
+            eps_fn_key = Path(eps_fn).name
+            if eps_fn_key in self._episodes.keys():
                 break
             if fetched_size + eps_len > self._max_size:
                 break
@@ -521,7 +522,7 @@ def make_replay_loader(
             num_workers,
             nstep,
             discount,
-            fetch_every=1000,
+            fetch_every=500,
             save_snapshot=save_snapshot,
             reward_type=reward_type,
             num_demos=num_demos,
