@@ -96,6 +96,21 @@ flags.DEFINE_string(
 )
 
 
+def set_seed(seed):
+    import random
+
+    import torch
+
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = False
+
+
 def compute_multimodal_reward(reward_model, **kwargs):
     trajectories, args = kwargs["trajectories"], kwargs["args"]
     images = trajectories["observations"]
@@ -300,19 +315,6 @@ def make_env(
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
 
-    import random
-
-    import torch
-
-    torch.manual_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = False
-
     console.print("Observation space", env.observation_space)
     console.print("Action space", env.action_space)
 
@@ -420,6 +422,7 @@ def main(_):
     record_dir = os.path.join(
         FLAGS.save_dir, "sim_record", FLAGS.env_name.split("/")[-1], f"{FLAGS.run_name}.{FLAGS.seed}"
     )
+    set_seed(FLAGS.seed)
     env = make_env(
         FLAGS.env_name,
         FLAGS.seed,
