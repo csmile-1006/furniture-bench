@@ -11,6 +11,7 @@ from agents.awac.awac_learner import AWACLearner
 from agents.dapg.dapg_learner import DAPGLearner
 from agents.iql.iql_learner import IQLLearner
 from agents.td3.td3_learner import TD3Learner
+from agents.bc.bc_learner import BCLearner
 from evaluation import evaluate_with_save
 from ml_collections import config_flags
 from rich.console import Console
@@ -33,7 +34,8 @@ flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_integer("from_skill", int(0), "Skill to start from.")
 flags.DEFINE_integer("skill", int(-1), "Skill to evaluate.")
 flags.DEFINE_integer("high_random_idx", int(0), "High random idx.")
-flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3"], "agent type.")
+flags.DEFINE_string("data_path", "", "Path to data.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "bc"], "agent type.")
 
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 
@@ -57,12 +59,25 @@ config_flags.DEFINE_config_file(
 )
 
 
+def load_action_stat(data_path):
+    stat_path = data_path / "action_stats.npz"
+    if stat_path.exists():
+        print(f"load action stat file from {stat_path}.")
+        action_stat = np.load(stat_path)
+        action_stat = {key: action_stat[key] for key in action_stat}
+    else:
+        print("no stat file in this folder.")
+        action_stat = {"low": np.full((7,), -1, dtype=np.float32), "high": np.ones((7,), dtype=np.float32)}
+    return action_stat
+
+
 def make_env(
     env_name: str,
     seed: int,
     randomness: str,
     encoder_type: str,
     reward_model: nn.Module = None,
+    action_stat: str = None,
 ):
     #  -> Tuple[gym.Env, D4RLDataset]:
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -95,6 +110,7 @@ def make_env(
     env = wrappers.SinglePrecision(env)
     env = wrappers.FrameStackWrapper(env, num_frames=FLAGS.window_size, skip_frame=FLAGS.skip_frame)
     env = wrappers.EpisodeMonitor(env)
+    env = wrappers.ActionUnnormalizeWrapper(env, action_stat)
 
     env.seed(seed)
     env.action_space.seed(seed)
@@ -125,12 +141,9 @@ def main(_):
     if "Sim" in FLAGS.env_name:
         import isaacgym  # noqa: F401
 
+    action_stat = load_action_stat(Path(FLAGS.data_path))
     env = make_env(
-        FLAGS.env_name,
-        FLAGS.seed,
-        FLAGS.randomness,
-        FLAGS.encoder_type,
-        reward_model=None,
+        FLAGS.env_name, FLAGS.seed, FLAGS.randomness, FLAGS.encoder_type, reward_model=None, action_stat=action_stat
     )
 
     kwargs = dict(FLAGS.config)
@@ -162,6 +175,14 @@ def main(_):
             env.observation_space.sample(),
             env.action_space.sample()[:1],
             **kwargs,
+        )
+    elif FLAGS.agent_type == "bc":
+        agent = BCLearner(
+            FLAGS.seed,
+            env.observation_space.sample(),
+            env.action_space.sample()[:1],
+            **kwargs,
+            max_steps=FLAGS.max_steps,
         )
     else:
         raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")

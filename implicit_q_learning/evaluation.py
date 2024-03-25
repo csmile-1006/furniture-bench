@@ -39,19 +39,19 @@ def evaluate_with_save(
     agent: nn.Module, env: gym.Env, num_episodes: int, expl_noise: float = 0.00, save_dir: Path = None
 ) -> Dict[str, float]:
     stats = {"return": [], "length": [], "success": [], "spl": []}
-    episodes = {env_idx: {key: [] for key in ["observations", "actions"]} for env_idx in range(env._num_envs)}
+    episodes = {env_idx: {key: [] for key in ["observations", "actions"]} for env_idx in range(env.num_envs)}
     ep, total_step = 0, 0
     pbar = trange(num_episodes, desc="evaluation", ncols=0)
-    observation, done = env.reset(), np.zeros((env._num_envs), dtype=bool)
-    for env_idx in range(min(env._num_envs, num_episodes)):
+    observation, done = env.reset(), np.zeros((env.num_envs), dtype=bool)
+    for env_idx in range(min(env.num_envs, num_episodes)):
         episodes[env_idx]["observations"].append(
             {key: observation[key][env_idx, -1] for key in ["color_image1", "color_image2"]}
         )
     while ep < num_episodes:
         action = agent.sample_actions(observation, expl_noise=expl_noise)
         observation, _, done, info = env.step(action)
-        total_step += min(env._num_envs, num_episodes)
-        for env_idx in range(min(env._num_envs, num_episodes)):
+        total_step += min(env.num_envs, num_episodes)
+        for env_idx in range(min(env.num_envs, num_episodes)):
             episodes[env_idx]["observations"].append(
                 {key: observation[key][env_idx, -1] for key in ["color_image1", "color_image2"]}
             )
