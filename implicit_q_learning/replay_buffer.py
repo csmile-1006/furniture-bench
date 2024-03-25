@@ -7,7 +7,9 @@ import random
 import traceback
 import collections
 from typing import Sequence
+import datetime
 from collections import deque
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -132,10 +134,11 @@ class ReplayBufferStorage:
     def add_episode(self, episode, env_idx, episode_idx):
         eps_idx = self._num_episodes
         eps_len = episode_len(episode)
-        tp = "success" if eps_len < self._max_env_steps else "failure"
+        tp = "success" if np.sum(episode["rewards"]) > 0.0 else "failure"
         self._num_episodes += 1
         self._num_transitions += eps_len
-        eps_fn = f"{tp}_{eps_idx}_{eps_len}_env{env_idx}_{episode_idx}.npz"
+        ts = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        eps_fn = f"{ts}_{tp}_{eps_idx}_{eps_len}_env{env_idx}_{episode_idx}.npz"
         save_episode(episode, self._replay_dir / eps_fn)
 
 
@@ -194,7 +197,7 @@ class ReplayBuffer(IterableDataset):
         eps_fn = random.choice(self._episode_fns)
         return self._episodes[eps_fn]
 
-    def _store_episode(self, eps_fn):
+    def _store_episode(self, eps_fn, tp="online"):
         try:
             episode = load_episode(
                 eps_fn,
@@ -217,6 +220,11 @@ class ReplayBuffer(IterableDataset):
             self._size -= episode_len(early_eps)
             if not self._save_snapshot:
                 early_eps_fn.unlink(missing_ok=True)
+        if tp == "offline":
+            tn = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+            eps_fn = f"{tn}_{Path(eps_fn).name}"
+        else:
+            eps_fn = Path(eps_fn).name
         self._episode_fns.append(eps_fn)
         self._episode_fns.sort()
         self._episodes[eps_fn] = episode
@@ -241,7 +249,7 @@ class ReplayBuffer(IterableDataset):
                     continue
                 if eps_fn in self._episodes.keys():
                     break
-                if not self._store_episode(eps_fn):
+                if not self._store_episode(eps_fn, tp="offline"):
                     break
 
     def _try_fetch(self):
@@ -255,7 +263,7 @@ class ReplayBuffer(IterableDataset):
         eps_fns = sorted(self._replay_dir.glob("*.npz"), reverse=True)
         fetched_size = 0
         for eps_fn in eps_fns:
-            eps_tp, eps_idx, eps_len, *_ = eps_fn.stem.split("_")
+            _, eps_tp, eps_idx, eps_len, *_ = eps_fn.stem.split("_")
             eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
             if eps_idx % self._num_workers != worker_id:
                 continue
