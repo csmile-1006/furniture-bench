@@ -568,7 +568,7 @@ def main(_):
         prefill_replay_buffer=FLAGS.prefill_replay_buffer,
         offline_replay_dir=Path(FLAGS.data_path).expanduser(),
         num_demos={
-            "success": FLAGS.num_envs,
+            "success": int(FLAGS.num_success_demos * 0.2),
             "failure": FLAGS.num_failure_demos,
         },
     )
