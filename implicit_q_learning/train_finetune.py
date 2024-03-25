@@ -242,7 +242,7 @@ def filter_trajectories(trajectories):
         return trajectories, True
 
     fail_cnt = 0
-    fail_threshold = 5
+    fail_threshold = 10
     succ_idx = 0
     for i in range(len(trajectories["phases"])):
         if trajectories["phases"][i] == TASK_TO_PHASE[FLAGS.env_name.split("/")[-1]]:
@@ -588,10 +588,10 @@ def main(_):
         while i <= steps:
             action = agent.sample_actions(observation, expl_noise=FLAGS.expl_noise)
             next_observation, reward, done, info = env.step(action)
-            for j in range(action.shape[0]):
-                if action[j][6] < 0:
-                    action[j] = np.array(action[j])
-                    action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
+            # for j in range(action.shape[0]):
+            #     if action[j][6] < 0:
+            #         action[j] = np.array(action[j])
+            #         action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
 
             reward, done = reward.squeeze(), done.squeeze()
             for env_idx in range(FLAGS.num_envs):

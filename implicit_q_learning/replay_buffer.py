@@ -298,7 +298,7 @@ class ReplayBuffer(IterableDataset):
 
         # action normalization!
         action = episode["actions"][idx]
-        # Online trajectory will include action with theta, so we don't need to convert it to quat
+        # Online trajectory will include action with theta, so we don't need to convert it to quat and normalize.
         if action.shape[-1] == 8:
             delta_pose, delta_quat, gripper_pose = action[:3], action[3:7], action[7:]
             delta_theta = quat_to_theta(delta_quat)
