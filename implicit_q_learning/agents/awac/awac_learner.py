@@ -47,6 +47,7 @@ def _update_jit(
     update_target: bool,
     utd_ratio: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
+    actor = _share_encoder(source=critic, target=actor)
     rng, key = jax.random.split(rng)
     new_critic, new_target_critic = critic, target_critic
     for i in range(utd_ratio):
@@ -72,15 +73,15 @@ def _update_jit(
             backup_entropy=False,
         )
         if update_target:
-            new_target_critic = target_update(new_critic, target_critic, tau)
+            new_target_critic = target_update(new_critic, new_target_critic, tau)
         else:
-            new_target_critic = target_critic
+            new_target_critic = new_target_critic
 
     # new_critic, critic_info = awac_update_critic(
     #     key, actor, critic, target_critic, None, batch, discount, expl_noise, num_qs, num_min_qs, backup_entropy=False
     # )
     rng, key = jax.random.split(rng)
-    new_actor, actor_info = awac_update_actor(key, actor, new_critic, batch, num_samples, beta, expl_noise)
+    new_actor, actor_info = awac_update_actor(key, actor, new_critic, mini_batch, num_samples, beta, expl_noise)
 
     return (
         rng,

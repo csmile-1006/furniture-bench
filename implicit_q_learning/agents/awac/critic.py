@@ -11,6 +11,8 @@ def get_value(
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     dist = actor(batch.observations, expl_noise)
 
+    rng = key
+    key, rng = jax.random.split(rng)
     policy_actions = dist.sample(seed=key)
 
     n_observations = {}

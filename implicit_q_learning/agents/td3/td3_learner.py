@@ -27,7 +27,9 @@ def _share_encoder(source, target):
     return target.replace(params=new_params)
 
 
-@partial(jax.jit, static_argnames=("update_policy", "use_td3_bc", "offline_batch_size"))
+@partial(
+    jax.jit, static_argnames=("num_qs", "num_min_qs", "update_policy", "use_td3_bc", "offline_batch_size", "utd_ratio")
+)
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
@@ -36,6 +38,8 @@ def _update_jit(
     target_critic: Model,
     batch: Batch,
     discount: float,
+    num_qs: int,
+    num_min_qs: int,
     tau: float,
     alpha: float,
     expl_noise: float,
@@ -43,18 +47,44 @@ def _update_jit(
     use_td3_bc: bool,
     bc_weight: float,
     offline_batch_size: int,
+    utd_ratio: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     rng, key = jax.random.split(rng)
-    new_critic, critic_info = td3_update_critic(
-        key, target_actor, critic, target_critic, None, batch, discount, expl_noise, backup_entropy=False
-    )
+    new_critic, new_target_critic = critic, target_critic
+    for i in range(utd_ratio):
+        rng, key = jax.random.split(rng)
+
+        def slice(x):
+            assert x.shape[0] % utd_ratio == 0
+            batch_size = x.shape[0] // utd_ratio
+            return x[batch_size * i : batch_size * (i + 1)]
+
+        mini_batch = jax.tree_util.tree_map(slice, batch)
+        new_critic, critic_info = td3_update_critic(
+            key,
+            target_actor,
+            critic,
+            target_critic,
+            None,
+            mini_batch,
+            discount,
+            num_qs,
+            num_min_qs,
+            expl_noise,
+            backup_entropy=False,
+        )
+        if update_policy:
+            new_target_critic = target_update(new_critic, new_target_critic, tau)
+        else:
+            new_target_critic = new_target_critic
+
     if update_policy:
         rng, key = jax.random.split(rng)
         new_actor, actor_info = td3_update_actor(
             key,
             actor,
             new_critic,
-            batch,
+            mini_batch,
             alpha,
             expl_noise,
             use_td3_bc,
@@ -67,10 +97,8 @@ def _update_jit(
 
     if update_policy:
         new_target_actor = target_update(new_actor, target_actor, tau)
-        new_target_critic = target_update(new_critic, target_critic, tau)
     else:
         new_target_actor = target_actor
-        new_target_critic = target_critic
 
     return (
         rng,
@@ -101,6 +129,9 @@ class TD3Learner(object):
         discount: float = 0.99,
         tau: float = 0.005,
         dropout_rate: Optional[float] = None,
+        num_qs: int = 10,
+        num_min_qs: int = 2,
+        critic_max_grad_norm: float = None,
         critic_layer_norm: bool = False,
         obs_keys: Sequence[str] = ("image1", "image2"),
         model_type: str = "transformer",
@@ -121,6 +152,9 @@ class TD3Learner(object):
 
         self.tau = tau
         self.discount = discount
+        self.num_qs = num_qs
+        self.num_min_qs = num_min_qs
+        self.critic_max_grad_norm = critic_max_grad_norm
         self.policy_delay = policy_delay
         self.alpha = alpha
         self.expl_noise = expl_noise
@@ -152,6 +186,7 @@ class TD3Learner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
             )
             actor_encoder_cls = partial(
                 CrossAttnTransformerEncoder,
@@ -163,6 +198,7 @@ class TD3Learner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
             )
         else:
             print("[INFO] use TransformerEncoder")
@@ -176,6 +212,7 @@ class TD3Learner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
             )
             actor_encoder_cls = partial(
                 TransformerEncoder,
@@ -187,6 +224,7 @@ class TD3Learner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
             )
 
         action_dim = actions.shape[-1]
@@ -199,7 +237,6 @@ class TD3Learner(object):
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,
-            obs_keys=obs_keys,
         )
         # actor_cls = partial(
         #     policy.NormalTanhMixturePolicy,
@@ -227,7 +264,11 @@ class TD3Learner(object):
         target_actor = Model.create(actor_def, inputs=[target_actor_key, observations])
 
         critic_cls = partial(
-            value_net.DoubleCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+            value_net.CriticEnsemble,
+            hidden_dims,
+            emb_dim,
+            critic_layer_norm=critic_layer_norm,
+            num_qs=self.num_qs,
         )
         critic_def = multiplexer.Multiplexer(
             encoder_cls=critic_encoder_cls,
@@ -235,10 +276,17 @@ class TD3Learner(object):
             stop_gradient=False,
         )
         critic_key, critic_dropout_key = jax.random.split(critic_key)
+        if self.critic_max_grad_norm is not None:
+            critic_tx = optax.chain(
+                optax.clip_by_global_norm(self.critic_max_grad_norm),
+                optax.adam(learning_rate=critic_lr),
+            )
+        else:
+            critic_tx = optax.adam(learning_rate=critic_lr)
         critic = Model.create(
             critic_def,
             inputs=[{"params": critic_key, "dropout": critic_dropout_key}, observations, actions],
-            tx=optax.adam(learning_rate=critic_lr),
+            tx=critic_tx,
         )
 
         target_critic = Model.create(critic_def, inputs=[target_critic_key, observations, actions])
@@ -250,7 +298,10 @@ class TD3Learner(object):
         self.rng = rng
         self.step = 1
 
-    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = None) -> jnp.ndarray:
+        if expl_noise is None:
+            expl_noise = self.expl_noise
+
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
@@ -265,7 +316,7 @@ class TD3Learner(object):
             print("detach transformer encoder of BC actor.")
             self.actor.apply_fn.disable_gradient()
 
-    def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
+    def update(self, batch: Batch, update_bc: bool = False, utd_ratio: int = 1) -> InfoDict:
         self.step += 1
         if update_bc:
             new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch)
@@ -285,6 +336,8 @@ class TD3Learner(object):
                 self.target_critic,
                 batch,
                 self.discount,
+                self.num_qs,
+                self.num_min_qs,
                 self.tau,
                 self.alpha,
                 self.expl_noise,
@@ -292,6 +345,7 @@ class TD3Learner(object):
                 self.use_td3_bc,
                 self.bc_weight,
                 self.offline_batch_size,
+                utd_ratio,
             )
             self.critic = new_critic
             self.target_critic = new_target_critic

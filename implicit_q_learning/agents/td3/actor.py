@@ -1,5 +1,6 @@
 from typing import Tuple
 
+import jax
 import jax.numpy as jnp
 
 from networks.common import Batch, InfoDict, Model, Params, PRNGKey
@@ -10,17 +11,18 @@ def get_value(
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     dist = actor(observations, expl_noise)
 
+    key, rng = jax.random.split(key)
     policy_actions = dist.sample(seed=key)
 
     n_observations = {}
     for k, v in observations.items():
         n_observations[k] = jnp.repeat(v[jnp.newaxis], num_samples, axis=0).reshape(-1, *v.shape[1:])
-    q_pi1, q_pi2 = critic(n_observations, policy_actions)
+    qs = critic(n_observations, policy_actions)
 
     def get_v(q):
         return jnp.mean(q, axis=0)
 
-    return get_v(q_pi1), get_v(q_pi2)
+    return jnp.asarray([get_v(elem) for elem in qs])
 
 
 def td3_update_actor(
@@ -34,6 +36,9 @@ def td3_update_actor(
     bc_weight: float,
     offline_batch_size: int,
 ) -> Tuple[Model, InfoDict]:
+    key, rng = jax.random.split(key)
+    key2, rng = jax.random.split(rng)
+
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
             actor_params,
@@ -43,9 +48,10 @@ def td3_update_actor(
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),
         )
-        sampled_actions = dist.sample(seed=key)
-        q1, q2 = critic(batch.observations, sampled_actions)
-        q = jnp.minimum(q1, q2)
+        sampled_actions = dist.sample(seed=key2)
+
+        qs = critic(batch.observations, sampled_actions)
+        q = qs.min(axis=0)
         actor_q_loss = -q.mean()
 
         if use_td3_bc:
@@ -58,7 +64,6 @@ def td3_update_actor(
             # actor_loss = lamb * actor_q_loss + bc_loss
 
             return actor_loss, {
-                # "lamb": lamb,
                 "actor_loss": actor_loss,
                 "actor_q_mean": -q.mean(),
                 "actor_q_min": -q.min(),
