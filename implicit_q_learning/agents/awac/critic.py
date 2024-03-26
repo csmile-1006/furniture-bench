@@ -3,6 +3,7 @@ from typing import Tuple
 import jax
 import jax.numpy as jnp
 from networks.common import Batch, InfoDict, Model, Params, PRNGKey
+from networks.value_net import subsample_critic_ensemble
 
 
 def get_value(
@@ -15,12 +16,12 @@ def get_value(
     n_observations = {}
     for k, v in batch.observations.items():
         n_observations[k] = jnp.repeat(v[jnp.newaxis], num_samples, axis=0).reshape(-1, *v.shape[1:])
-    q_pi1, q_pi2 = critic(n_observations, policy_actions)
+    qs = critic(n_observations, policy_actions)
 
     def get_v(q):
         return jnp.mean(q, axis=0)
 
-    return get_v(q_pi1), get_v(q_pi2)
+    return jnp.asarray([get_v(elem) for elem in qs])
 
 
 def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
@@ -38,21 +39,37 @@ def awac_update_critic(
     batch: Batch,
     discount: float,
     expl_noise: float,
+    num_qs: int,
+    num_min_qs: int,
     backup_entropy: bool,
 ) -> Tuple[Model, InfoDict]:
     dist = actor(batch.next_observations, expl_noise)
+
+    rng = key
+
+    key, rng = jax.random.split(rng)
     next_actions = dist.sample(seed=key)
-    next_log_probs = dist.log_prob(next_actions)
-    next_q1, next_q2 = target_critic(batch.next_observations, next_actions)
-    next_q = jnp.minimum(next_q1, next_q2)
+
+    key, rng = jax.random.split(rng)
+    target_params = subsample_critic_ensemble(key, target_critic.params, num_min_qs, num_qs)
+
+    key, rng = jax.random.split(rng)
+    next_qs = target_critic.apply(
+        {"params": target_params, **target_critic.extra_variables},
+        batch.next_observations,
+        next_actions,
+        rngs={"dropout": key},
+    )
+    next_q = next_qs.min(axis=0)
 
     target_q = batch.rewards + discount * batch.masks * next_q
 
     if backup_entropy:
+        next_log_probs = dist.log_prob(next_actions)
         target_q -= discount * batch.masks * temp() * next_log_probs
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        (q1, q2), updated_states = critic.apply(
+        qs, updated_states = critic.apply(
             critic_params,
             batch.observations,
             batch.actions,
@@ -60,19 +77,15 @@ def awac_update_critic(
             rngs={"dropout": key},
             mutable=critic.extra_variables.keys(),
         )
-        critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
+        critic_loss = ((qs - target_q) ** 2).mean()
         return (
             critic_loss,
             {
                 "critic_loss": critic_loss,
-                "q1_mean": q1.mean(),
-                "q1_min": q1.min(),
-                "q1_max": q1.max(),
-                "q1_std": q1.std(),
-                "q2_mean": q2.mean(),
-                "q2_min": q2.min(),
-                "q2_max": q2.max(),
-                "q2_std": q2.std(),
+                "q_mean": qs.mean(),
+                "q_min": qs.min(),
+                "q_max": qs.max(),
+                "q_std": qs.std(),
                 "target_q_mean": target_q.mean(),
                 "target_q_std": target_q.std(),
                 "target_q_min": target_q.min(),

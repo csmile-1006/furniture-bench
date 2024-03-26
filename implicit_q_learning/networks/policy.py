@@ -28,7 +28,6 @@ class NormalTanhPolicy(nn.Module):
     std_min: Optional[float] = None
     std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
-    obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
     @nn.compact
     def __call__(
@@ -70,7 +69,6 @@ class NormalTanhMixturePolicy(nn.Module):
     std_min: Optional[float] = None
     std_max: Optional[float] = None
     use_tanh: bool = False
-    obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
 
     @nn.compact
     def __call__(self, features: jnp.ndarray, expl_noise: float = 1.0, training: bool = False) -> tfd.Distribution:

@@ -294,9 +294,9 @@ class ReplayBuffer(IterableDataset):
         elif obs.shape[-1] == self._embedding_dim * 3:
             image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
             return dict(image1=image1, image2=image2, text_feature=text_feature)
-        elif obs.shape[-1] == self._embedding_dim * 2 + 14:
+        else:  # self._embedding_dim * 2 + 14 + self._text_feature_dim
             image1, image2, robot_state, text_feature = np.split(
-                obs, [self._embedding_dim, self._embedding_dim * 2, self._embedding_dim * 12 + 14], axis=-1
+                obs, [self._embedding_dim, self._embedding_dim * 2, self._embedding_dim * 2 + 14], axis=-1
             )
             return dict(image1=image1, image2=image2, robot_state=robot_state, text_feature=text_feature)
 
@@ -450,9 +450,9 @@ class OfflineReplayBuffer(IterableDataset):
         elif obs.shape[-1] == self._embedding_dim * 3:
             image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
             return dict(image1=image1, image2=image2, text_feature=text_feature)
-        elif obs.shape[-1] == self._embedding_dim * 2 + 14:
+        else:  # self._embedding_dim * 2 + 14 + self._text_feature_dim
             image1, image2, robot_state, text_feature = np.split(
-                obs, [self._embedding_dim, self._embedding_dim * 2, self._embedding_dim * 12 + 14], axis=-1
+                obs, [self._embedding_dim, self._embedding_dim * 2, self._embedding_dim * 2 + 14], axis=-1
             )
             return dict(image1=image1, image2=image2, robot_state=robot_state, text_feature=text_feature)
 

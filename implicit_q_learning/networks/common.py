@@ -336,7 +336,7 @@ class TransformerEncoder(nn.Module):
             dropout_rate=self.drop,
             activations=self.activations,
             name="FeatureMLP",
-        )(features)
+        )(features, training=not deterministic)
         embed = embed + get_1d_sincos_pos_embed(embed.shape[-1], num_timestep)
         embed = nn.LayerNorm()(embed)
 

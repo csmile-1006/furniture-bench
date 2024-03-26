@@ -11,6 +11,7 @@ def get_config():
     config.hidden_dims = (512, 256, 256, 256)
 
     config.detach_actor = False
+    config.expl_noise = 0.1
 
     config.dropout_rate = None
 

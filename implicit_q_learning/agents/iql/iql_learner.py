@@ -67,7 +67,7 @@ def _update_jit(
     )
 
 
-@partial(jax.jit, static_argnames=("utd_ratio"))
+@partial(jax.jit)
 def _update_bc_jit(
     rng: PRNGKey,
     actor: Model,

@@ -10,8 +10,9 @@ from agents.awac.critic import get_value
 def awac_update_actor(
     key: PRNGKey, actor: Model, critic: Model, batch: Batch, num_samples: int, beta: float, expl_noise: float
 ) -> Tuple[Model, InfoDict]:
-    v1, v2 = get_value(key, actor, critic, batch, num_samples, expl_noise)
-    v = jnp.minimum(v1, v2)
+    key, rng = jax.random.split(key)
+    vs = get_value(key, actor, critic, batch, num_samples, expl_noise)
+    v = vs.min(axis=0)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
@@ -23,8 +24,8 @@ def awac_update_actor(
             mutable=actor.extra_variables.keys(),
         )
         log_probs = dist.log_prob(batch.actions)
-        q1, q2 = critic(batch.observations, batch.actions)
-        q = jnp.minimum(q1, q2)
+        qs = critic(batch.observations, batch.actions, rngs={"dropout": key})
+        q = qs.min(axis=0)
         a = q - v
 
         # we could have used exp(a / beta) here but

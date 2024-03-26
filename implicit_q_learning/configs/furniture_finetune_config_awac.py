@@ -24,13 +24,17 @@ def get_config():
     config.beta = 2.0
 
     config.num_samples = 1
+    config.expl_noise = 0.1
 
     # transformer setup
     config.emb_dim = 256
     config.depth = 3
     config.num_heads = 8
 
-    # layer norm for critic
+    # critic options
+    config.num_qs = 10
+    config.num_min_qs = 2
+    config.critic_max_grad_norm = 1.0
     config.critic_layer_norm = True
 
     return config

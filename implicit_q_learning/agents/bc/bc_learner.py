@@ -49,6 +49,7 @@ class BCLearner(object):
         normalize_inputs: bool = True,
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
+        expl_noise: float = 1.0,
         detach_actor: bool = False,
         max_steps: int = 1_000_000,
     ):
@@ -56,6 +57,7 @@ class BCLearner(object):
         An implementation of Behavior Cloning.
         """
 
+        self.expl_noise = expl_noise
         self.detach_actor = detach_actor
         self.max_steps = max_steps
 
@@ -107,7 +109,6 @@ class BCLearner(object):
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,
-            obs_keys=obs_keys,
         )
         # actor_cls = partial(
         #     policy.NormalTanhMixturePolicy,
@@ -118,7 +119,6 @@ class BCLearner(object):
         #     std_min=1e-1,
         #     std_max=1e-0,
         #     use_tanh=False,
-        #     obs_keys=obs_keys,
         # )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
@@ -136,7 +136,9 @@ class BCLearner(object):
         self.rng = rng
         self.step = 1
 
-    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = None) -> jnp.ndarray:
+        if expl_noise is None:
+            expl_noise = self.expl_noise
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
@@ -150,7 +152,7 @@ class BCLearner(object):
             print("detach transformer encoder of BC actor.")
             self.actor.apply_fn.disable_gradient()
 
-    def update(self, batch: Batch, update_bc: bool = False) -> InfoDict:
+    def update(self, batch: Batch, update_bc: bool = False, utd_ratio=1) -> InfoDict:
         self.step += 1
         new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch)
         self.rng = new_rng

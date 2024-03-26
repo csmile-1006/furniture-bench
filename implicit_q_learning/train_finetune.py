@@ -13,10 +13,10 @@ import wandb
 import wrappers
 from absl import app, flags
 from agents.awac.awac_learner import AWACLearner
+from agents.bc.bc_learner import BCLearner
 from agents.dapg.dapg_learner import DAPGLearner
 from agents.iql.iql_learner import IQLLearner
 from agents.td3.td3_learner import TD3Learner
-from agents.bc.bc_learner import BCLearner
 from bpref_v2.data.instruct import CLASS_TO_PHASE, get_furniturebench_instruct
 from bpref_v2.data.label_reward_furniturebench import _postprocess_phases, load_reward_model
 from evaluation import evaluate
@@ -35,58 +35,67 @@ TASK_TO_PHASE = {
     "cabinet": 11,
 }
 
+# Environment Setting.
 flags.DEFINE_string("env_name", "FurnitureSimImageFeature-V0/one_leg", "Environment name.")
 flags.DEFINE_integer("num_envs", 1, "number of parallel envs.")
-flags.DEFINE_integer("num_gradient_steps", 2, "gradient steps per environment interaction.")
+flags.DEFINE_string("randomness", "low", "randomness of env.")
+flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
+flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
+flags.DEFINE_integer("seed", 42, "Random seed.")
+flags.DEFINE_integer("eval_episodes", 100, "Number of episodes used for evaluation.")
+
+# Logging Setting.
 flags.DEFINE_string("save_dir", "./tmp/", "logging dir.")
 flags.DEFINE_string("ckpt_dir", "", "Checkpoint dir.")
 flags.DEFINE_string("run_name", "debug", "Run specific name")
-flags.DEFINE_integer("ckpt_step", 0, "Specific checkpoint step")
-flags.DEFINE_integer("seed", 42, "Random seed.")
-flags.DEFINE_integer("eval_episodes", 100, "Number of episodes used for evaluation.")
-flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
-flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
-flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
-flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
-flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "bc"], "agent type.")
-flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
-flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
-flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
-flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
-flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
-flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_steps if unspecified).")
-flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
-flags.DEFINE_boolean("save_snapshot", False, "save snapshot of replay buffer.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
-flags.DEFINE_string("data_path", "", "Path to data.")
-flags.DEFINE_integer("num_success_demos", 100, "Number of success demonstrations.")
-flags.DEFINE_integer("num_failure_demos", 0, "Number of failure demonstrations.")
-flags.DEFINE_integer("num_workers", 1, "num_workers must be <= num_envs.")
+flags.DEFINE_boolean("wandb", False, "Use wandb")
+flags.DEFINE_string("wandb_project", "", "wandb project")
+flags.DEFINE_string("wandb_entity", "", "wandb entity")
+
+# Agent Setting.
 config_flags.DEFINE_config_file(
     "config",
     "default.py",
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "bc"], "agent type.")
+flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
+
+# Training Setting.
+flags.DEFINE_integer("ckpt_step", 0, "Specific checkpoint step")
+flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
+flags.DEFINE_integer("eval_interval", 100000, "Eval interval.")
+flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
+flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
+flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
+flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
+flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
+flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining steps.")
+
+# Replay Buffer Setting.
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
 flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
 flags.DEFINE_integer("skip_frame", 2, "how often skip frame.")
+flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_steps if unspecified).")
+flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
+flags.DEFINE_boolean("save_snapshot", False, "save snapshot of replay buffer.")
+flags.DEFINE_string("data_path", "", "Path to data.")
+flags.DEFINE_integer("num_success_demos", 100, "Number of success demonstrations.")
+flags.DEFINE_integer("num_failure_demos", 0, "Number of failure demonstrations.")
+flags.DEFINE_integer("num_workers", 1, "num_workers must be <= num_envs.")
+flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
+flags.DEFINE_boolean("prefill_replay_buffer", False, "prefill replay buffer.")
+flags.DEFINE_boolean("filter_trajectories", False, "filter trajectory.")
+
+# Reward Model Setting.
+flags.DEFINE_string("reward_encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_integer("reward_window_size", 4, "Number of frames in context window in reward model.")
 flags.DEFINE_integer("reward_skip_frame", 2, "how often skip frame in reward model.")
-flags.DEFINE_string("encoder_type", "", "vip or r3m or liv")
-flags.DEFINE_string("reward_encoder_type", "", "vip or r3m or liv")
 flags.DEFINE_enum(
     "reward_type", "sparse", ["sparse", "step", "ours", "viper", "diffusion", "ours_shaped"], "reward type"
 )
-flags.DEFINE_boolean("wandb", False, "Use wandb")
-flags.DEFINE_string("wandb_project", "", "wandb project")
-flags.DEFINE_string("wandb_entity", "", "wandb entity")
-flags.DEFINE_integer("device_id", 0, "Choose device id for IQL agent.")
-flags.DEFINE_float("lambda_mr", 1.0, "lambda value for dataset.")
-flags.DEFINE_float("expl_noise", 1.0, "expl_noise for stochastic actor.")
-flags.DEFINE_string("randomness", "low", "randomness of env.")
-flags.DEFINE_boolean("prefill_replay_buffer", False, "prefill replay buffer.")
-flags.DEFINE_boolean("filter_trajectories", False, "filter trajectory.")
 flags.DEFINE_string("rm_type", "RFE", "type of reward model.")
 flags.DEFINE_string("image_keys", "color_image2|color_image1", "image keys used for computing rewards.")
 flags.DEFINE_string(
@@ -94,6 +103,7 @@ flags.DEFINE_string(
     "/home/changyeon/ICML2024/rfe_checkpoints",
     "reward model checkpoint base path.",
 )
+flags.DEFINE_boolean("use_text_feature", False, "use text feature for observation.")
 
 
 def set_seed(seed):
@@ -321,7 +331,7 @@ def make_env(
     return env
 
 
-def make_offline_loader(furniture, env, data_path, batch_size):
+def make_offline_loader(furniture, env, data_path, batch_size, obs_keys):
     return make_replay_loader(
         furniture=furniture,
         replay_dir=Path(data_path).expanduser(),
@@ -337,9 +347,7 @@ def make_offline_loader(furniture, env, data_path, batch_size):
             "success": FLAGS.num_success_demos,
             "failure": FLAGS.num_failure_demos,
         },
-        obs_keys=tuple(
-            sorted([key for key in env.observation_space.spaces.keys() if key not in ["color_image1", "color_image2"]])
-        ),
+        obs_keys=obs_keys,
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
@@ -400,7 +408,7 @@ def main(_):
         rm_ckpt_path = (
             Path(FLAGS.rm_ckpt_path).expanduser()
             / FLAGS.env_name.split("/")[-1]
-            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-supc1.0-ep0.2-demo100-hier-shaped-newsupcon-failneg-supcliv-vitb16-vipl"
+            / f"w{FLAGS.reward_window_size}-s{FLAGS.reward_skip_frame}-nfp1.0-supc1.0-ep0.2-demo100-hier-shaped-newsupcon-failneg-supcliv-vitb16-vipil"
             / "s0"
             / "best_phase_model.pkl"
         )
@@ -410,10 +418,11 @@ def main(_):
 
         args = ConfigDict()
         args.task_name = FLAGS.env_name.split("/")[-1]
-        args.image_keys = "color_image2|color_image1"
+        args.image_keys = FLAGS.image_keys
         args.window_size = FLAGS.reward_window_size
         args.skip_frame = FLAGS.reward_skip_frame
         args.lambda_mr = FLAGS.lambda_mr
+        args.get_text_feature = FLAGS.use_text_feature
 
         reward_stat = load_reward_stat(Path(FLAGS.data_path))
 
@@ -450,46 +459,61 @@ def main(_):
     wandb.config.update(FLAGS)
 
     offline_batch_size = int(FLAGS.batch_size * FLAGS.utd_ratio * FLAGS.offline_ratio)
-    online_batch_size = FLAGS.batch_size - offline_batch_size
+    online_batch_size = FLAGS.batch_size * FLAGS.utd_ratio - offline_batch_size
+
+    sample_obs = env.observation_space.sample()
+    if FLAGS.use_text_feature:
+        sample_obs["text_feature"] = np.zeros(
+            (
+                FLAGS.window_size,
+                reward_model.config.embd_dim,
+            ),
+            dtype=np.float32,
+        )
+    sample_act = env.action_space.sample()[:1]
+
+    obs_keys = [key for key in env.observation_space.spaces.keys() if key not in ["color_image1", "color_image2"]]
+    if FLAGS.use_text_feature:
+        obs_keys.append("text_feature")
+    obs_keys = tuple(sorted(obs_keys))
 
     if FLAGS.agent_type == "iql":
         agent = IQLLearner(
             FLAGS.seed,
-            env.observation_space.sample(),
-            env.action_space.sample()[:1],
+            sample_obs,
+            sample_act,
+            obs_keys=obs_keys,
             max_steps=FLAGS.max_steps,
             **kwargs,
         )
     elif FLAGS.agent_type == "awac":
-        agent = AWACLearner(
-            FLAGS.seed,
-            env.observation_space.sample(),
-            env.action_space.sample()[:1],
-            **kwargs,
-        )
+        agent = AWACLearner(FLAGS.seed, sample_obs, sample_act, obs_keys=obs_keys, **kwargs)
     elif FLAGS.agent_type == "dapg":
         agent = DAPGLearner(
             FLAGS.seed,
-            env.observation_space.sample(),
-            env.action_space.sample()[:1],
-            **kwargs,
+            sample_obs,
+            sample_act,
+            obs_keys=obs_keys,
             offline_batch_size=offline_batch_size,
+            **kwargs,
         )
     elif FLAGS.agent_type == "td3":
         agent = TD3Learner(
             FLAGS.seed,
-            env.observation_space.sample(),
-            env.action_space.sample()[:1],
-            **kwargs,
+            sample_obs,
+            sample_act,
+            obs_keys=obs_keys,
             offline_batch_size=offline_batch_size,
+            **kwargs,
         )
     elif FLAGS.agent_type == "bc":
         agent = BCLearner(
             FLAGS.seed,
-            env.observation_space.sample(),
-            env.action_space.sample()[:1],
-            **kwargs,
+            sample_obs,
+            sample_act,
+            obs_keys=obs_keys,
             max_steps=FLAGS.max_steps,
+            **kwargs,
         )
     else:
         raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")
@@ -497,7 +521,9 @@ def main(_):
     def batch_to_jax(y):
         return jax.tree_util.tree_map(lambda x: x.numpy(), y)
 
-    offline_loader = make_offline_loader(str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, FLAGS.batch_size)
+    offline_loader = make_offline_loader(
+        str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, FLAGS.batch_size, obs_keys
+    )
     if FLAGS.ckpt_dir != "":
         console.print(
             f"load trained checkpoints trained with {FLAGS.num_pretraining_steps} steps from {FLAGS.ckpt_dir}"
@@ -542,7 +568,9 @@ def main(_):
         agent.save(ckpt_dir, i)
     del offline_loader
 
-    offline_loader = make_offline_loader(str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, offline_batch_size)
+    offline_loader = make_offline_loader(
+        str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, offline_batch_size, obs_keys
+    )
     replay_storage = ReplayBufferStorage(
         replay_dir=Path(buffer_dir).expanduser(),
         max_env_steps=env.furniture.max_env_steps,
@@ -558,9 +586,7 @@ def main(_):
         discount=FLAGS.config.get("discount", 1.0),
         buffer_type="online",
         reward_type=FLAGS.reward_type,
-        obs_keys=tuple(
-            sorted([key for key in env.observation_space.spaces.keys() if key not in ["color_image1", "color_image2"]])
-        ),
+        obs_keys=obs_keys,
         window_size=FLAGS.window_size,
         skip_frame=FLAGS.skip_frame,
         lambda_mr=FLAGS.lambda_mr,
@@ -588,7 +614,7 @@ def main(_):
         agent.prepare_online_step()
     with online_pbar:
         while i <= steps:
-            action = agent.sample_actions(observation, expl_noise=FLAGS.expl_noise)
+            action = agent.sample_actions(observation)
             next_observation, reward, done, info = env.step(action)
             reward, done = reward.squeeze(), done.squeeze()
 
@@ -653,7 +679,7 @@ def main(_):
             if i > start_training:
                 if offline_replay_iter is None and online_replay_iter is None:
                     offline_replay_iter, online_replay_iter = iter(offline_loader), iter(online_loader)
-                for _ in range(FLAGS.num_gradient_steps):
+                for _ in range(FLAGS.num_envs):
                     offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
                     offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                     combined = combine(offline_batch, online_batch)
@@ -666,7 +692,7 @@ def main(_):
                             masks=batch.masks,
                             next_observations=batch.next_observations,
                         )
-                    update_info = agent.update(batch, update_bc=False)
+                    update_info = agent.update(batch, update_bc=False, utd_ratio=FLAGS.utd_ratio)
 
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():
