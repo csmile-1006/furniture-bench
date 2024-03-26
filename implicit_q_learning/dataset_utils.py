@@ -2,7 +2,6 @@ import collections
 import pickle
 from typing import Optional, Dict
 
-import d4rl
 import gym
 import numpy as np
 import jax.numpy as jnp
@@ -182,6 +181,8 @@ class Dataset(object):
 
 class D4RLDataset(Dataset):
     def __init__(self, env: gym.Env, clip_to_eps: bool = True, eps: float = 1e-5):
+        import d4rl
+
         dataset = d4rl.qlearning_dataset(env)
 
         if clip_to_eps:
