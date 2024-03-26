@@ -243,6 +243,8 @@ def load_reward_stat(data_path):
     else:
         print("no stat file in this folder.")
         reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
+    print("disable reward stat!")
+    reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
     return reward_stat
 
 
