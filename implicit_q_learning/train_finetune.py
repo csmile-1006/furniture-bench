@@ -540,6 +540,7 @@ def main(_):
                     wandb.log({f"offline-evaluation/{k}": v}, step=i)
                 env.unset_eval_flag()
         agent.save(ckpt_dir, i)
+    del offline_loader
 
     offline_loader = make_offline_loader(str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, offline_batch_size)
     replay_storage = ReplayBufferStorage(
@@ -568,7 +569,7 @@ def main(_):
         prefill_replay_buffer=FLAGS.prefill_replay_buffer,
         offline_replay_dir=Path(FLAGS.data_path).expanduser(),
         num_demos={
-            "success": FLAGS.num_envs,
+            "success": int(FLAGS.num_success_demos * 0.01),
             "failure": FLAGS.num_failure_demos,
         },
     )
@@ -589,12 +590,8 @@ def main(_):
         while i <= steps:
             action = agent.sample_actions(observation, expl_noise=FLAGS.expl_noise)
             next_observation, reward, done, info = env.step(action)
-            # for j in range(action.shape[0]):
-            #     if action[j][6] < 0:
-            #         action[j] = np.array(action[j])
-            #         action[j, 3:7] = -1 * action[j, 3:7]  # Make sure quaternion scalar is positive.
-
             reward, done = reward.squeeze(), done.squeeze()
+
             for env_idx in range(FLAGS.num_envs):
                 trajectories[env_idx]["observations"].append(
                     {key: observation[key][env_idx][-1] for key in observation.keys()}
