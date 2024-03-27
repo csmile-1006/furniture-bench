@@ -240,11 +240,12 @@ def load_reward_stat(data_path):
         print(f"load reward stat file from {stat_path}.")
         reward_stat = np.load(stat_path)
         reward_stat = {key: reward_stat[key] for key in reward_stat}
+        reward_stat["min"] = reward_stat["min"] - 0.2 * np.fabs(reward_stat["min"])
     else:
         print("no stat file in this folder.")
         reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
-    print("disable reward stat!")
-    reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
+    # print("disable reward stat!")
+    # reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
     return reward_stat
 
 
@@ -699,6 +700,9 @@ def main(_):
                     if i % FLAGS.log_interval == 0:
                         for k, v in update_info.items():
                             wandb.log({f"training/{k}": v}, step=i)
+                        wandb.log({"training/batch_reward_mean": np.mean(batch.rewards)}, step=i)
+                        wandb.log({"training/batch_reward_min": np.min(batch.rewards)}, step=i)
+                        wandb.log({"training/batch_reward_max": np.max(batch.rewards)}, step=i)
             observation = next_observation
 
             if i != start_step and i % FLAGS.ckpt_interval == 0:

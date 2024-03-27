@@ -306,6 +306,23 @@ class Block(nn.Module):
         return batch + x
 
 
+class ConcatEncoder(nn.Module):
+    obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
+
+    @nn.compact
+    def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False):
+        features = {}
+        for k, v in observations.items():
+            if v.ndim == 2:
+                v = v[jnp.newaxis]
+            if k in self.obs_keys:
+                features[k] = v
+        batch_size, num_timestep, _ = features[self.obs_keys[0]].shape
+        features = concat_multiple_emb(features)
+        features = jnp.reshape(features, (batch_size, -1))
+        return features
+
+
 class TransformerEncoder(nn.Module):
     emb_dim: int = 1024
     depth: int = 2

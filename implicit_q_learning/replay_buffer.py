@@ -85,7 +85,8 @@ def load_episode(
             rewards = episode["diffusion_rewards"] / lambda_mr
         elif reward_type == "ours":
             _min, _max = reward_stat["min"], reward_stat["max"]
-            rewards = (episode["multimodal_rewards"] - _min) / (_max - _min)
+            # rewards = (episode["multimodal_rewards"] - _min) / (_max - _min)
+            rewards = episode["multimodal_rewards"] - _min
             rewards = rewards / lambda_mr
             rewards = rewards + (episode["rewards"] / lambda_mr)
             if smoothe:

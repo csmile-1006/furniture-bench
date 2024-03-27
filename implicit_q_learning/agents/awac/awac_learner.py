@@ -12,7 +12,7 @@ from agents.awac.actor import awac_update_actor
 from agents.awac.critic import awac_update_critic, target_update
 from agents.iql.iql_learner import _update_bc_jit
 from networks import multiplexer, policy, value_net
-from networks.common import Batch, CrossAttnTransformerEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
+from networks.common import Batch, InfoDict, Model, PRNGKey, ConcatEncoder
 
 
 def _share_encoder(source, target):
@@ -152,58 +152,63 @@ class AWACLearner(object):
         if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
             observations["text_feature"] = observations["text_feature"][np.newaxis]
 
-        if "text_feature" in obs_keys and model_type == "crossattn":
-            print("[INFO] use CrossAttnTransformerEncoder")
-            critic_encoder_cls = partial(
-                CrossAttnTransformerEncoder,
-                emb_dim=emb_dim,
-                depth=depth,
-                num_heads=num_heads,
-                att_drop=0.0 if dropout_rate is None else dropout_rate,
-                drop=0.0 if dropout_rate is None else dropout_rate,
-                normalize_inputs=normalize_inputs,
-                activations=activations,
-                use_sigmareparam=use_sigmareparam,
-                obs_keys=obs_keys,
-            )
-            actor_encoder_cls = partial(
-                CrossAttnTransformerEncoder,
-                emb_dim=emb_dim,
-                depth=depth,
-                num_heads=num_heads,
-                att_drop=0.0 if dropout_rate is None else dropout_rate,
-                drop=0.0 if dropout_rate is None else dropout_rate,
-                normalize_inputs=normalize_inputs,
-                activations=activations,
-                use_sigmareparam=use_sigmareparam,
-                obs_keys=obs_keys,
-            )
-        else:
-            print("[INFO] use TransformerEncoder")
-            critic_encoder_cls = partial(
-                TransformerEncoder,
-                emb_dim=emb_dim,
-                depth=depth,
-                num_heads=num_heads,
-                att_drop=0.0 if dropout_rate is None else dropout_rate,
-                drop=0.0 if dropout_rate is None else dropout_rate,
-                normalize_inputs=normalize_inputs,
-                activations=activations,
-                use_sigmareparam=use_sigmareparam,
-                obs_keys=obs_keys,
-            )
-            actor_encoder_cls = partial(
-                TransformerEncoder,
-                emb_dim=emb_dim,
-                depth=depth,
-                num_heads=num_heads,
-                att_drop=0.0 if dropout_rate is None else dropout_rate,
-                drop=0.0 if dropout_rate is None else dropout_rate,
-                normalize_inputs=normalize_inputs,
-                activations=activations,
-                use_sigmareparam=use_sigmareparam,
-                obs_keys=obs_keys,
-            )
+        critic_encoder_cls, actor_encoder_cls = (
+            partial(ConcatEncoder, obs_keys=obs_keys),
+            partial(ConcatEncoder, obs_keys=obs_keys),
+        )
+
+        # if "text_feature" in obs_keys and model_type == "crossattn":
+        #     print("[INFO] use CrossAttnTransformerEncoder")
+        #     critic_encoder_cls = partial(
+        #         CrossAttnTransformerEncoder,
+        #         emb_dim=emb_dim,
+        #         depth=depth,
+        #         num_heads=num_heads,
+        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
+        #         drop=0.0 if dropout_rate is None else dropout_rate,
+        #         normalize_inputs=normalize_inputs,
+        #         activations=activations,
+        #         use_sigmareparam=use_sigmareparam,
+        #         obs_keys=obs_keys,
+        #     )
+        #     actor_encoder_cls = partial(
+        #         CrossAttnTransformerEncoder,
+        #         emb_dim=emb_dim,
+        #         depth=depth,
+        #         num_heads=num_heads,
+        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
+        #         drop=0.0 if dropout_rate is None else dropout_rate,
+        #         normalize_inputs=normalize_inputs,
+        #         activations=activations,
+        #         use_sigmareparam=use_sigmareparam,
+        #         obs_keys=obs_keys,
+        #     )
+        # else:
+        #     print("[INFO] use TransformerEncoder")
+        #     critic_encoder_cls = partial(
+        #         TransformerEncoder,
+        #         emb_dim=emb_dim,
+        #         depth=depth,
+        #         num_heads=num_heads,
+        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
+        #         drop=0.0 if dropout_rate is None else dropout_rate,
+        #         normalize_inputs=normalize_inputs,
+        #         activations=activations,
+        #         use_sigmareparam=use_sigmareparam,
+        #         obs_keys=obs_keys,
+        #     )
+        #     actor_encoder_cls = partial(
+        #         TransformerEncoder,
+        #         emb_dim=emb_dim,
+        #         depth=depth,
+        #         num_heads=num_heads,
+        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
+        #         drop=0.0 if dropout_rate is None else dropout_rate,
+        #         normalize_inputs=normalize_inputs,
+        #         activations=activations,
+        #         use_sigmareparam=use_sigmareparam,
+        #         obs_keys=obs_keys,
+        #     )
 
         action_dim = actions.shape[-1]
         actor_cls = partial(
@@ -227,7 +232,7 @@ class AWACLearner(object):
         #     use_tanh=False,
         #     obs_keys=obs_keys,
         # )
-        actor_def = multiplexer.Multiplexer(
+        actor_def = multiplexer.ConcatMultilPlexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
             stop_gradient=False,
@@ -246,7 +251,7 @@ class AWACLearner(object):
             critic_layer_norm=critic_layer_norm,
             num_qs=self.num_qs,
         )
-        critic_def = multiplexer.Multiplexer(
+        critic_def = multiplexer.ConcatMultilPlexer(
             encoder_cls=critic_encoder_cls,
             network_cls=critic_cls,
             stop_gradient=False,
