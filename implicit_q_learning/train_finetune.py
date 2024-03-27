@@ -547,15 +547,6 @@ def main(_):
             total=FLAGS.num_pretraining_steps,
         ):
             offline_batch = batch_to_jax(offline_batch)
-            if "Furniture" in FLAGS.env_name and FLAGS.reward_type == "sparse":
-                offline_batch = Batch(
-                    observations=offline_batch.observations,
-                    actions=offline_batch.actions,
-                    rewards=offline_batch.rewards - 1,
-                    masks=offline_batch.masks,
-                    next_observations=offline_batch.next_observations,
-                )
-
             update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
