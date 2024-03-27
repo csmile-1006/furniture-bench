@@ -155,6 +155,7 @@ class AWACLearner(object):
         if encoder_type == "concat":
             print("[INFO] use ConcatEncoder")
             critic_encoder_cls = actor_encoder_cls = partial(ConcatEncoder, obs_keys=obs_keys)
+            multiplexer_cls = multiplexer.ConcatMultilPlexer
         elif encoder_type == "transformer":
             print("[INFO] use TransformerEncoder")
             critic_encoder_cls = actor_encoder_cls = partial(
@@ -169,6 +170,7 @@ class AWACLearner(object):
                 use_sigmareparam=use_sigmareparam,
                 obs_keys=obs_keys,
             )
+            multiplexer_cls = multiplexer.SequentialMultiplexer
 
         action_dim = actions.shape[-1]
         actor_cls = partial(
@@ -181,7 +183,7 @@ class AWACLearner(object):
             state_dependent_std=True,
             tanh_squash_distribution=False,
         )
-        actor_def = multiplexer.ConcatMultilPlexer(
+        actor_def = multiplexer_cls(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
             stop_gradient=False,
@@ -200,7 +202,7 @@ class AWACLearner(object):
             critic_layer_norm=critic_layer_norm,
             num_qs=self.num_qs,
         )
-        critic_def = multiplexer.ConcatMultilPlexer(
+        critic_def = multiplexer_cls(
             encoder_cls=critic_encoder_cls,
             network_cls=critic_cls,
             stop_gradient=False,

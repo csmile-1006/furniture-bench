@@ -75,6 +75,7 @@ class BCLearner(object):
         if encoder_type == "concat":
             print("[INFO] use ConcatEncoder")
             actor_encoder_cls = partial(ConcatEncoder, obs_keys=obs_keys)
+            multiplexer_cls = multiplexer.ConcatMultiplexer
         elif encoder_type == "transformer":
             print("[INFO] use TransformerEncoder")
             actor_encoder_cls = partial(
@@ -89,6 +90,7 @@ class BCLearner(object):
                 use_sigmareparam=use_sigmareparam,
                 obs_keys=obs_keys,
             )
+            multiplexer_cls = multiplexer.SequentialMultiplexer
 
         action_dim = actions.shape[-1]
         actor_cls = partial(
@@ -101,7 +103,7 @@ class BCLearner(object):
             state_dependent_std=True,
             tanh_squash_distribution=False,
         )
-        actor_def = multiplexer.Multiplexer(
+        actor_def = multiplexer_cls(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
             stop_gradient=False,
