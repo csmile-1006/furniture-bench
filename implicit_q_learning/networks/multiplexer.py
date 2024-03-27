@@ -32,7 +32,7 @@ class SequentialMultiplexer(nn.Module):
         self.stop_gradient = True
 
 
-class ConcatMultiPlexer(nn.Module):
+class ConcatMultiplexer(nn.Module):
     encoder_cls: Type[nn.Module]
     network_cls: Type[nn.Module]
     stop_gradient: bool = False
