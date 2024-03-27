@@ -11,10 +11,11 @@ def get_config():
     config.hidden_dims = (512, 256, 256, 256)
 
     config.detach_actor = False
-    config.expl_noise = 0.1
+    config.expl_noise = 0.2
 
     config.dropout_rate = None
 
+    config.encoder_type = "concat"
     # transformer setup
     config.emb_dim = 256
     config.depth = 3

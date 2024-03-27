@@ -25,6 +25,7 @@ def get_config():
 
     config.tau = 0.005  # For soft target updates.
 
+    config.encoder_type = "concat"
     # transformer setup
     config.emb_dim = 256
     config.depth = 3

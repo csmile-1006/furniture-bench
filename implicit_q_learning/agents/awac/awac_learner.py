@@ -1,7 +1,7 @@
 """Implementations of algorithms for continuous control."""
 
 from functools import partial
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Literal, Optional, Sequence, Tuple
 
 import flax.linen as nn
 import jax
@@ -12,7 +12,7 @@ from agents.awac.actor import awac_update_actor
 from agents.awac.critic import awac_update_critic, target_update
 from agents.iql.iql_learner import _update_bc_jit
 from networks import multiplexer, policy, value_net
-from networks.common import Batch, InfoDict, Model, PRNGKey, ConcatEncoder
+from networks.common import Batch, ConcatEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 
 
 def _share_encoder(source, target):
@@ -117,7 +117,7 @@ class AWACLearner(object):
         critic_max_grad_norm: float = None,
         critic_layer_norm: bool = False,
         obs_keys: Sequence[str] = ("image1", "image2"),
-        model_type: str = "transformer",
+        encoder_type: Literal["transformer", "concat"] = "concat",
         normalize_inputs: bool = True,
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
@@ -152,63 +152,23 @@ class AWACLearner(object):
         if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
             observations["text_feature"] = observations["text_feature"][np.newaxis]
 
-        critic_encoder_cls, actor_encoder_cls = (
-            partial(ConcatEncoder, obs_keys=obs_keys),
-            partial(ConcatEncoder, obs_keys=obs_keys),
-        )
-
-        # if "text_feature" in obs_keys and model_type == "crossattn":
-        #     print("[INFO] use CrossAttnTransformerEncoder")
-        #     critic_encoder_cls = partial(
-        #         CrossAttnTransformerEncoder,
-        #         emb_dim=emb_dim,
-        #         depth=depth,
-        #         num_heads=num_heads,
-        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
-        #         drop=0.0 if dropout_rate is None else dropout_rate,
-        #         normalize_inputs=normalize_inputs,
-        #         activations=activations,
-        #         use_sigmareparam=use_sigmareparam,
-        #         obs_keys=obs_keys,
-        #     )
-        #     actor_encoder_cls = partial(
-        #         CrossAttnTransformerEncoder,
-        #         emb_dim=emb_dim,
-        #         depth=depth,
-        #         num_heads=num_heads,
-        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
-        #         drop=0.0 if dropout_rate is None else dropout_rate,
-        #         normalize_inputs=normalize_inputs,
-        #         activations=activations,
-        #         use_sigmareparam=use_sigmareparam,
-        #         obs_keys=obs_keys,
-        #     )
-        # else:
-        #     print("[INFO] use TransformerEncoder")
-        #     critic_encoder_cls = partial(
-        #         TransformerEncoder,
-        #         emb_dim=emb_dim,
-        #         depth=depth,
-        #         num_heads=num_heads,
-        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
-        #         drop=0.0 if dropout_rate is None else dropout_rate,
-        #         normalize_inputs=normalize_inputs,
-        #         activations=activations,
-        #         use_sigmareparam=use_sigmareparam,
-        #         obs_keys=obs_keys,
-        #     )
-        #     actor_encoder_cls = partial(
-        #         TransformerEncoder,
-        #         emb_dim=emb_dim,
-        #         depth=depth,
-        #         num_heads=num_heads,
-        #         att_drop=0.0 if dropout_rate is None else dropout_rate,
-        #         drop=0.0 if dropout_rate is None else dropout_rate,
-        #         normalize_inputs=normalize_inputs,
-        #         activations=activations,
-        #         use_sigmareparam=use_sigmareparam,
-        #         obs_keys=obs_keys,
-        #     )
+        if encoder_type == "concat":
+            print("[INFO] use ConcatEncoder")
+            critic_encoder_cls = actor_encoder_cls = partial(ConcatEncoder, obs_keys=obs_keys)
+        elif encoder_type == "transformer":
+            print("[INFO] use TransformerEncoder")
+            critic_encoder_cls = actor_encoder_cls = partial(
+                TransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+                normalize_inputs=normalize_inputs,
+                activations=activations,
+                use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
+            )
 
         action_dim = actions.shape[-1]
         actor_cls = partial(
@@ -221,17 +181,6 @@ class AWACLearner(object):
             state_dependent_std=True,
             tanh_squash_distribution=False,
         )
-        # actor_cls = partial(
-        #     policy.NormalTanhMixturePolicy,
-        #     hidden_dims,
-        #     action_dim,
-        #     num_modes=10,
-        #     dropout_rate=dropout_rate,
-        #     std_min=1e-1,
-        #     std_max=1e-0,
-        #     use_tanh=False,
-        #     obs_keys=obs_keys,
-        # )
         actor_def = multiplexer.ConcatMultilPlexer(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,

@@ -26,6 +26,7 @@ def get_config():
     config.num_samples = 1
     config.expl_noise = 0.2
 
+    config.encoder_type = "concat"
     # transformer setup
     config.emb_dim = 256
     config.depth = 3

@@ -77,7 +77,7 @@ flags.DEFINE_integer("num_pretraining_steps", int(1e6), "Number of pretraining s
 # Replay Buffer Setting.
 flags.DEFINE_integer("n_step", 1, "N-step Q-learning.")
 flags.DEFINE_integer("window_size", 4, "Number of frames in context window.")
-flags.DEFINE_integer("skip_frame", 2, "how often skip frame.")
+flags.DEFINE_integer("skip_frame", 1, "how often skip frame.")
 flags.DEFINE_integer("replay_buffer_size", int(1e6), "Replay buffer size (=max_steps if unspecified).")
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
 flags.DEFINE_boolean("save_snapshot", False, "save snapshot of replay buffer.")
