@@ -616,7 +616,7 @@ def main(_):
                                 next_observation[key][env_idx] = new_ob[key]
                             done[env_idx] = False
                             for k, v in info[f"episode_{env_idx}"].items():
-                                wandb.log({f"training/{k}": v}, step=total_env_step + env_idx)
+                                wandb.log({f"training/{k}": v})
                             trajectories[env_idx] = _reset_traj_dict()
                             num_episodes += 1
 
