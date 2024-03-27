@@ -11,7 +11,7 @@ from pathlib import Path
 def evaluate(agent: nn.Module, env: gym.Env, num_episodes: int, expl_noise: float = 0.00) -> Dict[str, float]:
     stats = {"return": [], "length": [], "success": [], "spl": []}
     ep, total_step = 0, 0
-    pbar = trange(num_episodes, desc="evaluation", ncols=0)
+    pbar = trange(num_episodes, desc="evaluation", ncols=0, leave=False)
     observation, done = env.reset(), np.zeros((env._num_envs), dtype=bool)
     while ep < num_episodes:
         action = agent.sample_actions(observation, expl_noise=expl_noise)
@@ -41,7 +41,7 @@ def evaluate_with_save(
     stats = {"return": [], "length": [], "success": [], "spl": []}
     episodes = {env_idx: {key: [] for key in ["observations", "actions"]} for env_idx in range(env.num_envs)}
     ep, total_step = 0, 0
-    pbar = trange(num_episodes, desc="evaluation", ncols=0)
+    pbar = trange(num_episodes, desc="evaluation", ncols=0, leave=False)
     observation, done = env.reset(), np.zeros((env.num_envs), dtype=bool)
     for env_idx in range(min(env.num_envs, num_episodes)):
         episodes[env_idx]["observations"].append(

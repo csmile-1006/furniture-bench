@@ -51,7 +51,6 @@ class BCLearner(object):
         use_sigmareparam: bool = True,
         expl_noise: float = 1.0,
         detach_actor: bool = False,
-        max_steps: int = 1_000_000,
     ):
         """
         An implementation of Behavior Cloning.
@@ -59,7 +58,6 @@ class BCLearner(object):
 
         self.expl_noise = expl_noise
         self.detach_actor = detach_actor
-        self.max_steps = max_steps
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key = jax.random.split(rng, 2)

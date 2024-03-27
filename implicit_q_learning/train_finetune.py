@@ -237,26 +237,24 @@ def compute_multimodal_reward(reward_model, **kwargs):
 def load_reward_stat(data_path):
     stat_path = data_path / "reward_stats.npz"
     if stat_path.exists():
-        print(f"load reward stat file from {stat_path}.")
+        console.print(f"load reward stat file from {stat_path}.")
         reward_stat = np.load(stat_path)
         reward_stat = {key: reward_stat[key] for key in reward_stat}
         reward_stat["min"] = reward_stat["min"] - 0.2 * np.fabs(reward_stat["min"])
     else:
-        print("no stat file in this folder.")
+        console.print("no stat file in this folder.")
         reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
-    # print("disable reward stat!")
-    # reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}
     return reward_stat
 
 
 def load_action_stat(data_path):
     stat_path = data_path / "action_stats.npz"
     if stat_path.exists():
-        print(f"load action stat file from {stat_path}.")
+        console.print(f"load action stat file from {stat_path}.")
         action_stat = np.load(stat_path)
         action_stat = {key: action_stat[key] for key in action_stat}
     else:
-        print("no stat file in this folder.")
+        console.print("no stat file in this folder.")
         action_stat = {"low": np.full((7,), -1, dtype=np.float32), "high": np.ones((7,), dtype=np.float32)}
     return action_stat
 
@@ -366,11 +364,6 @@ def combine(one_dict, other_dict):
     for k, v in one_dict.items():
         if isinstance(v, dict):
             combined[k] = combine(v, other_dict[k])
-        # elif v.shape[0] == other_dict[k].shape[0]:
-        #     tmp = np.empty((v.shape[0] + other_dict[k].shape[0], *v.shape[1:]), dtype=v.dtype)
-        #     tmp[0::2] = v
-        #     tmp[1::2] = other_dict[k]
-        #     combined[k] = tmp
         else:
             tmp = np.concatenate([v, other_dict[k]], axis=0)
             combined[k] = tmp
@@ -515,7 +508,6 @@ def main(_):
             sample_obs,
             sample_act,
             obs_keys=obs_keys,
-            max_steps=FLAGS.max_steps,
             **kwargs,
         )
     else:
@@ -537,7 +529,7 @@ def main(_):
             agent.load(f"{FLAGS.ckpt_dir}.{FLAGS.seed}", FLAGS.num_pretraining_steps)
     else:
         console.print("Start pre-training with offline dataset.")
-        start_step, steps = 1, FLAGS.num_pretraining_steps + 1
+        start_step, steps = 0, FLAGS.num_pretraining_steps
         for i, offline_batch in tqdm.tqdm(
             zip(range(start_step, steps), offline_loader),
             smoothing=0.1,
@@ -550,14 +542,14 @@ def main(_):
             update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
-                    wandb.log({f"offline-training/{k}": v}, step=i)
+                    wandb.log({f"offline-training/{k}": v}, step=i - FLAGS.num_pretraining_steps)
 
-            if i % 100_000 == 0:
+            if i and i % 100_000 == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():
-                    wandb.log({f"offline-evaluation/{k}": v}, step=i)
+                    wandb.log({f"offline-evaluation/{k}": v}, step=i - FLAGS.num_pretraining_steps)
                 env.unset_eval_flag()
         agent.save(ckpt_dir, i)
     del offline_loader
@@ -594,7 +586,7 @@ def main(_):
         },
     )
 
-    start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps + 1
+    start_step, steps = 0, FLAGS.max_steps
     online_pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="online-training")
     i = start_step
     eval_returns = []
@@ -607,7 +599,7 @@ def main(_):
     if FLAGS.use_bc:
         agent.prepare_online_step()
     with online_pbar:
-        while i <= steps:
+        while i < steps:
             action = agent.sample_actions(observation)
             next_observation, reward, done, info = env.step(action)
             reward, done = reward.squeeze(), done.squeeze()
@@ -699,7 +691,7 @@ def main(_):
             if i != start_step and i % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
+            if i and i % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
