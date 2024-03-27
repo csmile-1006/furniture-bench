@@ -174,6 +174,7 @@ class ReplayBuffer(IterableDataset):
         self._num_workers = max(1, num_workers)
         self._episode_fns = []
         self._episodes = dict()
+        self._episode_path = dict()
         self._nstep = nstep
         self._discount = discount
         self._fetch_every = fetch_every
@@ -220,15 +221,16 @@ class ReplayBuffer(IterableDataset):
             early_eps = self._episodes.pop(early_eps_fn)
             self._size -= episode_len(early_eps)
             if not self._save_snapshot:
-                early_eps_fn.unlink(missing_ok=True)
+                self._episode_path[early_eps_fn].unlink(missing_ok=True)
         if tp == "offline":
             tn = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-            eps_fn = f"{tn}_{Path(eps_fn).name}"
+            eps_key = f"{tn}_{Path(eps_fn).name}"
         else:
-            eps_fn = Path(eps_fn).name
-        self._episode_fns.append(eps_fn)
+            eps_key = Path(eps_fn).name
+        self._episode_fns.append(eps_key)
         self._episode_fns.sort()
-        self._episodes[eps_fn] = episode
+        self._episodes[eps_key] = episode
+        self._episode_path[eps_key] = eps_fn
         self._size += eps_len
 
         if not self._save_snapshot:
