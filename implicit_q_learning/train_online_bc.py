@@ -501,14 +501,6 @@ def main(_):
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     wandb.log({f"training/{k}": v}, step=i - FLAGS.num_pretraining_steps)
-
-            if i % 100_000 == 0:
-                env.set_eval_flag()
-                eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
-
-                for k, v in eval_stats.items():
-                    wandb.log({f"evaluation/{k}": v}, step=i - FLAGS.num_pretraining_steps)
-                env.unset_eval_flag()
         agent.save(ckpt_dir, i)
     del offline_loader
 
@@ -549,6 +541,13 @@ def main(_):
     iteration_pbar = trange(iterations, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="online iterations")
     offline_replay_iter, online_replay_iter = None, None
     num_episodes = 0
+
+    tqdm.write("Evaluation before online iteration.")
+    env.set_eval_flag()
+    eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+    for k, v in eval_stats.items():
+        wandb.log({f"evaluation/{k}": v}, step=total_train_step)
+    env.unset_eval_flag()
 
     it = 0
     with iteration_pbar:
