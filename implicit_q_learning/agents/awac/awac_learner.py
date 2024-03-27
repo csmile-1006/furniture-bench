@@ -155,7 +155,7 @@ class AWACLearner(object):
         if encoder_type == "concat":
             print("[INFO] use ConcatEncoder")
             critic_encoder_cls = actor_encoder_cls = partial(ConcatEncoder, obs_keys=obs_keys)
-            multiplexer_cls = multiplexer.ConcatMultilPlexer
+            multiplexer_cls = multiplexer.ConcatMultiPlexer
         elif encoder_type == "transformer":
             print("[INFO] use TransformerEncoder")
             critic_encoder_cls = actor_encoder_cls = partial(
