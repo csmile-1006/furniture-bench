@@ -542,14 +542,14 @@ def main(_):
             update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
-                    wandb.log({f"offline-training/{k}": v}, step=i - FLAGS.num_pretraining_steps)
+                    wandb.log({f"offline-training/{k}": v}, step=i)
 
             if i and i % 100_000 == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 
                 for k, v in eval_stats.items():
-                    wandb.log({f"offline-evaluation/{k}": v}, step=i - FLAGS.num_pretraining_steps)
+                    wandb.log({f"offline-evaluation/{k}": v}, step=i)
                 env.unset_eval_flag()
         agent.save(ckpt_dir, i)
     del offline_loader
@@ -586,7 +586,7 @@ def main(_):
         },
     )
 
-    start_step, steps = 0, FLAGS.max_steps
+    start_step, steps = FLAGS.num_pretraining_steps, FLAGS.num_pretraining_steps + FLAGS.max_steps
     online_pbar = tqdm.trange(start_step, steps, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="online-training")
     i = start_step
     eval_returns = []
@@ -688,10 +688,10 @@ def main(_):
                         wandb.log({"training/batch_reward_max": np.max(batch.rewards)}, step=i)
             observation = next_observation
 
-            if i != start_step and i % FLAGS.ckpt_interval == 0:
+            if i != start_step and (i - FLAGS.num_pretraining_steps) % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if i and i % FLAGS.eval_interval == 0:
+            if (i - FLAGS.num_pretraining_steps) and (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
 

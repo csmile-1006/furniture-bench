@@ -487,7 +487,7 @@ def main(_):
         agent.load(f"{FLAGS.ckpt_dir}.{FLAGS.seed}", FLAGS.num_pretraining_steps)
     else:
         console.print("Start pre-training with offline dataset.")
-        start_step, steps = 1, FLAGS.num_pretraining_steps + 1
+        start_step, steps = 0, FLAGS.num_pretraining_steps
         for i, offline_batch in tqdm(
             zip(range(start_step, steps), offline_loader),
             smoothing=0.1,
@@ -500,7 +500,7 @@ def main(_):
             update_info = agent.update(offline_batch)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
-                    wandb.log({f"training/{k}": v}, step=i - FLAGS.num_pretraining_steps)
+                    wandb.log({f"training/{k}": v}, step=i)
         agent.save(ckpt_dir, i)
     del offline_loader
 
@@ -537,7 +537,8 @@ def main(_):
     )
 
     iterations = FLAGS.num_iterations
-    total_train_step = 0
+    total_train_step = FLAGS.num_pretraining_steps
+    total_env_step = 0
     iteration_pbar = trange(iterations, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="online iterations")
     offline_replay_iter, online_replay_iter = None, None
     num_episodes = 0
@@ -615,12 +616,13 @@ def main(_):
                                 next_observation[key][env_idx] = new_ob[key]
                             done[env_idx] = False
                             for k, v in info[f"episode_{env_idx}"].items():
-                                wandb.log({f"training/{k}": v}, step=i + env_idx)
+                                wandb.log({f"training/{k}": v}, step=total_env_step + env_idx)
                             trajectories[env_idx] = _reset_traj_dict()
                             num_episodes += 1
 
                     observation = next_observation
                     env_step += FLAGS.num_envs
+                    total_env_step += FLAGS.num_envs
                     collect_demo_pbar.set_description(f"collecting demo: env step {env_step}")
 
             if offline_replay_iter is None and online_replay_iter is None:
@@ -645,14 +647,13 @@ def main(_):
                     )
                 update_info = agent.update(batch)
 
+                total_train_step += 1
                 if total_train_step % FLAGS.log_interval == 0:
                     for k, v in update_info.items():
                         wandb.log({f"training/{k}": v}, step=total_train_step)
                     wandb.log({"training/batch_reward_mean": np.mean(batch.rewards)}, step=total_train_step)
                     wandb.log({"training/batch_reward_min": np.min(batch.rewards)}, step=total_train_step)
                     wandb.log({"training/batch_reward_max": np.max(batch.rewards)}, step=total_train_step)
-
-                total_train_step += 1
                 training_pbar.set_postfix(total_training_step=total_train_step)
 
             tqdm.write(f"Evaluation in iteration {it}.")
