@@ -15,12 +15,10 @@ from networks.common import Batch, ConcatEncoder, InfoDict, Model, PRNGKey, Tran
 
 @partial(jax.jit)
 def _update_bc_jit(
-    rng: PRNGKey,
-    actor: Model,
-    batch: Batch,
+    rng: PRNGKey, actor: Model, batch: Batch, expl_noise: float
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
     key, rng = jax.random.split(rng)
-    new_actor, actor_info = bc_update_actor(key, actor, batch)
+    new_actor, actor_info = bc_update_actor(key, actor, batch, expl_noise)
 
     return (
         rng,
@@ -135,7 +133,7 @@ class BCLearner(object):
 
     def update(self, batch: Batch, update_bc: bool = False, utd_ratio=1) -> InfoDict:
         self.step += 1
-        new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch)
+        new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.expl_noise)
         self.rng = new_rng
         self.actor = new_actor
 

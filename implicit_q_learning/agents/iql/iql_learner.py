@@ -1,17 +1,18 @@
 """Implementations of algorithms for continuous control."""
 
 from functools import partial
-from typing import Callable, Optional, Sequence, Tuple, Literal
+from typing import Callable, Literal, Optional, Sequence, Tuple
 
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.iql.actor import awr_update_actor, bc_update_actor
-from networks import multiplexer, policy, value_net
-from networks.common import Batch, InfoDict, Model, PRNGKey, TransformerEncoder, ConcatEncoder
+from agents.bc.bc_learner import _update_bc_jit
+from agents.iql.actor import awr_update_actor
 from agents.iql.critic import update_q, update_v
+from networks import multiplexer, policy, value_net
+from networks.common import Batch, ConcatEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 
 
 def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
@@ -64,23 +65,6 @@ def _update_jit(
         new_value,
         new_target_critic,
         {**critic_info, **value_info, **actor_info},
-    )
-
-
-@partial(jax.jit)
-def _update_bc_jit(
-    rng: PRNGKey,
-    actor: Model,
-    batch: Batch,
-    expl_noise: float,
-) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    key, rng = jax.random.split(rng)
-    new_actor, actor_info = bc_update_actor(key, actor, batch, expl_noise)
-
-    return (
-        rng,
-        new_actor,
-        actor_info,
     )
 
 

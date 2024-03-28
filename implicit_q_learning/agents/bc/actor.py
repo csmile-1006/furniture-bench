@@ -5,10 +5,15 @@ import jax.numpy as jnp
 from networks.common import Batch, InfoDict, Model, Params, PRNGKey
 
 
-def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch) -> Tuple[Model, InfoDict]:
+def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch, expl_noise: float) -> Tuple[Model, InfoDict]:
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
-            actor_params, batch.observations, training=True, rngs={"dropout": key}, mutable=actor.extra_variables.keys()
+            actor_params,
+            batch.observations,
+            expl_noise,
+            training=True,
+            rngs={"dropout": key},
+            mutable=actor.extra_variables.keys(),
         )
         log_probs = dist.log_prob(batch.actions)
         a = -log_probs

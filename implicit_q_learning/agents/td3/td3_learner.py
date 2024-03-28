@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.iql.iql_learner import _update_bc_jit
+from agents.bc.bc_learner import _update_bc_jit
 from agents.td3.actor import td3_update_actor
 from agents.td3.critic import target_update, td3_update_critic
 from networks import multiplexer, policy, value_net

@@ -10,7 +10,7 @@ import numpy as np
 import optax
 from agents.awac.actor import awac_update_actor
 from agents.awac.critic import awac_update_critic, target_update
-from agents.iql.iql_learner import _update_bc_jit
+from agents.bc.bc_learner import _update_bc_jit
 from networks import multiplexer, policy, value_net
 from networks.common import Batch, ConcatEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 
