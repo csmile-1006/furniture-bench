@@ -275,7 +275,7 @@ class TD3Learner(object):
     def update(self, batch: Batch, update_bc: bool = False, utd_ratio: int = 1) -> InfoDict:
         self.step += 1
         if update_bc:
-            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch)
+            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.expl_noise)
         else:
             (
                 new_rng,

@@ -186,7 +186,7 @@ class AWACLearner(object):
         actor_def = multiplexer_cls(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
-            stop_gradient=False,
+            stop_gradient=True,
         )
         optimiser = optax.adamw(**actor_optim_kwargs)
 
@@ -251,7 +251,7 @@ class AWACLearner(object):
     def update(self, batch: Batch, update_bc: bool = False, utd_ratio: int = 1) -> InfoDict:
         self.step += 1
         if update_bc:
-            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch)
+            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.expl_noise)
         else:
             (
                 new_rng,

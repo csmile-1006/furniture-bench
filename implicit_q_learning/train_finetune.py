@@ -513,6 +513,12 @@ def main(_):
     else:
         raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")
 
+    if FLAGS.use_bc:
+        assert FLAGS.agent_type not in [
+            "awac",
+            "iql",
+        ], f"{FLAGS.agent_type.upper()} agent do not support BC pre-training."
+
     def batch_to_jax(y):
         return jax.tree_util.tree_map(lambda x: x.numpy(), y)
 

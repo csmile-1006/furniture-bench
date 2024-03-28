@@ -43,7 +43,7 @@ def update_q(key: PRNGKey, critic: Model, target_value: Model, batch: Batch, dis
     target_q = batch.rewards + discount * batch.masks * next_v
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        (q1, q2), updated_states = critic.apply(
+        qs, updated_states = critic.apply(
             critic_params,
             batch.observations,
             batch.actions,
@@ -51,19 +51,15 @@ def update_q(key: PRNGKey, critic: Model, target_value: Model, batch: Batch, dis
             rngs={"dropout": key},
             mutable=critic.extra_variables.keys(),
         )
-        critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
+        critic_loss = ((qs - target_q) ** 2).mean()
         return (
             critic_loss,
             {
                 "critic_loss": critic_loss,
-                "q1_mean": q1.mean(),
-                "q1_min": q1.min(),
-                "q1_max": q1.max(),
-                "q1_std": q1.std(),
-                "q2_mean": q2.mean(),
-                "q2_min": q2.min(),
-                "q2_max": q2.max(),
-                "q2_std": q2.std(),
+                "q_mean": qs.mean(),
+                "q_min": qs.min(),
+                "q_max": qs.max(),
+                "q_std": qs.std(),
                 "target_q_mean": target_q.mean(),
                 "target_q_std": target_q.std(),
                 "target_q_min": target_q.min(),
