@@ -133,7 +133,7 @@ class BCLearner(object):
 
     def update(self, batch: Batch, update_bc: bool = False, utd_ratio=1) -> InfoDict:
         self.step += 1
-        new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.expl_noise)
+        new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, 1.0)
         self.rng = new_rng
         self.actor = new_actor
 
