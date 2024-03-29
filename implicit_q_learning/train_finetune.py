@@ -234,6 +234,17 @@ def compute_multimodal_reward(reward_model, **kwargs):
     return output
 
 
+def load_state(data_path):
+    stat_path = data_path / "states.npz"
+    if stat_path.exists():
+        console.print(f"load state file from {stat_path}.")
+        state = np.load(stat_path, allow_pickle=True)
+        state = {key: state[key] for key in state}
+    else:
+        raise ValueError("no state file in this folder.")
+    return state
+
+
 def load_reward_stat(data_path):
     stat_path = data_path / "reward_stats.npz"
     if stat_path.exists():
@@ -422,6 +433,7 @@ def main(_):
 
         reward_stat = load_reward_stat(Path(FLAGS.data_path))
 
+    STATES = load_state(Path(FLAGS.data_path))
     action_stat = load_action_stat(Path(FLAGS.data_path))
 
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -597,7 +609,7 @@ def main(_):
     i = start_step
     eval_returns = []
     trajectories = _initialize_traj_dict()
-    observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
+    observation, done = env.reset_to(STATES), np.zeros((env._num_envs,), dtype=bool)
     start_training = FLAGS.num_pretraining_steps + env.furniture.max_env_steps * FLAGS.num_envs
     offline_replay_iter, online_replay_iter = None, None
     num_episodes = 0
@@ -659,7 +671,7 @@ def main(_):
                             env_idx,
                             env.episode_cnts[env_idx],
                         )
-                    new_ob = env.reset_env(env_idx)
+                    new_ob = env.reset_env_to(env_idx, STATES[env_idx])
                     for key in next_observation:
                         next_observation[key][env_idx] = new_ob[key]
                     done[env_idx] = False
@@ -699,7 +711,7 @@ def main(_):
 
             if (i - FLAGS.num_pretraining_steps) and (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
-                eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+                eval_stats = evaluate(agent, env, FLAGS.eval_episodes, state=STATES)
 
                 for k, v in eval_stats.items():
                     wandb.log({f"evaluation/{k}": v}, step=i)
@@ -710,7 +722,7 @@ def main(_):
                     eval_returns,
                     fmt=["%d", "%.1f"],
                 )
-                observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
+                observation, done = env.reset_to(STATES), np.zeros((env._num_envs,), dtype=bool)
                 trajectories = _initialize_traj_dict()
 
                 env.unset_eval_flag()

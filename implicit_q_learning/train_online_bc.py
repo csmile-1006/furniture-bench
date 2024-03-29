@@ -226,6 +226,17 @@ def compute_multimodal_reward(reward_model, **kwargs):
     return output
 
 
+def load_state(data_path):
+    stat_path = data_path / "state.npz"
+    if stat_path.exists():
+        console.print(f"load state file from {stat_path}.")
+        state = np.load(stat_path)
+        state = {key: state[key] for key in state}
+    else:
+        raise ValueError("no state file in this folder.")
+    return state
+
+
 def load_reward_stat(data_path):
     stat_path = data_path / "reward_stats.npz"
     if stat_path.exists():
@@ -412,6 +423,7 @@ def main(_):
 
         reward_stat = load_reward_stat(Path(FLAGS.data_path))
 
+    STATES = load_state(Path(FLAGS.data_path))
     action_stat = load_action_stat(Path(FLAGS.data_path))
 
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -554,7 +566,7 @@ def main(_):
     with iteration_pbar:
         while it < iterations:
             num_collected_episodes = 0
-            observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
+            observation, done = env.reset_to(STATES), np.zeros((env._num_envs,), dtype=bool)
             trajectories = _initialize_traj_dict()
             collect_demo_pbar = trange(
                 FLAGS.num_demos, smoothing=0.1, disable=not FLAGS.tqdm, ncols=0, desc="collecting demos", leave=False
@@ -611,7 +623,7 @@ def main(_):
                                 num_collected_episodes += 1
                                 collect_demo_pbar.update(1)
 
-                            new_ob = env.reset_env(env_idx)
+                            new_ob = env.reset_env_to(env_idx, STATES[env_idx])
                             for key in next_observation:
                                 next_observation[key][env_idx] = new_ob[key]
                             done[env_idx] = False
@@ -658,7 +670,7 @@ def main(_):
 
             tqdm.write(f"Evaluation in iteration {it}.")
             env.set_eval_flag()
-            eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+            eval_stats = evaluate(agent, env, FLAGS.eval_episodes, state=STATES)
             for k, v in eval_stats.items():
                 wandb.log({f"evaluation/{k}": v}, step=total_train_step)
             env.unset_eval_flag()

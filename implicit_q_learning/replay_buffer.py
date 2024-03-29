@@ -243,7 +243,7 @@ class ReplayBuffer(IterableDataset):
         except Exception:
             worker_id = 0
         for key, num_demo in self._num_demos.items():
-            eps_fns = sorted(self._offline_replay_dir.glob(f"{key}_*.npz"), reverse=True)
+            eps_fns = sorted(self._offline_replay_dir.glob(f"{key}_*.npz"), key=lambda x: int(str(x).split("_")[-2]))
             for eps_fn in eps_fns[:num_demo]:
                 eps_tp, eps_idx, eps_len = eps_fn.stem.split("_")
                 eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
@@ -431,7 +431,7 @@ class OfflineReplayBuffer(IterableDataset):
         except Exception:
             worker_id = 0
         for key, num_demo in self._num_demos.items():
-            eps_fns = sorted(self._replay_dir.glob(f"{key}_*.npz"), reverse=True)
+            eps_fns = sorted(self._replay_dir.glob(f"{key}_*.npz"), key=lambda x: int(str(x).split("_")[-2]))
             for eps_fn in eps_fns[:num_demo]:
                 eps_tp, eps_idx, eps_len = eps_fn.stem.split("_")
                 eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
