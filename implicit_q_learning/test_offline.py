@@ -57,16 +57,28 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
+flags.DEFINE_boolean("use_text_feature", False, "use text feature for observation.")
+
+
+def load_state(data_path):
+    stat_path = data_path / "states.npz"
+    if stat_path.exists():
+        console.print(f"load state file from {stat_path}.")
+        state = np.load(stat_path, allow_pickle=True)
+        state = {key: state[key] for key in state}
+    else:
+        raise ValueError("no state file in this folder.")
+    return state
 
 
 def load_action_stat(data_path):
     stat_path = data_path / "action_stats.npz"
     if stat_path.exists():
-        print(f"load action stat file from {stat_path}.")
+        console.print(f"load action stat file from {stat_path}.")
         action_stat = np.load(stat_path)
         action_stat = {key: action_stat[key] for key in action_stat}
     else:
-        print("no stat file in this folder.")
+        console.print("no stat file in this folder.")
         action_stat = {"low": np.full((7,), -1, dtype=np.float32), "high": np.ones((7,), dtype=np.float32)}
     return action_stat
 
@@ -141,10 +153,15 @@ def main(_):
     if "Sim" in FLAGS.env_name:
         import isaacgym  # noqa: F401
 
+    STATES = load_state(Path(FLAGS.data_path))
     action_stat = load_action_stat(Path(FLAGS.data_path))
     env = make_env(
         FLAGS.env_name, FLAGS.seed, FLAGS.randomness, FLAGS.encoder_type, reward_model=None, action_stat=action_stat
     )
+    obs_keys = [key for key in env.observation_space.spaces.keys() if key not in ["color_image1", "color_image2"]]
+    if FLAGS.use_text_feature:
+        obs_keys.append("text_feature")
+    obs_keys = tuple(sorted(obs_keys))
 
     kwargs = dict(FLAGS.config)
     if FLAGS.agent_type == "iql":
@@ -153,6 +170,7 @@ def main(_):
             env.observation_space.sample(),
             env.action_space.sample()[:1],
             max_steps=FLAGS.max_steps,
+            obs_keys=obs_keys,
             **kwargs,
         )
     elif FLAGS.agent_type == "awac":
@@ -160,6 +178,7 @@ def main(_):
             FLAGS.seed,
             env.observation_space.sample(),
             env.action_space.sample()[:1],
+            obs_keys=obs_keys,
             **kwargs,
         )
     elif FLAGS.agent_type == "dapg":
@@ -167,6 +186,7 @@ def main(_):
             FLAGS.seed,
             env.observation_space.sample(),
             env.action_space.sample()[:1],
+            obs_keys=obs_keys,
             **kwargs,
         )
     elif FLAGS.agent_type == "td3":
@@ -174,6 +194,7 @@ def main(_):
             FLAGS.seed,
             env.observation_space.sample(),
             env.action_space.sample()[:1],
+            obs_keys=obs_keys,
             **kwargs,
         )
     elif FLAGS.agent_type == "bc":
@@ -181,8 +202,8 @@ def main(_):
             FLAGS.seed,
             env.observation_space.sample(),
             env.action_space.sample()[:1],
+            obs_keys=obs_keys,
             **kwargs,
-            max_steps=FLAGS.max_steps,
         )
     else:
         raise ValueError(f"Unknown agent type: {FLAGS.agent_type}")
@@ -190,7 +211,7 @@ def main(_):
     ckpt_dir = os.path.join(FLAGS.ckpt_dir, f"{FLAGS.run_name}.{FLAGS.seed}")
     agent.load(ckpt_dir, FLAGS.ckpt_step or FLAGS.max_steps)
 
-    evaluate_with_save(agent, env, FLAGS.eval_episodes, FLAGS.temperature, Path(ep_dir))
+    evaluate_with_save(agent, env, FLAGS.eval_episodes, FLAGS.temperature, Path(ep_dir), state=STATES)
 
 
 if __name__ == "__main__":
