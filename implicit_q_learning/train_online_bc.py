@@ -227,7 +227,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
 
 
 def load_state(data_path):
-    stat_path = data_path / "state.npz"
+    stat_path = data_path / "states.npz"
     if stat_path.exists():
         console.print(f"load state file from {stat_path}.")
         state = np.load(stat_path)
