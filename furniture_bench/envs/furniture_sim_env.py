@@ -1151,7 +1151,23 @@ class FurnitureSimEnv(gym.Env):
         self._reset_franka(env_idx, dof_pos)
         self._reset_parts(env_idx, state["parts_poses"])
         self.env_steps[env_idx] = 0
+        self.episode_cnts[env_idx] += 1
         self.move_neutral = False
+        if self.video_writer.get(env_idx) is not None:
+            self.video_writer[env_idx].release()
+            self.video_writer[env_idx] = None
+        if self.record and self.episode_cnts[env_idx] % self.record_every == 0 and env_idx % self.num_envs == 0:
+            record_dir = (
+                Path(self.record_dir)
+                / f"env{env_idx}_ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
+            record_dir.mkdir(parents=True, exist_ok=True)
+            self.video_writer[env_idx] = cv2.VideoWriter(
+                str(record_dir / "video.mp4"),
+                cv2.VideoWriter_fourcc("m", "p", "4", "v"),
+                30,
+                (self.img_size[0], self.img_size[1] * 2),  # Wrist and front cameras.
+            )
 
     def _update_franka_dof_state_buffer(self, dof_pos=None):
         """
