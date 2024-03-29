@@ -230,7 +230,7 @@ def load_state(data_path):
     stat_path = data_path / "states.npz"
     if stat_path.exists():
         console.print(f"load state file from {stat_path}.")
-        state = np.load(stat_path)
+        state = np.load(stat_path, allow_pickle=True)
         state = {key: state[key] for key in state}
     else:
         raise ValueError("no state file in this folder.")
@@ -513,7 +513,7 @@ def main(_):
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     wandb.log({f"training/{k}": v}, step=i)
-        agent.save(ckpt_dir, i)
+        agent.save(ckpt_dir, i + 1)
     del offline_loader
 
     offline_loader = make_offline_loader(
@@ -676,7 +676,7 @@ def main(_):
             env.unset_eval_flag()
 
             tqdm.write(f"Save checkpoint in iteration {it}.")
-            agent.save(ft_ckpt_dir, total_train_step)
+            agent.save(ft_ckpt_dir, total_train_step + 1)
             it += 1
             iteration_pbar.update(1)
 
