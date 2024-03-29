@@ -129,8 +129,7 @@ class IQLLearner(object):
             print("[INFO] use ConcatEncoder")
             critic_encoder_cls = actor_encoder_cls = partial(ConcatEncoder, obs_keys=obs_keys)
             multiplexer_cls = multiplexer.ConcatMultiplexer
-        elif encoder_type == "transformer":
-            print("[INFO] use TransformerEncoder")
+        elif encoder_type.startswith("transformer"):
             critic_encoder_cls = actor_encoder_cls = partial(
                 TransformerEncoder,
                 emb_dim=emb_dim,
@@ -142,8 +141,14 @@ class IQLLearner(object):
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
                 obs_keys=obs_keys,
+                return_intermeidate=encoder_type == "transformer_intermediate",
             )
-            multiplexer_cls = multiplexer.SequentialMultiplexer
+            if encoder_type == "trnsformer":
+                print("[INFO] use TransformerEncoder")
+                multiplexer_cls = multiplexer.SequentialMultiplexer
+            if encoder_type == "transformer_intermediate":
+                print("[INFO] use TransformerEncoder with intermediate values.")
+                multiplexer_cls = multiplexer.SequentialInterMediateMultiplexer
 
         action_dim = actions.shape[-1]
         actor_cls = partial(

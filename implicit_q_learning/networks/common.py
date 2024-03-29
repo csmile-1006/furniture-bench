@@ -335,6 +335,7 @@ class TransformerEncoder(nn.Module):
     normalize_inputs: bool = True
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     use_sigmareparam: bool = True
+    return_intermeidate: bool = False
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
@@ -358,6 +359,7 @@ class TransformerEncoder(nn.Module):
         embed = nn.LayerNorm()(embed)
 
         x = embed
+        intermediate_values = []
         for _ in range(self.depth):
             x = Block(
                 dim=self.emb_dim,
@@ -368,11 +370,15 @@ class TransformerEncoder(nn.Module):
                 activations=self.activations,
                 use_sigmareparam=self.use_sigmareparam,
             )(x, deterministic, custom_mask)
+            intermediate_values.append(x)
 
         x = nn.LayerNorm()(x)
         if self.stop_gradient:
             x = lax.stop_gradient(x)
-        return x
+        if self.return_intermeidate:
+            return x, intermediate_values
+        else:
+            return x
 
 
 class PrenormPixelLangBlock(nn.Module):
