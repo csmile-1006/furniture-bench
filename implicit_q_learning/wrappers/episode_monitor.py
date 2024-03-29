@@ -27,7 +27,15 @@ class EpisodeMonitor(gym.ActionWrapper):
 
     def reset_env(self, idx):
         obs = self.env.reset_env(idx)
-        self.refresh()
+
+        self.reward_sum[idx] = 0.0
+        self.episode_length[idx] = 0
+        self.start_time[idx] = time.time()
+
+        return obs
+
+    def reset_env_to(self, idx, state):
+        obs = self.env.reset_env_to(idx, state)
 
         self.reward_sum[idx] = 0.0
         self.episode_length[idx] = 0
@@ -76,3 +84,7 @@ class EpisodeMonitor(gym.ActionWrapper):
     def reset(self) -> np.ndarray:
         self._reset_stats()
         return self.env.reset()
+
+    def reset_to(self, state) -> np.ndarray:
+        self._reset_stats()
+        return self.env.reset_to(state)
