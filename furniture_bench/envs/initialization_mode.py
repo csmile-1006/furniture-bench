@@ -81,5 +81,9 @@ def load_embedding(encoder_type, device_id):
 
         def img_emb_layer(x):
             return model(x / 255.0)
+    elif encoder_type in ["vip", "r3m"]:
+
+        def img_emb_layer(x):
+            return model(x)
 
     return img_emb_layer, embedding_dim
