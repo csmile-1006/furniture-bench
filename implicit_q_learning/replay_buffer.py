@@ -2,20 +2,20 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import collections
+import datetime
 import io
 import random
 import traceback
-import collections
-from typing import Sequence
-import datetime
 from collections import deque
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
 import torch
+from dataset_utils import exponential_moving_average, quat_to_theta, transform_phases
 from torch.utils.data import IterableDataset
-
-from dataset_utils import exponential_moving_average, transform_phases, quat_to_theta
+from tqdm import tqdm
 
 Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
 SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 784}
@@ -63,18 +63,19 @@ def load_episode(
     reward_stat: dict = None,
     smoothe: bool = False,
 ):
-    observations, next_observations, timesteps = [], [], []
+    timesteps = []
+    observations = {key: [] for key in obs_keys}
     with fn.open("rb") as f:
         episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
         eps_len = episode_len(episode)
         stacked_timesteps = _get_stacked_timesteps(eps_len, window_size, skip_frame)
         for i in range(eps_len):
-            observations.append(np.concatenate([episode["observations"][i][key] for key in obs_keys], axis=-1))
+            for key in obs_keys:
+                observations[key].append(episode["observations"][i][key])
             timesteps.append(stacked_timesteps[i])
-            next_observations.append(
-                np.concatenate([episode["next_observations"][i][key] for key in obs_keys], axis=-1)
-            )
+        observations = {key: np.asarray(value) for key, value in observations.items()}
+
         if reward_type == "sparse":
             rewards = episode["rewards"]
         elif reward_type == "step":
@@ -104,13 +105,15 @@ def load_episode(
             # rewards = delta_our_reward + episode["rewards"]
 
     return dict(
-        observations=np.asarray(observations),
+        **observations,
+        # observations=np.asarray(observations),
         timesteps=np.asarray(timesteps),
         actions=episode["actions"],
         rewards=rewards,
         masks=1.0 - episode["terminals"],
         dones_float=episode["terminals"],
-        next_observations=np.asarray(next_observations),
+        # next_observations=episode["next_observations"],
+        # next_observations=np.asarray(next_observations),
     )
 
 
@@ -244,7 +247,7 @@ class ReplayBuffer(IterableDataset):
             worker_id = 0
         for key, num_demo in self._num_demos.items():
             eps_fns = sorted(self._offline_replay_dir.glob(f"{key}_*.npz"), key=lambda x: int(str(x).split("_")[-2]))
-            for eps_fn in eps_fns[:num_demo]:
+            for eps_fn in tqdm(eps_fns[:num_demo], desc="load episodes", position=worker_id, leave=False, ncols=0):
                 eps_tp, eps_idx, eps_len = eps_fn.stem.split("_")
                 eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
                 assert eps_tp == key, f"{eps_fn} is not {key}."
@@ -306,7 +309,6 @@ class ReplayBuffer(IterableDataset):
     def __sample(self):
         episode = self._sample_episode()
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
-        obs = episode["observations"][episode["timesteps"][idx]]
 
         # action normalization!
         action = episode["actions"][idx]
@@ -319,7 +321,6 @@ class ReplayBuffer(IterableDataset):
                 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
             )
 
-        next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -327,9 +328,10 @@ class ReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        observation = self._split_observations(obs)
-        next_observation = self._split_observations(next_obs)
-
+        obs_idx = episode["timesteps"][idx]
+        observation = {key: episode[key][obs_idx] for key in self._obs_keys}
+        next_obs_idx = episode["timesteps"][min(idx + self._nstep, episode_len(episode) - 1)]
+        next_observation = {key: episode[key][next_obs_idx] for key in self._obs_keys}
         return Batch(
             observations=observation,
             actions=action,
@@ -432,7 +434,7 @@ class OfflineReplayBuffer(IterableDataset):
             worker_id = 0
         for key, num_demo in self._num_demos.items():
             eps_fns = sorted(self._replay_dir.glob(f"{key}_*.npz"), key=lambda x: int(str(x).split("_")[-2]))
-            for eps_fn in eps_fns[:num_demo]:
+            for eps_fn in tqdm(eps_fns[:num_demo], desc="load episodes", position=worker_id, leave=False, ncols=0):
                 eps_tp, eps_idx, eps_len = eps_fn.stem.split("_")
                 eps_idx, eps_len = map(lambda x: int(x), [eps_idx, eps_len])
                 assert eps_tp == key, f"{eps_fn} is not {key}."
@@ -462,7 +464,6 @@ class OfflineReplayBuffer(IterableDataset):
     def _sample(self):
         episode = self._sample_episode()
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
-        obs = episode["observations"][episode["timesteps"][idx]]
 
         # action normalization!
         action = episode["actions"][idx]
@@ -471,7 +472,6 @@ class OfflineReplayBuffer(IterableDataset):
         action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
         action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
 
-        next_obs = episode["next_observations"][episode["timesteps"][idx + self._nstep - 1]]
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -479,8 +479,10 @@ class OfflineReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        observation = self._split_observations(obs)
-        next_observation = self._split_observations(next_obs)
+        obs_idx = episode["timesteps"][idx]
+        observation = {key: episode[key][obs_idx] for key in self._obs_keys}
+        next_obs_idx = episode["timesteps"][min(idx + self._nstep, episode_len(episode) - 1)]
+        next_observation = {key: episode[key][next_obs_idx] for key in self._obs_keys}
 
         return Batch(
             observations=observation,

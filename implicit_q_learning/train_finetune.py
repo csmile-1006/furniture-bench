@@ -16,6 +16,7 @@ from agents.awac.awac_learner import AWACLearner
 from agents.bc.bc_learner import BCLearner
 from agents.dapg.dapg_learner import DAPGLearner
 from agents.iql.iql_learner import IQLLearner
+from agents.sac.sac_learner import SACLearner
 from agents.td3.td3_learner import TD3Learner
 from bpref_v2.data.instruct import CLASS_TO_PHASE, get_furniturebench_instruct
 from bpref_v2.data.label_reward_furniturebench import _postprocess_phases, load_reward_model
@@ -60,7 +61,7 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
-flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "bc"], "agent type.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "sac", "bc"], "agent type.")
 flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
 
 # Training Setting.
@@ -514,6 +515,15 @@ def main(_):
             offline_batch_size=offline_batch_size,
             **kwargs,
         )
+    elif FLAGS.agent_type == "sac":
+        agent = SACLearner(
+            FLAGS.seed,
+            sample_obs,
+            sample_act,
+            obs_keys=obs_keys,
+            offline_batch_size=offline_batch_size,
+            **kwargs,
+        )
     elif FLAGS.agent_type == "bc":
         agent = BCLearner(
             FLAGS.seed,
@@ -709,7 +719,7 @@ def main(_):
             if i != start_step and (i - FLAGS.num_pretraining_steps) % FLAGS.ckpt_interval == 0:
                 agent.save(ft_ckpt_dir, i)
 
-            if (i - FLAGS.num_pretraining_steps) and (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
+            if (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
                 eval_stats = evaluate(agent, env, FLAGS.eval_episodes, state=STATES)
 

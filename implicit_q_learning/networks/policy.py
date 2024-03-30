@@ -40,10 +40,10 @@ class NormalTanhPolicy(nn.Module):
             features, training=training
         )
 
-        means = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseMean")(outputs)
+        means = nn.Dense(self.action_dim, kernel_init=default_init(1.0), name="OutputDenseMean")(outputs)
 
         if self.state_dependent_std:
-            stds = nn.Dense(self.action_dim, kernel_init=default_init(), name="OutputDenseStd")(outputs)
+            stds = nn.Dense(self.action_dim, kernel_init=default_init(1.0), name="OutputDenseStd")(outputs)
         else:
             stds = self.param("OutputStd", nn.initializers.zeros, (self.action_dim,))
 
@@ -77,16 +77,16 @@ class NormalTanhMixturePolicy(nn.Module):
             features, training=training
         )
 
-        logits = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseLogit")(
+        logits = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(1.0), name="OutputDenseLogit")(
             outputs
         )
         means = nn.Dense(
             self.action_dim * self.num_modes,
-            kernel_init=default_init(),
+            kernel_init=default_init(1.0),
             bias_init=nn.initializers.normal(stddev=1.0),
             name="OutputDenseMean",
         )(outputs)
-        scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(), name="OutputDenseScales")(
+        scales = nn.Dense(self.action_dim * self.num_modes, kernel_init=default_init(1.0), name="OutputDenseScales")(
             outputs
         )
         scales = (self.std_max - self.std_min) * nn.sigmoid(scales) + self.std_min
