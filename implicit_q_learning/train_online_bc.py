@@ -169,7 +169,7 @@ def compute_multimodal_reward(reward_model, **kwargs):
             stacked_timesteps.append(np.stack(timestep_stack))
             stacked_attn_masks.append(np.stack(attn_mask_stack))
 
-        stacked_images = {ik: np.asarray(val) for ik, val in stacked_images.items()}
+        stacked_images = {ik: np.moveaxis(val, -3, -1) for ik, val in stacked_images.items()}
         stacked_timesteps = np.asarray(stacked_timesteps)
         stacked_attn_masks = np.asarray(stacked_attn_masks)
 
@@ -468,9 +468,10 @@ def main(_):
             ),
             dtype=np.float32,
         )
+    sample_obs = {key: val[np.newaxis] for key, val in sample_obs.items()}
     sample_act = env.action_space.sample()[:1]
 
-    obs_keys = [key for key in env.observation_space.spaces.keys() if key not in ["color_image1", "color_image2"]]
+    obs_keys = [key for key in env.observation_space.spaces.keys() if key not in ["image1", "image2"]]
     if FLAGS.use_text_feature:
         obs_keys.append("text_feature")
     obs_keys = tuple(sorted(obs_keys))

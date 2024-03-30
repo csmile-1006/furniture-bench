@@ -10,14 +10,28 @@ import numpy as np
 import optax
 from agents.bc.actor import bc_update_actor
 from networks import multiplexer, policy
-from networks.common import Batch, ConcatEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
+from networks.common import (
+    Batch,
+    ConcatEncoder,
+    InfoDict,
+    IntermediateTransformerEncoder,
+    Model,
+    PRNGKey,
+    TransformerEncoder,
+    batched_random_crop,
+)
 
 
 @partial(jax.jit)
 def _update_bc_jit(
     rng: PRNGKey, actor: Model, batch: Batch, expl_noise: float
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
-    key, rng = jax.random.split(rng)
+    batch_observations = batch.observations
+    for ok in batch_observations:
+        if "color" in ok:
+            rng, key = jax.random.split(rng)
+            batch_observations[ok] = batched_random_crop(key, batch_observations[ok])
+    batch._replace(observations=batch_observations)
     new_actor, actor_info = bc_update_actor(key, actor, batch, expl_noise)
 
     return (
@@ -60,19 +74,19 @@ class BCLearner(object):
         rng = jax.random.PRNGKey(seed)
         rng, actor_key = jax.random.split(rng, 2)
 
-        if len(observations["image1"].shape) == 3 or len(observations["image1"].shape) == 2:
-            observations["image1"] = observations["image1"][np.newaxis]
-            observations["image2"] = observations["image2"][np.newaxis]
-        if len(observations["robot_state"].shape) == 2:
-            observations["robot_state"] = observations["robot_state"][np.newaxis]
-        if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
-            observations["text_feature"] = observations["text_feature"][np.newaxis]
+        # if len(observations["image1"].shape) == 3 or len(observations["image1"].shape) == 2:
+        #     observations["image1"] = observations["image1"][np.newaxis]
+        #     observations["image2"] = observations["image2"][np.newaxis]
+        # if len(observations["robot_state"].shape) == 2:
+        #     observations["robot_state"] = observations["robot_state"][np.newaxis]
+        # if observations.get("text_feature") is not None and len(observations["text_feature"].shape) == 2:
+        #     observations["text_feature"] = observations["text_feature"][np.newaxis]
 
         if encoder_type == "concat":
             print("[INFO] use ConcatEncoder")
             actor_encoder_cls = partial(ConcatEncoder, obs_keys=obs_keys)
             multiplexer_cls = multiplexer.ConcatMultiplexer
-        elif encoder_type.startswith("transformer"):
+        elif encoder_type == "transformer":
             actor_encoder_cls = partial(
                 TransformerEncoder,
                 emb_dim=emb_dim,
@@ -84,14 +98,24 @@ class BCLearner(object):
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
                 obs_keys=obs_keys,
-                return_intermeidate=encoder_type == "transformer_intermediate",
             )
-            if encoder_type == "transformer":
-                print("[INFO] use TransformerEncoder")
-                multiplexer_cls = multiplexer.SequentialMultiplexer
-            if encoder_type == "transformer_intermediate":
-                print("[INFO] use TransformerEncoder with intermediate values.")
-                multiplexer_cls = multiplexer.SequentialInterMediateMultiplexer
+            print("[INFO] use TransformerEncoder")
+            multiplexer_cls = multiplexer.SequentialMultiplexer
+        elif encoder_type == "transformer_intermediate":
+            actor_encoder_cls = partial(
+                IntermediateTransformerEncoder,
+                emb_dim=emb_dim,
+                depth=depth,
+                num_heads=num_heads,
+                att_drop=0.0 if dropout_rate is None else dropout_rate,
+                drop=0.0 if dropout_rate is None else dropout_rate,
+                normalize_inputs=normalize_inputs,
+                activations=activations,
+                use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
+            )
+            print("[INFO] use TransformerEncoder with intermediate values.")
+            multiplexer_cls = multiplexer.SequentialMultiplexer
 
         action_dim = actions.shape[-1]
         actor_cls = partial(
@@ -107,7 +131,6 @@ class BCLearner(object):
         actor_def = multiplexer_cls(
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
-            stop_gradient=False,
         )
         optimiser = optax.adamw(**actor_optim_kwargs)
 

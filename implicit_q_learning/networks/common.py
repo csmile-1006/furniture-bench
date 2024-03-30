@@ -323,7 +323,7 @@ class ConcatEncoder(nn.Module):
         return features
 
 
-class TransformerEncoder(nn.Module):
+class IntermediateTransformerEncoder(nn.Module):
     emb_dim: int = 1024
     depth: int = 2
     att_drop: float = 0.0
@@ -331,11 +331,37 @@ class TransformerEncoder(nn.Module):
     num_heads: int = 8
     mlp_ratio: int = 4
     obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
-    stop_gradient: bool = False
     normalize_inputs: bool = True
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
     use_sigmareparam: bool = True
-    return_intermeidate: bool = False
+
+    def setup(self):
+        from bpref_v2.third_party.openai.model import load_liv_model, normalize_image
+
+        self.pvr_model, self.pvr_model_var = load_liv_model()
+        self.normalize_image = normalize_image
+        self.visual_descriptor_net = VisualDescriptorsNet(pyramid_fuse_layers=[2, 3, 4], d_model=self.emb_dim)
+
+    def _get_pvr_feature(self, images):
+        original_shape = images.shape[:2]
+        images = jnp.reshape(images, (-1,) + images.shape[-3:])
+        images = jnp.moveaxis(images, -3, -1)
+        if images.shape[-3] != 224:
+            images = jax.image.resize(
+                images, (images.shape[0], 224, 224, images.shape[-1]), method="bicubic"
+            )  # to meet the input size of the clip model
+        images = (images / 255.0).astype(jnp.float32)
+        images = self.normalize_image(images)
+        image_feat = self.pvr_model.apply(
+            self.pvr_model_var,
+            images,
+            method=self.pvr_model.get_full_image_feature,
+        )
+        all_features = [
+            jnp.reshape(image_feat[idx], original_shape[:2] + image_feat[idx].shape[-3:])
+            for idx in range(len(image_feat))
+        ]
+        return all_features
 
     @nn.compact
     def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
@@ -344,7 +370,12 @@ class TransformerEncoder(nn.Module):
             if v.ndim == 2:
                 v = v[jnp.newaxis]
             if k in self.obs_keys:
-                features[k] = v
+                if "color" in k:
+                    pvr_feature = self._get_pvr_feature(v)
+                    visual_sentences = self.visual_descriptor_net(pvr_feature, train=not deterministic)
+                    features[k] = visual_sentences
+                else:
+                    features[k] = v
         batch_size, num_timestep, _ = features[self.obs_keys[0]].shape
 
         features = concat_multiple_emb(features)
@@ -373,12 +404,170 @@ class TransformerEncoder(nn.Module):
             intermediate_values.append(x)
 
         x = nn.LayerNorm()(x)
-        if self.stop_gradient:
-            x = lax.stop_gradient(x)
-        if self.return_intermeidate:
-            return x, intermediate_values
-        else:
-            return x
+        return x
+
+
+class VisualDescriptorsNet(nn.Module):
+    """Produces visual sentence."""
+
+    pyramid_fuse_layers: Sequence[int]
+    d_model: int
+
+    @nn.compact
+    def __call__(self, x, *, train):
+        pixel_features = x
+        batch_size, seq_len = pixel_features[self.pyramid_fuse_layers[0]].shape[:2]
+        layer_pixel_x = []
+
+        normal_initializer = jax.nn.initializers.normal(stddev=0.05)
+        for pyr_idx in self.pyramid_fuse_layers:
+            pixel_x = pixel_features[pyr_idx]
+
+            h = jnp.shape(pixel_x)[-3]
+            w = jnp.shape(pixel_x)[-2]
+
+            pixel_x = nn.Dense(self.d_model, kernel_init=normal_initializer, bias_init=normal_initializer)(pixel_x)
+
+            pixel_x = self._flatten(pixel_x)
+            # Scale the embeddings.
+            pixel_x *= jnp.sqrt(float(self.d_model))
+
+            pos_2d = positional_encoding2d(self.d_model, h, w)
+
+            pixel_x = pixel_x + pos_2d
+
+            layer_pixel_x.append(pixel_x)
+
+        pixel_sentence = jnp.concatenate(layer_pixel_x, axis=-2).reshape(batch_size, seq_len, -1)
+        return pixel_sentence
+
+    @staticmethod
+    def _flatten(x):
+        nb, ns, nw, nh, nc = x.shape
+        return jnp.reshape(x, (nb, ns, nw * nh, nc))
+
+
+def positional_encoding2d(d_model, height, width, flatten=True):
+    """Creates a 2d fixed sin/cos embedding."""
+    if d_model % 4 != 0:
+        raise ValueError("Cannot use sin/cos positional encoding with " "odd dimension (got dim={:d})".format(d_model))
+    pe = jnp.zeros([d_model, height, width])
+    # Each dimension use half of d_model
+    d_model = int(d_model / 2)
+    div_term = jnp.exp(jnp.arange(0.0, d_model, 2) * -(jnp.log(10000.0) / d_model))
+    pos_w = jnp.expand_dims(jnp.arange(0.0, width), 1)
+    pos_h = jnp.expand_dims(jnp.arange(0.0, height), 1)
+
+    pe = pe.at[0:d_model:2, :, :].set(
+        jnp.tile(jnp.expand_dims(jnp.transpose(jnp.sin(pos_w * div_term)), 1), [1, height, 1])
+    )
+    pe = pe.at[1:d_model:2, :, :].set(
+        jnp.tile(jnp.expand_dims(jnp.transpose(jnp.cos(pos_w * div_term)), 1), [1, height, 1])
+    )
+    pe = pe.at[d_model::2, :, :].set(
+        jnp.tile(jnp.expand_dims(jnp.transpose(jnp.sin(pos_h * div_term)), 2), [1, 1, width])
+    )
+    pe = pe.at[d_model + 1 :: 2, :, :].set(
+        jnp.tile(jnp.expand_dims(jnp.transpose(jnp.cos(pos_h * div_term)), 2), [1, 1, width])
+    )
+
+    if flatten:
+        pe = jnp.reshape(pe, [height * width, d_model * 2])
+    else:
+        pe = jnp.reshape(pe, [height, width, d_model * 2])
+    # Add batch axis.
+    return pe[None, Ellipsis]
+
+
+def random_crop(key, img, padding):
+    crop_from = jax.random.randint(key, (2,), 0, 2 * padding + 1)
+    crop_from = jnp.concatenate([crop_from, jnp.zeros((2,), dtype=jnp.int32)])
+    padded_img = jnp.pad(img, ((padding, padding), (padding, padding), (0, 0), (0, 0)), mode="edge")
+    return jax.lax.dynamic_slice(padded_img, crop_from, img.shape)
+
+
+def batched_random_crop(key, imgs, padding=10):
+    keys = jax.random.split(key, imgs.shape[0])
+    return jax.vmap(random_crop, (0, 0, None))(keys, imgs, padding)
+
+
+class TransformerEncoder(nn.Module):
+    emb_dim: int = 1024
+    depth: int = 2
+    att_drop: float = 0.0
+    drop: float = 0.0
+    num_heads: int = 8
+    mlp_ratio: int = 4
+    obs_keys: Sequence[str] = ("image1", "image2", "text_feature")
+    normalize_inputs: bool = True
+    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu
+    use_sigmareparam: bool = True
+
+    def setup(self):
+        from bpref_v2.third_party.openai.model import load_liv_model, normalize_image
+
+        self.pvr_model, self.pvr_model_var = load_liv_model()
+        self.normalize_image = normalize_image
+
+    def _get_pvr_feature(self, images):
+        original_shape = images.shape[:2]
+        images = jnp.reshape(images, (-1,) + images.shape[-3:])
+        images = jnp.moveaxis(images, -3, -1)
+        if images.shape[-3] != 224:
+            images = jax.image.resize(
+                images, (images.shape[0], 224, 224, images.shape[-1]), method="bicubic"
+            )  # to meet the input size of the clip model
+        images = (images / 255.0).astype(jnp.float32)
+        images = self.normalize_image(images)
+        image_feat = self.pvr_model.apply(
+            self.pvr_model_var,
+            images,
+            method=self.pvr_model.encode_image,
+        )
+        image_feat = jnp.reshape(image_feat, original_shape[:2] + image_feat.shape[-1:])
+        return image_feat
+
+    @nn.compact
+    def __call__(self, observations: Dict[str, jnp.ndarray], deterministic=False, custom_mask=None):
+        features = {}
+        for k, v in observations.items():
+            if v.ndim == 2:
+                v = v[jnp.newaxis]
+            if k in self.obs_keys:
+                if "color" in k:
+                    pvr_feature = self._get_pvr_feature(v)
+                    features[k] = pvr_feature
+                else:
+                    features[k] = v
+        batch_size, num_timestep, _ = features[self.obs_keys[0]].shape
+
+        features = concat_multiple_emb(features)
+        features = InputNorm(features.shape[-1], skip=not self.normalize_inputs)(features, deterministic=deterministic)
+        embed = MLP(
+            [self.emb_dim, self.emb_dim, self.emb_dim],
+            dropout_rate=self.drop,
+            activations=self.activations,
+            name="FeatureMLP",
+        )(features, training=not deterministic)
+        embed = embed + get_1d_sincos_pos_embed(embed.shape[-1], num_timestep)
+        embed = nn.LayerNorm()(embed)
+
+        x = embed
+        intermediate_values = []
+        for _ in range(self.depth):
+            x = Block(
+                dim=self.emb_dim,
+                num_heads=self.num_heads,
+                mlp_ratio=self.mlp_ratio,
+                att_drop=self.att_drop,
+                drop=self.drop,
+                activations=self.activations,
+                use_sigmareparam=self.use_sigmareparam,
+            )(x, deterministic, custom_mask)
+            intermediate_values.append(x)
+
+        x = nn.LayerNorm()(x)
+        return x
 
 
 class PrenormPixelLangBlock(nn.Module):
@@ -464,8 +653,6 @@ class CrossAttnTransformerEncoder(nn.Module):
             )(fused_feature, deterministic, custom_mask)
 
         x = nn.LayerNorm()(x)
-        if self.stop_gradient:
-            x = lax.stop_gradient(x)
         return x
 
 

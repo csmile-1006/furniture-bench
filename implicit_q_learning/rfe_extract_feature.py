@@ -1,11 +1,10 @@
 import io
 import pickle
 from pathlib import Path
-from collections import deque
 
 import numpy as np
-import torch
 import scipy
+import torch
 from absl import app, flags
 
 FLAGS = flags.FLAGS
@@ -15,6 +14,8 @@ flags.DEFINE_string("out_dir", None, "Path to save converted data.")
 flags.DEFINE_boolean("use_r3m", False, "Use r3m to encode images.")
 flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
 flags.DEFINE_boolean("use_liv", False, "Use liv to encode images.")
+flags.DEFINE_boolean("use_liv_intermediate", False, "Use liv to encode images (+ intermediate features).")
+flags.DEFINE_boolean("use_raw", False, "Use raw image.")
 flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
 flags.DEFINE_integer("num_success_demos", -1, "Number of demos to convert")
 flags.DEFINE_integer("num_failure_demos", -1, "Number of demos to convert")
@@ -40,7 +41,7 @@ def save_episode(episode, fn):
 
 
 def main(_):
-    if FLAGS.num_threads > 0:
+    if FLAGS.num_threads > 0 and (FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv):
         print(f"Setting torch.num_threads to {FLAGS.num_threads}")
         torch.set_num_threads(FLAGS.num_threads)
 
@@ -65,6 +66,39 @@ def main(_):
         from liv import load_liv
 
         encoder = load_liv()
+
+    if FLAGS.use_liv_intermediate:
+        # Use LIV for the image encoder.
+        from bpref_v2.third_party.openai.model import load_liv_model, normalize_image
+        from liv import load_liv
+
+        clip_model, clip_model_var, _ = load_liv_model()
+
+        import jax
+        import jax.numpy as jnp
+
+        @jax.jit
+        def _get_pvr_feature(clip_model_var, images):
+            images = jnp.reshape(images, (-1,) + images.shape[-3:])
+            images = jnp.moveaxis(images, -3, -1)
+            if images.shape[-3] != 224:
+                images = jax.image.resize(
+                    images, (images.shape[0], 224, 224, images.shape[-1]), method="bicubic"
+                )  # to meet the input size of the clip model
+            images = (images / 255.0).astype(jnp.float32)
+            images = normalize_image(images)
+            image_feat = clip_model.apply(
+                clip_model_var,
+                images,
+                method=clip_model.get_full_image_feature,
+            )
+            all_features = {idx: image_feat[idx] for idx in range(len(image_feat))}
+
+            return all_features
+
+        from functools import partial
+
+        encoder = partial(_get_pvr_feature, clip_model_var)
 
     if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
         encoder.eval()
@@ -135,47 +169,93 @@ def main(_):
                         img1_feature[_l : _l + FLAGS.batch_size] = encoder(_img1).cpu().detach().numpy()
                         img2_feature[_l : _l + FLAGS.batch_size] = encoder(_img2).cpu().detach().numpy()
 
-            stacked_timesteps = []
-            timestep_stacks = {key: deque([], maxlen=FLAGS.window_size) for key in range(FLAGS.skip_frame)}
-            for _ in range(FLAGS.window_size):
-                for j in range(FLAGS.skip_frame):
-                    timestep_stacks[j].append(0)
+            if FLAGS.use_liv_intermediate:
+                img1 = [x["observations"][_l]["color_image1"] for _l in range(length)]
+                img2 = [x["observations"][_l]["color_image2"] for _l in range(length)]
+                img1 = np.stack(img1)
+                img2 = np.stack(img2)
 
-            for i in range(length - 1):
-                mod = i % FLAGS.skip_frame
-                timestep_stack = timestep_stacks[mod]
-                timestep_stack.append(i)
-                stacked_timesteps.append(np.stack(timestep_stack))
+                img1_feature, img2_feature = dict(), dict()
+
+                for _l in range(0, length, FLAGS.batch_size):
+                    _img1 = img1[_l : _l + FLAGS.batch_size]
+                    _img2 = img2[_l : _l + FLAGS.batch_size]
+                    _img1_feature, _img2_feature = encoder(_img1), encoder(_img2)
+                    for key in _img1_feature:
+                        if img1_feature.get(key) is None:
+                            img1_feature[key] = []
+                        if img2_feature.get(key) is None:
+                            img2_feature[key] = []
+                        img1_feature[key].append(np.asarray(_img1_feature[key]))
+                        img2_feature[key].append(np.asarray(_img2_feature[key]))
+
+                img1_feature = {key: np.concatenate(val, axis=0) for key, val in img1_feature.items()}
+                img2_feature = {key: np.concatenate(val, axis=0) for key, val in img2_feature.items()}
 
             cumsum_skills = np.cumsum(x["skills"])
-
             for _len in range(length - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip or FLAGS.use_liv:
                     image1 = img1_feature[_len]
                     next_image1 = img1_feature[min(_len + 1, length - 2)]
                     image2 = img2_feature[_len]
                     next_image2 = img1_feature[min(_len + 1, length - 2)]
-                    timestep = stacked_timesteps[_len]
-                    next_timestep = stacked_timesteps[min(_len + 1, length - 2)]
-                else:
-                    raise ValueError("You have to choose either use_r3m or use_vip or use_liv.")
+                    obs_.append(
+                        {
+                            "image1": image1,
+                            "image2": image2,
+                            "robot_state": x["observations"][_len]["robot_state"],
+                        }
+                    )
+                    next_obs_.append(
+                        {
+                            "image1": next_image1,
+                            "image2": next_image2,
+                            "robot_state": x["observations"][min(_len + 1, length - 2)]["robot_state"],
+                        }
+                    )
 
-                obs_.append(
-                    {
-                        "image1": image1,
-                        "image2": image2,
-                        "timestep": timestep,
-                        "robot_state": x["observations"][_len]["robot_state"],
+                elif FLAGS.use_liv_intermediate:
+                    _image1_feature = {f"image1_{key}": img1_feature[key][_len] for key in img1_feature.keys()}
+                    _image1_next_feature = {
+                        f"image1_{key}": img1_feature[key][min(_len + 1, length - 2)] for key in img1_feature.keys()
                     }
-                )
-                next_obs_.append(
-                    {
-                        "image1": next_image1,
-                        "image2": next_image2,
-                        "timestep": next_timestep,
-                        "robot_state": x["observations"][min(_len + 1, length - 2)]["robot_state"],
+                    _image2_feature = {f"image2_{key}": img2_feature[key][_len] for key in img2_feature.keys()}
+                    _image2_next_feature = {
+                        f"image2_{key}": img2_feature[key][min(_len + 1, length - 2)] for key in img2_feature.keys()
                     }
-                )
+                    obs_.append(
+                        {
+                            **_image1_feature,
+                            **_image2_feature,
+                            "robot_state": x["observations"][_len]["robot_state"],
+                        }
+                    )
+                    next_obs_.append(
+                        {
+                            **_image1_feature,
+                            **_image2_feature,
+                            "robot_state": x["observations"][_len]["robot_state"],
+                        }
+                    )
+                elif FLAGS.use_raw:
+                    obs_.append(
+                        {
+                            "color_image1": x["observations"][_len]["color_image1"],
+                            "color_image2": x["observations"][_len]["color_image2"],
+                            "robot_state": x["observations"][_len]["robot_state"],
+                        }
+                    )
+                    next_obs_.append(
+                        {
+                            "color_image1": x["observations"][min(_len + 1, length - 2)]["color_image1"],
+                            "color_image2": x["observations"][min(_len + 1, length - 2)]["color_image2"],
+                            "robot_state": x["observations"][min(_len + 1, length - 2)]["robot_state"],
+                        }
+                    )
+                else:
+                    raise ValueError(
+                        "You have to choose either use_r3m or use_vip or use_liv or use_liv_intermediate or use_raw."
+                    )
 
                 action_.append(x["actions"][_len])
                 reward_.append(x["rewards"][_len])
