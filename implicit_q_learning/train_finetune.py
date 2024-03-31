@@ -644,7 +644,7 @@ def main(_):
                                     idx
                                 ]
                         info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
-                        if num_episodes % 5 * FLAGS.num_envs == 0:
+                        if num_episodes % 1 == 0:
                             jax.clear_caches()
 
                     if i > start_training + FLAGS.num_envs or FLAGS.prefill_replay_buffer:

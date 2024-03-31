@@ -71,15 +71,9 @@ def load_episode(
         eps_len = episode_len(episode)
         stacked_timesteps = _get_stacked_timesteps(eps_len, window_size, skip_frame)
         for i in range(eps_len):
-            # observations.append(
-            #     np.concatenate([episode["observations"][i][key] for key in ["color_image1", "color_image2"]], axis=-1)
-            # )
             for key in obs_keys:
                 observations[key].append(episode["observations"][i][key])
             timesteps.append(stacked_timesteps[i])
-            # color_image1.append(episode["observations"][i]["color_image1"])
-            # color_image2.append(episode["observations"][i]["color_image2"])
-            # robot_state.append(episode["observations"][i]["robot_state"])
         observations = {key: np.asarray(value) for key, value in observations.items()}
 
         if reward_type == "sparse":
@@ -92,7 +86,6 @@ def load_episode(
             rewards = episode["diffusion_rewards"] / lambda_mr
         elif reward_type == "ours":
             _min, _max = reward_stat["min"], reward_stat["max"]
-            # rewards = (episode["multimodal_rewards"] - _min) / (_max - _min)
             rewards = episode["multimodal_rewards"] - _min
             rewards = rewards / lambda_mr
             rewards = rewards + (episode["rewards"] / lambda_mr)
@@ -112,14 +105,11 @@ def load_episode(
 
     return dict(
         **observations,
-        # observations=np.asarray(observations),
         timesteps=np.asarray(timesteps),
         actions=episode["actions"],
         rewards=rewards,
         masks=1.0 - episode["terminals"],
         dones_float=episode["terminals"],
-        # next_observations=episode["next_observations"],
-        # next_observations=np.asarray(next_observations),
     )
 
 
@@ -485,18 +475,6 @@ class OfflineReplayBuffer(IterableDataset):
             reward += discount * step_reward
             discount *= episode["masks"][idx + i] * self._discount
 
-        # obs_idx = episode["timesteps"][idx]
-        # observation = dict(
-        #     color_image1=episode["color_image1"][obs_idx],
-        #     color_image2=episode["color_image2"][obs_idx],
-        #     robot_state=episode["robot_state"][obs_idx],
-        # )
-        # next_obs_idx = episode["timesteps"][min(idx + self._nstep, episode_len(episode) - 1)]
-        # next_observation = dict(
-        #     color_image1=episode["color_image1"][next_obs_idx],
-        #     color_image2=episode["color_image2"][next_obs_idx],
-        #     robot_state=episode["robot_state"][next_obs_idx],
-        # )
         obs_idx = episode["timesteps"][idx]
         observation = {key: episode[key][obs_idx] for key in self._obs_keys}
         next_obs_idx = episode["timesteps"][min(idx + self._nstep, episode_len(episode) - 1)]
