@@ -33,10 +33,7 @@ class BCLearner(object):
         seed: int,
         observations: jnp.ndarray,
         actions: jnp.ndarray,
-        actor_optim_kwargs: dict = {
-            "learning_rate": 3e-4,
-            "weight_decay": 1e-4,
-        },
+        actor_lr: float = 3e-4,
         hidden_dims: Sequence[int] = (256, 256),
         emb_dim: int = 256,
         depth: int = 2,
@@ -109,7 +106,7 @@ class BCLearner(object):
             network_cls=actor_cls,
             stop_gradient=False,
         )
-        optimiser = optax.adamw(**actor_optim_kwargs)
+        optimiser = optax.adam(actor_lr)
 
         actor_key, actor_dropout_key = jax.random.split(actor_key)
         actor = Model.create(
