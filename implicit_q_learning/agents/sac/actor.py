@@ -30,15 +30,14 @@ def sac_update_actor(
             mutable=actor.extra_variables.keys(),
         )
         sampled_actions = dist.sample(seed=key2)
-        log_probs = dist.log_prob(sampled_actions)
+        online_log_probs = dist.log_prob(sampled_actions)
 
         qs = critic(batch.observations, sampled_actions)
         q = qs.mean(axis=0)
-        actor_q_loss = (log_probs * temp() - q).mean()
+        actor_q_loss = (online_log_probs * temp() - q).mean()
 
         if use_bc:
-            log_probs = dist.log_prob(batch.actions)
-            offline_log_probs = log_probs[:offline_batch_size]
+            offline_log_probs = dist.log_prob(batch.actions)[:offline_batch_size]
             bc_loss = -offline_log_probs.mean()
             actor_loss = actor_q_loss + bc_weight * bc_loss
 
@@ -55,7 +54,7 @@ def sac_update_actor(
                 "bc_loss_min": -offline_log_probs.min(),
                 "bc_loss_max": -offline_log_probs.max(),
                 "bc_loss_std": -offline_log_probs.std(),
-                "entropy": -log_probs.mean(),
+                "entropy": -online_log_probs.mean(),
                 "updated_states": updated_states,
             }
         else:
@@ -66,7 +65,7 @@ def sac_update_actor(
                 "actor_q_min": -q.min(),
                 "actor_q_max": -q.max(),
                 "actor_q_std": -q.std(),
-                "entropy": -log_probs.mean(),
+                "entropy": -online_log_probs.mean(),
                 "updated_states": updated_states,
             }
 
