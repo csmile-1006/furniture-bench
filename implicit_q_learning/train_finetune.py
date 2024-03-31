@@ -384,14 +384,14 @@ def combine(one_dict, other_dict):
 
 def _initialize_traj_dict():
     trajectories = {
-        env_idx: {key: [] for key in ["observations", "actions", "rewards", "terminals", "next_observations", "phases"]}
+        env_idx: {key: [] for key in ["observations", "actions", "rewards", "terminals", "phases"]}
         for env_idx in range(FLAGS.num_envs)
     }
     return trajectories
 
 
 def _reset_traj_dict():
-    return {key: [] for key in ["observations", "actions", "rewards", "terminals", "next_observations", "phases"]}
+    return {key: [] for key in ["observations", "actions", "rewards", "terminals", "phases"]}
 
 
 def main(_):
@@ -627,9 +627,6 @@ def main(_):
                 trajectories[env_idx]["observations"].append(
                     {key: observation[key][env_idx][-1] for key in observation.keys()}
                 )
-                trajectories[env_idx]["next_observations"].append(
-                    {key: next_observation[key][env_idx][-1] for key in next_observation.keys()}
-                )
                 trajectories[env_idx]["actions"].append(action[env_idx])
                 trajectories[env_idx]["rewards"].append(reward[env_idx])
                 trajectories[env_idx]["terminals"].append(done[env_idx])
@@ -646,9 +643,6 @@ def main(_):
                                 trajectories[env_idx]["observations"][idx]["text_feature"] = output["text_features"][
                                     idx
                                 ]
-                                trajectories[env_idx]["next_observations"][idx]["text_feature"] = output[
-                                    "text_features"
-                                ][min(idx + 1, len(output["rewards"]) - 1)]
                         info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
                         if num_episodes % 5 * FLAGS.num_envs == 0:
                             jax.clear_caches()
@@ -689,14 +683,6 @@ def main(_):
                     offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                     combined = combine(offline_batch, online_batch)
                     batch = Batch(**combined)
-                    if "antmaze" in FLAGS.env_name:
-                        batch = Batch(
-                            observations=batch.observations,
-                            actions=batch.actions,
-                            rewards=batch.rewards - 1,
-                            masks=batch.masks,
-                            next_observations=batch.next_observations,
-                        )
                     update_info = agent.update(batch, update_bc=False, utd_ratio=FLAGS.utd_ratio)
 
                     if i % FLAGS.log_interval == 0:
