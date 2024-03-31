@@ -13,7 +13,7 @@ def get_config():
 
     config.dropout_rate = None
 
-    config.encoder_type = "concat"
+    config.encoder_type = "transformer"
     # transformer setup
     config.emb_dim = 1024
     config.depth = 3

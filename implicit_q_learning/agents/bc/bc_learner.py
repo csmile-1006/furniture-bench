@@ -102,6 +102,7 @@ class BCLearner(object):
             tanh_squash_distribution=False,
         )
         actor_def = multiplexer_cls(
+            latent_dim=emb_dim,
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
             stop_gradient=False,

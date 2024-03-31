@@ -211,6 +211,7 @@ class SACLearner(object):
             tanh_squash_distribution=False,
         )
         actor_def = multiplexer_cls(
+            latent_dim=emb_dim,
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
             stop_gradient=False,
@@ -225,11 +226,11 @@ class SACLearner(object):
         critic_cls = partial(
             value_net.CriticEnsemble,
             hidden_dims,
-            emb_dim,
             critic_layer_norm=critic_layer_norm,
             num_qs=self.num_qs,
         )
         critic_def = multiplexer_cls(
+            latent_dim=emb_dim,
             encoder_cls=critic_encoder_cls,
             network_cls=critic_cls,
             stop_gradient=False,
@@ -328,6 +329,8 @@ class SACLearner(object):
         self.critic.save(path)
         path = f"{ckpt_dir}/{step}_target_critic"
         self.target_critic.save(path)
+        path = f"{ckpt_dir}/{step}_temperature"
+        self.temp.save(path)
 
     def load(self, ckpt_dir, step):
         path = f"{ckpt_dir}/{step}_actor"
@@ -336,6 +339,8 @@ class SACLearner(object):
         self.critic = self.critic.load(path)
         path = f"{ckpt_dir}/{step}_target_critic"
         self.target_critic = self.target_critic.load(path)
+        path = f"{ckpt_dir}/{step}_temperature"
+        self.temp = self.temp.load(path)
 
     def load_actor(self, ckpt_dir, step):
         path = f"{ckpt_dir}/{step}_actor"

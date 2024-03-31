@@ -9,7 +9,6 @@ from networks.common import MLP
 
 class ValueCritic(nn.Module):
     hidden_dims: Sequence[int]
-    emb_dim: int
     critic_layer_norm: bool = False
 
     @nn.compact
@@ -21,7 +20,6 @@ class ValueCritic(nn.Module):
 
 class Critic(nn.Module):
     hidden_dims: Sequence[int]
-    emb_dim: int
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     training: bool = (False,)
     critic_layer_norm: bool = False
@@ -42,7 +40,6 @@ class Critic(nn.Module):
 
 class DoubleCritic(nn.Module):
     hidden_dims: Sequence[int]
-    emb_dim: int
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     critic_layer_norm: bool = False
 
@@ -52,13 +49,11 @@ class DoubleCritic(nn.Module):
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         critic1 = Critic(
             self.hidden_dims,
-            self.emb_dim,
             activations=self.activations,
             critic_layer_norm=self.critic_layer_norm,
         )(features, actions, training=training)
         critic2 = Critic(
             self.hidden_dims,
-            self.emb_dim,
             activations=self.activations,
             critic_layer_norm=self.critic_layer_norm,
         )(features, actions, training=training)
@@ -67,7 +62,6 @@ class DoubleCritic(nn.Module):
 
 class CriticEnsemble(nn.Module):
     hidden_dims: Sequence[int]
-    emb_dim: int
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     critic_layer_norm: bool = False
     num_qs: int = 2
@@ -84,7 +78,6 @@ class CriticEnsemble(nn.Module):
         )
         qs = VmapCritic(
             self.hidden_dims,
-            self.emb_dim,
             activations=self.activations,
             critic_layer_norm=self.critic_layer_norm,
         )(states, actions, training)

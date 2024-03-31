@@ -33,7 +33,7 @@ def sac_update_actor(
         log_probs = dist.log_prob(sampled_actions)
 
         qs = critic(batch.observations, sampled_actions)
-        q = qs.min(axis=0)
+        q = qs.mean(axis=0)
         actor_q_loss = (log_probs * temp() - q).mean()
 
         if use_bc:
