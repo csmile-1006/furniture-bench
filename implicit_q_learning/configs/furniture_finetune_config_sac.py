@@ -29,7 +29,7 @@ def get_config():
 
     # critic options
     config.num_qs = 10
-    config.num_min_qs = 1
+    config.num_min_qs = 2
     config.critic_max_grad_norm = None
     config.critic_layer_norm = True
 
