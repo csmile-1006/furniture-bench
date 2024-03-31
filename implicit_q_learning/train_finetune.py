@@ -252,7 +252,6 @@ def load_reward_stat(data_path):
         console.print(f"load reward stat file from {stat_path}.")
         reward_stat = np.load(stat_path)
         reward_stat = {key: reward_stat[key] for key in reward_stat}
-        reward_stat["min"] = reward_stat["min"] - 0.2 * np.fabs(reward_stat["min"])
     else:
         console.print("no stat file in this folder.")
         reward_stat = {"mean": 0.0, "std": 1.0, "var": 1.0, "min": 0.0, "max": 1.0}

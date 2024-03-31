@@ -88,6 +88,7 @@ def load_episode(
             _min, _max = reward_stat["min"], reward_stat["max"]
             # rewards = (episode["multimodal_rewards"] - _min) / (_max - _min)
             rewards = episode["multimodal_rewards"] - _min
+            rewards = np.clip(rewards, 0.0, np.inf)
             rewards = rewards / lambda_mr
             rewards = rewards + (episode["rewards"] / lambda_mr)
             if smoothe:
