@@ -49,7 +49,8 @@ def calql_update_critic(
             for k, val in obs.items()
         }
         dist = actor(repeated_obs, expl_noise)
-        actions, log_probs = dist.sample_and_log_prob(seed=key)
+        actions = dist.sample(seed=key)
+        log_probs = dist.log_prob(actions)
         return repeated_obs, actions, log_probs
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
