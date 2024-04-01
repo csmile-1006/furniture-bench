@@ -578,7 +578,7 @@ def main(_):
                 for k, v in eval_stats.items():
                     wandb.log({f"offline-evaluation/{k}": v}, step=i)
                 env.unset_eval_flag()
-        agent.save(ckpt_dir, i + 1)
+        agent.save(ckpt_dir, steps)
     del offline_loader
 
     offline_loader = make_offline_loader(
