@@ -19,6 +19,7 @@ def sac_update_actor(
 ) -> Tuple[Model, InfoDict]:
     key, rng = jax.random.split(key)
     key2, rng = jax.random.split(rng)
+    key3, rng = jax.random.split(rng)
 
     def actor_loss_fn(actor_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         dist, updated_states = actor.apply(
@@ -37,12 +38,17 @@ def sac_update_actor(
         actor_q_loss = (online_log_probs * temp() - q).mean()
 
         if use_bc:
-            offline_log_probs = dist.log_prob(batch.actions)[:offline_batch_size]
+            demo_dist, _ = actor.apply(
+                actor_params,
+                {key: value[:offline_batch_size] for key, value in batch.observations.items()},
+                expl_noise,
+                training=True,
+                rngs={"dropout": key3},
+                mutable=actor.extra_variables.keys(),
+            )
+            offline_log_probs = demo_dist.log_prob(batch.actions[:offline_batch_size])
             bc_loss = -offline_log_probs.mean()
             actor_loss = actor_q_loss + bc_weight * bc_loss
-
-            # lamb = alpha / abs(data_q.mean())
-            # actor_loss = lamb * actor_q_loss + bc_loss
 
             return actor_loss, {
                 "actor_loss": actor_loss,
