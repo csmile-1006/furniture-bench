@@ -133,6 +133,8 @@ class SACLearner(object):
         target_entropy: Optional[float] = None,
         backup_entropy: bool = True,
         init_temperature: float = 1.0,
+        fixed_alpha: bool = False,
+        init_alpha: float = 1.0,
         init_mean: Optional[np.ndarray] = None,
         policy_final_fc_init_scale: float = 1.0,
         dropout_rate: Optional[float] = None,
@@ -162,6 +164,8 @@ class SACLearner(object):
             self.target_entropy = target_entropy
 
         self.backup_entropy = backup_entropy
+        self.fixed_alpha = fixed_alpha
+        self.init_alpha = init_alpha
 
         self.tau = tau
         self.discount = discount

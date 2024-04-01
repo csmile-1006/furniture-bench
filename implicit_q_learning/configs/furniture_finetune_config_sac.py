@@ -20,6 +20,9 @@ def get_config():
 
     config.tau = 0.005  # For soft target updates.
     config.backup_entropy = False
+    config.fixed_alpha = True
+    config.init_alpha = 1.0
+    config.init_temperature = 1.0
 
     config.encoder_type = "transformer"
     # transformer setup
