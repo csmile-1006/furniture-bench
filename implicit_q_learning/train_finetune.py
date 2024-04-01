@@ -624,9 +624,11 @@ def main(_):
             reward, done = reward.squeeze(), done.squeeze()
 
             for env_idx in range(FLAGS.num_envs):
-                trajectories[env_idx]["observations"].append(
-                    {key: observation[key][env_idx][-1] for key in observation.keys()}
-                )
+                obs = {key: observation[key][env_idx][-1] for key in observation.keys()}
+                for key in obs:
+                    if "color" in key:
+                        obs[key] = obs[key].astype(np.uint8)
+                trajectories[env_idx]["observations"].append(obs)
                 trajectories[env_idx]["actions"].append(action[env_idx])
                 trajectories[env_idx]["rewards"].append(reward[env_idx])
                 trajectories[env_idx]["terminals"].append(done[env_idx])
@@ -644,7 +646,7 @@ def main(_):
                                     idx
                                 ]
                         info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
-                        if num_episodes % 1 == 0:
+                        if num_episodes % FLAGS.num_envs == 0:
                             jax.clear_caches()
 
                     if i > start_training + FLAGS.num_envs or FLAGS.prefill_replay_buffer:

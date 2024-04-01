@@ -12,7 +12,7 @@ import wandb
 import wrappers
 from absl import app, flags
 from agents.bc.bc_learner import BCLearner
-from bpref_v2.data.instruct import CLASS_TO_PHASE, get_furniturebench_instruct
+from bpref_v2.data.instruct import get_furniturebench_instruct
 from bpref_v2.data.label_reward_furniturebench import _postprocess_phases, load_reward_model
 from evaluation import evaluate
 from ml_collections import ConfigDict, config_flags
@@ -122,8 +122,8 @@ def compute_multimodal_reward(reward_model, **kwargs):
         args.window_size,
         args.skip_frame,
     )
-    get_video_feature = kwargs.get("get_video_feature", False)
-    get_text_feature = kwargs.get("get_text_feature", False)
+    # get_video_feature = kwargs.get("get_video_feature", False)
+    # get_text_feature = kwargs.get("get_text_feature", False)
     img_features = {}
     insts = {
         phase: clip.tokenize(get_furniturebench_instruct(task_name, phase, output_type="all")).detach().cpu().numpy()
@@ -173,9 +173,10 @@ def compute_multimodal_reward(reward_model, **kwargs):
         stacked_timesteps = np.asarray(stacked_timesteps)
         stacked_attn_masks = np.asarray(stacked_attn_masks)
 
-        rewards, phases, video_features, text_features = [], [], [], []
-        cls2phase = CLASS_TO_PHASE[task_name]
-        batch_size = 32
+        # rewards, phases, video_features, text_features = [], [], [], []
+        phases = []
+        # cls2phase = CLASS_TO_PHASE[task_name]
+        batch_size = 64
         for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="predict phase per batch"):
             _range = range(i, min(i + batch_size, len_demos))
             batch = {
@@ -188,29 +189,30 @@ def compute_multimodal_reward(reward_model, **kwargs):
             phases.extend(phase)
 
         processed_phases = _postprocess_phases(phases)
-        for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
-            _range = range(i, min(i + batch_size, len_demos))
-            batch = {
-                "instruct": np.stack([insts[cls2phase[p]] for p in processed_phases[_range]]),
-                "image": {ik: stacked_images[ik][_range] for ik in image_keys},
-                "timestep": stacked_timesteps[_range],
-                "attn_mask": stacked_attn_masks[_range],
-                # "action": stacked_actions[_range],
-            }
-            output = reward_model.get_reward(
-                batch, get_video_feature=get_video_feature, get_text_feature=get_text_feature
-            )
-            rewards.extend(output["rewards"])
-            if get_video_feature:
-                video_features.extend(output["video_features"])
-            if get_text_feature:
-                text_features.extend(output["text_features"])
+        # for i in trange(0, len_demos, batch_size, leave=False, ncols=0, desc="reward compute per batch"):
+        #     _range = range(i, min(i + batch_size, len_demos))
+        #     batch = {
+        #         "instruct": np.stack([insts[cls2phase[p]] for p in processed_phases[_range]]),
+        #         "image": {ik: stacked_images[ik][_range] for ik in image_keys},
+        #         "timestep": stacked_timesteps[_range],
+        #         "attn_mask": stacked_attn_masks[_range],
+        #         # "action": stacked_actions[_range],
+        #     }
+        #     output = reward_model.get_reward(
+        #         batch, get_video_feature=get_video_feature, get_text_feature=get_text_feature
+        #     )
+        #     rewards.extend(output["rewards"])
+        #     if get_video_feature:
+        #         video_features.extend(output["video_features"])
+        #     if get_text_feature:
+        #         text_features.extend(output["text_features"])
 
-        output = {"rewards": np.asarray(rewards), "processed_phases": np.asarray(processed_phases)}
-        if get_video_feature:
-            output["video_features"] = np.asarray(video_features)
-        if get_text_feature:
-            output["text_features"] = np.asarray(text_features)
+        # output = {"rewards": np.asarray(rewards), "processed_phases": np.asarray(processed_phases)}
+        output = {"rewards": np.zeros((len_demos,), dtype=np.float32), "processed_phases": np.asarray(processed_phases)}
+        # if get_video_feature:
+        #     output["video_features"] = np.asarray(video_features)
+        # if get_text_feature:
+        #     output["text_features"] = np.asarray(text_features)
         return output
 
     output = _get_reward(img_features=img_features)
@@ -376,14 +378,14 @@ def combine(one_dict, other_dict):
 
 def _initialize_traj_dict():
     trajectories = {
-        env_idx: {key: [] for key in ["observations", "actions", "rewards", "terminals", "next_observations", "phases"]}
+        env_idx: {key: [] for key in ["observations", "actions", "rewards", "terminals", "phases"]}
         for env_idx in range(FLAGS.num_envs)
     }
     return trajectories
 
 
 def _reset_traj_dict():
-    return {key: [] for key in ["observations", "actions", "rewards", "terminals", "next_observations", "phases"]}
+    return {key: [] for key in ["observations", "actions", "rewards", "terminals", "phases"]}
 
 
 def main(_):
@@ -580,12 +582,11 @@ def main(_):
                     reward, done = reward.squeeze(), done.squeeze()
 
                     for env_idx in range(FLAGS.num_envs):
-                        trajectories[env_idx]["observations"].append(
-                            {key: observation[key][env_idx][-1] for key in observation.keys()}
-                        )
-                        trajectories[env_idx]["next_observations"].append(
-                            {key: next_observation[key][env_idx][-1] for key in next_observation.keys()}
-                        )
+                        obs = {key: observation[key][env_idx][-1] for key in observation.keys()}
+                        for key in obs:
+                            if "color" in key:
+                                obs[key] = obs[key].astype(np.uint8)
+                        trajectories[env_idx]["observations"].append(obs)
                         trajectories[env_idx]["actions"].append(action[env_idx])
                         trajectories[env_idx]["rewards"].append(reward[env_idx])
                         trajectories[env_idx]["terminals"].append(done[env_idx])
@@ -602,11 +603,8 @@ def main(_):
                                         trajectories[env_idx]["observations"][idx]["text_feature"] = output[
                                             "text_features"
                                         ][idx]
-                                        trajectories[env_idx]["next_observations"][idx]["text_feature"] = output[
-                                            "text_features"
-                                        ][min(idx + 1, len(output["rewards"]) - 1)]
-                                info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
-                                if num_episodes % 5 * FLAGS.num_envs == 0:
+                                # info[f"episode_{env_idx}"]["return"] = np.sum(output["rewards"])
+                                if num_episodes % FLAGS.num_envs == 0:
                                     jax.clear_caches()
 
                             trajs, insert_traj = (
@@ -650,14 +648,6 @@ def main(_):
                 offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                 combined = combine(offline_batch, online_batch)
                 batch = Batch(**combined)
-                if "antmaze" in FLAGS.env_name:
-                    batch = Batch(
-                        observations=batch.observations,
-                        actions=batch.actions,
-                        rewards=batch.rewards - 1,
-                        masks=batch.masks,
-                        next_observations=batch.next_observations,
-                    )
                 update_info = agent.update(batch)
 
                 total_train_step += 1
