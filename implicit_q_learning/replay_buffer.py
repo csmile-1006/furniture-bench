@@ -17,7 +17,9 @@ from dataset_utils import exponential_moving_average, quat_to_theta, transform_p
 from torch.utils.data import IterableDataset
 from tqdm import tqdm
 
-Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
+Batch = collections.namedtuple(
+    "Batch", ["observations", "actions", "rewards", "masks", "next_observations", "mc_returns"]
+)
 SHORTEST_PATHS = {"one_leg": 402, "cabinet": 816, "lamp": 611, "round_table": 784}
 PHASE_TO_REWARD = {"one_leg": {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: -1}}
 
@@ -49,6 +51,14 @@ def _get_stacked_timesteps(length, window_size, skip_frame):
         stacked_timesteps.append(np.stack(timestep_stack))
 
     return stacked_timesteps
+
+
+def discount_cumsum(x, gamma, terminals):
+    discount_cumsum = np.zeros_like(x, dtype=np.float32)
+    discount_cumsum[-1] = x[-1]
+    for t in reversed(range(x.shape[0] - 1)):
+        discount_cumsum[t] = x[t] + gamma * discount_cumsum[t + 1] * (1 - terminals[t])
+    return discount_cumsum
 
 
 def load_episode(
@@ -322,6 +332,9 @@ class ReplayBuffer(IterableDataset):
                 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
             )
 
+        mc_returns = discount_cumsum(episode["rewards"], self._discount, episode["dones_float"])
+        mc_return = mc_returns[idx]
+
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -339,6 +352,7 @@ class ReplayBuffer(IterableDataset):
             rewards=reward,
             masks=discount,
             next_observations=next_observation,
+            mc_returns=mc_return,
         )
 
     def __iter__(self):
@@ -473,6 +487,9 @@ class OfflineReplayBuffer(IterableDataset):
         action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
         action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
 
+        mc_returns = discount_cumsum(episode["rewards"], self._discount, episode["dones_float"])
+        mc_return = mc_returns[idx]
+
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -491,6 +508,7 @@ class OfflineReplayBuffer(IterableDataset):
             rewards=reward,
             masks=discount,
             next_observations=next_observation,
+            mc_returns=mc_return,
         )
 
     def __iter__(self):

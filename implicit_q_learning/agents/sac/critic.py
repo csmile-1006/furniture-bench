@@ -25,38 +25,37 @@ def sac_update_critic(
     expl_noise: float,
     backup_entropy: bool,
 ) -> Tuple[Model, InfoDict]:
-    dist = actor(batch.next_observations, expl_noise)
-
     rng = key
-
-    key, rng = jax.random.split(rng)
-    next_actions = dist.sample(seed=key)
 
     key, rng = jax.random.split(rng)
     target_params = subsample_critic_ensemble(key, target_critic.params, num_min_qs, num_qs)
 
-    key, rng = jax.random.split(rng)
-    next_qs = target_critic.apply(
-        {"params": target_params, **target_critic.extra_variables},
-        batch.next_observations,
-        next_actions,
-        rngs={"dropout": key},
-    )
-    next_q = next_qs.min(axis=0)
-
-    target_q = batch.rewards + discount * batch.masks * next_q
-
-    if backup_entropy:
-        next_log_probs = dist.log_prob(next_actions)
-        target_q -= discount * batch.masks * temp() * next_log_probs
+    key, key2, key3, rng = jax.random.split(rng, 4)
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
+        dist = actor(batch.next_observations, expl_noise)
+        next_actions = dist.sample(seed=key)
+
+        next_qs = target_critic.apply(
+            {"params": target_params, **target_critic.extra_variables},
+            batch.next_observations,
+            next_actions,
+            rngs={"dropout": key2},
+        )
+        target_q_values = next_qs.min(axis=0)
+
+        if backup_entropy:
+            next_log_probs = dist.log_prob(next_actions)
+            target_q_values -= temp() * next_log_probs
+
+        target_q = jax.lax.stop_gradient(batch.rewards + discount * batch.masks * target_q_values)
+
         qs, updated_states = critic.apply(
             critic_params,
             batch.observations,
             batch.actions,
             training=True,
-            rngs={"dropout": key},
+            rngs={"dropout": key3},
             mutable=critic.extra_variables.keys(),
         )
         critic_loss = ((qs - target_q) ** 2).mean()

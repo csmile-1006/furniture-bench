@@ -14,6 +14,7 @@ import wrappers
 from absl import app, flags
 from agents.awac.awac_learner import AWACLearner
 from agents.bc.bc_learner import BCLearner
+from agents.calql.calql_learner import CalQLLearner
 from agents.dapg.dapg_learner import DAPGLearner
 from agents.iql.iql_learner import IQLLearner
 from agents.sac.sac_learner import SACLearner
@@ -61,7 +62,7 @@ config_flags.DEFINE_config_file(
     "File path to the training hyperparameter configuration.",
     lock_config=False,
 )
-flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "sac", "bc"], "agent type.")
+flags.DEFINE_enum("agent_type", "awac", ["awac", "dapg", "iql", "td3", "sac", "calql", "bc"], "agent type.")
 flags.DEFINE_boolean("use_bc", False, "use BC in offline pretraining.")
 
 # Training Setting.
@@ -523,6 +524,15 @@ def main(_):
             offline_batch_size=offline_batch_size,
             **kwargs,
         )
+    elif FLAGS.agent_type == "calql":
+        agent = CalQLLearner(
+            FLAGS.seed,
+            sample_obs,
+            sample_act,
+            obs_keys=obs_keys,
+            offline_batch_size=offline_batch_size,
+            **kwargs,
+        )
     elif FLAGS.agent_type == "bc":
         agent = BCLearner(
             FLAGS.seed,
@@ -566,7 +576,7 @@ def main(_):
             total=FLAGS.num_pretraining_steps,
         ):
             offline_batch = batch_to_jax(offline_batch)
-            update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc)
+            update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc, offline=True)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
                     wandb.log({f"offline-training/{k}": v}, step=i)

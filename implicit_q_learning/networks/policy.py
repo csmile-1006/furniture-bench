@@ -5,6 +5,7 @@ import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import numpy as np
+import distrax
 from tensorflow_probability.substrates import jax as tfp
 
 tfd = tfp.distributions
@@ -25,8 +26,8 @@ class NormalTanhPolicy(nn.Module):
     state_dependent_std: bool = True
     dropout_rate: Optional[float] = None
     log_std_scale: float = 1.0
-    std_min: Optional[float] = None
-    std_max: Optional[float] = None
+    log_std_min: Optional[float] = None
+    log_std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
 
     @nn.compact
@@ -43,21 +44,25 @@ class NormalTanhPolicy(nn.Module):
         means = nn.Dense(self.action_dim, kernel_init=default_init(1.0), name="OutputDenseMean")(outputs)
 
         if self.state_dependent_std:
-            stds = nn.Dense(self.action_dim, kernel_init=default_init(1.0), name="OutputDenseStd")(outputs)
+            log_stds = nn.Dense(self.action_dim, kernel_init=default_init(1.0), name="OutputDenseLogStd")(outputs)
         else:
-            stds = self.param("OutputStd", nn.initializers.zeros, (self.action_dim,))
+            log_stds = self.param("OutputLogStd", nn.initializers.zeros, (self.action_dim,))
 
-        # stds = nn.tanh(stds)
-        # stds = (self.std_max - self.std_min) * stds * 0.5 * (stds + 1) + self.std_min
-        stds = (self.std_max - self.std_min) * nn.sigmoid(stds) + self.std_min
+        log_stds = nn.tanh(log_stds)
+        log_stds = (self.log_std_max - self.log_std_min) * log_stds * 0.5 * (log_stds + 1) + self.log_std_min
+        # log_stds = (self.log_std_max - self.log_std_min) * nn.sigmoid(log_stds) + self.std_min
+        # log_stds = jnp.clip(log_stds, self.log_std_min, self.log_std_max)
 
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)
 
-        base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=stds * expl_noise)
         if self.tanh_squash_distribution:
-            return tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh())
+            return distrax.Transformed(
+                distrax.MultivariateNormalDiag(means, jnp.exp(log_stds) * expl_noise),
+                distrax.Block(distrax.Tanh(), ndims=1),
+            )
         else:
+            base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds) * expl_noise)
             return base_dist
 
 

@@ -317,7 +317,7 @@ class ConcatEncoder(nn.Module):
                 v = v[jnp.newaxis]
             if k in self.obs_keys:
                 features[k] = v
-        batch_size, num_timestep, _ = features[self.obs_keys[0]].shape
+        batch_size, num_timestep, *_ = features[self.obs_keys[0]].shape
         features = concat_multiple_emb(features)
         features = jnp.reshape(features, (batch_size, -1))
         return features
@@ -345,7 +345,7 @@ class TransformerEncoder(nn.Module):
                 v = v[jnp.newaxis]
             if k in self.obs_keys:
                 features[k] = v
-        batch_size, num_timestep, _ = features[self.obs_keys[0]].shape
+        batch_size, num_timestep, *_ = features[self.obs_keys[0]].shape
 
         features = concat_multiple_emb(features)
         features = InputNorm(features.shape[-1], skip=not self.normalize_inputs)(features, deterministic=deterministic)
@@ -426,7 +426,7 @@ class CrossAttnTransformerEncoder(nn.Module):
                 v = v[jnp.newaxis]
             if k in self.obs_keys:
                 image_features[k] = v
-        batch_size, num_timestep, _ = image_features[self.obs_keys[0]].shape
+        batch_size, num_timestep, *_ = image_features[self.obs_keys[0]].shape
         image_features = concat_multiple_emb(image_features)
         image_features = MLP([self.emb_dim], dropout_rate=self.drop, name="ImageFeatureMLP")(image_features)
         # image_embed = image_features + get_1d_sincos_pos_embed(image_features.shape[-1], num_timestep)

@@ -8,10 +8,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.bc.bc_learner import _update_bc_jit
-from agents.sac.actor import sac_update_actor
-from agents.sac import temperature
-from agents.sac.critic import target_update, sac_update_critic
+from agents.calql.actor import calql_update_actor
+from agents.calql import temperature
+from agents.calql.critic import target_update, calql_update_critic
 from networks import multiplexer, policy, value_net
 from networks.common import Batch, ConcatEncoder, InfoDict, Model, PRNGKey, TransformerEncoder
 
@@ -38,6 +37,13 @@ def _share_encoder(source, target):
         "offline_batch_size",
         "utd_ratio",
         "backup_entropy",
+        "cql_n_actions",
+        "cql_importance_sample",
+        "cql_lagrange",
+        "cql_max_target_backup",
+        "cql_min_q_weight",
+        "cql_min_q_weight_online",
+        "enable_calql",
     ),
 )
 def _update_jit(
@@ -58,6 +64,13 @@ def _update_jit(
     use_bc: bool,
     bc_weight: float,
     offline_batch_size: int,
+    cql_n_actions: int,
+    cql_importance_sample: bool,
+    cql_temp: float,
+    cql_lagrange: bool,
+    cql_max_target_backup: bool,
+    cql_min_q_weight: float,
+    enable_calql: bool,
     utd_ratio: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, InfoDict]:
     actor = _share_encoder(source=critic, target=actor)
@@ -72,7 +85,7 @@ def _update_jit(
             return x[batch_size * i : batch_size * (i + 1)]
 
         mini_batch = jax.tree_util.tree_map(slice, batch)
-        new_critic, critic_info = sac_update_critic(
+        new_critic, critic_info = calql_update_critic(
             key,
             actor,
             critic,
@@ -83,7 +96,13 @@ def _update_jit(
             num_qs,
             num_min_qs,
             expl_noise,
-            backup_entropy=backup_entropy,
+            backup_entropy,
+            cql_n_actions,
+            cql_importance_sample,
+            cql_temp,
+            cql_max_target_backup,
+            cql_min_q_weight,
+            enable_calql,
         )
         if update_target:
             new_target_critic = target_update(new_critic, new_target_critic, tau)
@@ -91,7 +110,7 @@ def _update_jit(
             new_target_critic = new_target_critic
 
     rng, key = jax.random.split(rng)
-    new_actor, actor_info = sac_update_actor(
+    new_actor, actor_info = calql_update_actor(
         key,
         actor,
         new_critic,
@@ -114,13 +133,13 @@ def _update_jit(
     )
 
 
-class SACLearner(object):
+class CalQLLearner(object):
     def __init__(
         self,
         seed: int,
         observations: jnp.ndarray,
         actions: jnp.ndarray,
-        actor_lr: float = 3e-4,
+        actor_lr: float = 1e-4,
         critic_lr: float = 3e-4,
         temp_lr: float = 3e-4,
         hidden_dims: Sequence[int] = (256, 256),
@@ -131,7 +150,7 @@ class SACLearner(object):
         tau: float = 0.005,
         target_update_period: int = 1,
         target_entropy: Optional[float] = None,
-        backup_entropy: bool = True,
+        backup_entropy: bool = False,
         init_temperature: float = 1.0,
         fixed_alpha: bool = False,
         init_alpha: float = 1.0,
@@ -152,6 +171,17 @@ class SACLearner(object):
         use_bc: bool = False,
         detach_actor: bool = False,
         offline_batch_size: int = 128,
+        cql_n_actions: int = 10,
+        cql_importance_sample: bool = True,
+        cql_target_action_gap: float = 1.0,
+        cql_temp: float = 1.0,
+        cql_lagrange: bool = False,
+        cql_max_target_backup: bool = True,
+        cql_clip_diff_min: float = -np.inf,
+        cql_clip_diff_max: float = np.inf,
+        cql_min_q_weight: float = 5.0,
+        cql_min_q_weight_online: float = -1.0,
+        enable_calql: bool = True,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -178,6 +208,19 @@ class SACLearner(object):
         self.detach_actor = detach_actor
         self.offline_batch_size = offline_batch_size
         self.target_update_period = target_update_period
+
+        # CQL Hyperparameters
+        self.cql_n_actions = cql_n_actions
+        self.cql_importance_sample = cql_importance_sample
+        self.cql_lagrange = cql_lagrange
+        self.cql_max_target_backup = cql_max_target_backup
+        self.cql_target_action_gap = cql_target_action_gap
+        self.cql_temp = cql_temp
+        self.cql_clip_diff_min = cql_clip_diff_min
+        self.cql_clip_diff_max = cql_clip_diff_max
+        self.cql_min_q_weight = cql_min_q_weight
+        self.cql_min_q_weight_online = cql_min_q_weight_online
+        self.enable_calql = enable_calql
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, target_critic_key, temp_key = jax.random.split(rng, 5)
@@ -218,7 +261,7 @@ class SACLearner(object):
             latent_dim=emb_dim,
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
-            stop_gradient=False,
+            stop_gradient=True,
         )
         optimiser = optax.adam(actor_lr)
 
@@ -258,6 +301,13 @@ class SACLearner(object):
             temperature.Temperature(init_temperature), inputs=[temp_key], tx=optax.adam(learning_rate=temp_lr)
         )
 
+        if cql_lagrange:
+            temp_key, temp_prime_key = jax.random.split(temp_key)
+            temp_prime = Model.create(
+                temperature.Temperature(init_temperature), inputs=[temp_prime_key], tx=optax.adam(learning_rate=temp_lr)
+            )
+            self.temp_prime = temp_prime
+
         self.actor = actor
         self.critic = critic
         self.target_critic = target_critic
@@ -277,47 +327,49 @@ class SACLearner(object):
         return np.clip(actions, -1, 1)
 
     def prepare_online_step(self):
-        print("transfer pre-trained transformer encoder from BC actor.")
-        self.critic = _share_encoder(source=self.actor, target=self.critic)
-        if self.detach_actor:
-            print("detach transformer encoder of BC actor.")
-            self.actor.apply_fn.disable_gradient()
+        print("do nothing.")
+        return
 
     def update(self, batch: Batch, update_bc: bool = False, utd_ratio: int = 1, **kwargs) -> InfoDict:
         self.step += 1
-        if update_bc:
-            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.expl_noise)
-        else:
-            (
-                new_rng,
-                new_actor,
-                new_critic,
-                new_target_critic,
-                new_temp,
-                info,
-            ) = _update_jit(
-                self.rng,
-                self.actor,
-                self.critic,
-                self.target_critic,
-                self.temp,
-                batch,
-                self.discount,
-                self.num_qs,
-                self.num_min_qs,
-                self.tau,
-                self.expl_noise,
-                self.target_entropy,
-                self.backup_entropy,
-                self.step % self.target_update_period == 0,
-                self.use_bc,
-                self.bc_weight,
-                self.offline_batch_size,
-                utd_ratio,
-            )
-            self.critic = new_critic
-            self.target_critic = new_target_critic
-            self.temp = new_temp
+        cql_min_q_weight = self.cql_min_q_weight if kwargs.get("offline") else self.cql_min_q_weight_online
+        (
+            new_rng,
+            new_actor,
+            new_critic,
+            new_target_critic,
+            new_temp,
+            info,
+        ) = _update_jit(
+            self.rng,
+            self.actor,
+            self.critic,
+            self.target_critic,
+            self.temp,
+            batch,
+            self.discount,
+            self.num_qs,
+            self.num_min_qs,
+            self.tau,
+            self.expl_noise,
+            self.target_entropy,
+            self.backup_entropy,
+            self.step % self.target_update_period == 0,
+            self.use_bc,
+            self.bc_weight,
+            self.offline_batch_size,
+            self.cql_n_actions,
+            self.cql_importance_sample,
+            self.cql_temp,
+            self.cql_lagrange,
+            self.cql_max_target_backup,
+            cql_min_q_weight,
+            self.enable_calql,
+            utd_ratio,
+        )
+        self.critic = new_critic
+        self.target_critic = new_target_critic
+        self.temp = new_temp
 
         self.rng = new_rng
         self.actor = new_actor
