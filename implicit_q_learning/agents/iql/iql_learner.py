@@ -8,7 +8,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-from agents.bc.bc_learner import _update_bc_jit
 from agents.iql.actor import awr_update_actor
 from agents.iql.critic import update_q, update_v
 from networks import multiplexer, policy, value_net
@@ -143,7 +142,7 @@ class IQLLearner(object):
                 obs_keys=obs_keys,
                 return_intermeidate=encoder_type == "transformer_intermediate",
             )
-            if encoder_type == "trnsformer":
+            if encoder_type == "transformer":
                 print("[INFO] use TransformerEncoder")
                 multiplexer_cls = multiplexer.SequentialMultiplexer
             if encoder_type == "transformer_intermediate":
@@ -155,13 +154,14 @@ class IQLLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            std_min=1e-1,
-            std_max=1e-0,
+            log_std_min=-10.0,
+            log_std_max=2.0,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,
         )
         actor_def = multiplexer_cls(
+            latent_dim=emb_dim,
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
             stop_gradient=True,
@@ -180,11 +180,11 @@ class IQLLearner(object):
         critic_cls = partial(
             value_net.CriticEnsemble,
             hidden_dims,
-            emb_dim,
             critic_layer_norm=critic_layer_norm,
             num_qs=self.num_qs,
         )
         critic_def = multiplexer_cls(
+            latent_dim=emb_dim,
             encoder_cls=critic_encoder_cls,
             network_cls=critic_cls,
             stop_gradient=False,
@@ -203,8 +203,9 @@ class IQLLearner(object):
             tx=critic_tx,
         )
 
-        value_cls = partial(value_net.ValueCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm)
+        value_cls = partial(value_net.ValueCritic, hidden_dims, critic_layer_norm=critic_layer_norm)
         value_def = multiplexer_cls(
+            latent_dim=emb_dim,
             encoder_cls=critic_encoder_cls,
             network_cls=value_cls,
             stop_gradient=False,
@@ -244,33 +245,30 @@ class IQLLearner(object):
             print("detach transformer encoder of BC actor.")
             self.actor.apply_fn.disable_gradient()
 
-    def update(self, batch: Batch, utd_ratio: int = 1, update_bc: bool = False) -> InfoDict:
-        if update_bc:
-            new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, self.expl_noise)
-        else:
-            (
-                new_rng,
-                new_actor,
-                new_critic,
-                new_value,
-                new_target_critic,
-                info,
-            ) = _update_jit(
-                self.rng,
-                self.actor,
-                self.critic,
-                self.value,
-                self.target_critic,
-                batch,
-                self.discount,
-                self.tau,
-                self.expectile,
-                self.A_scaling,
-                self.expl_noise,
-            )
-            self.critic = new_critic
-            self.value = new_value
-            self.target_critic = new_target_critic
+    def update(self, batch: Batch, utd_ratio: int = 1, update_bc: bool = False, **kwargs) -> InfoDict:
+        (
+            new_rng,
+            new_actor,
+            new_critic,
+            new_value,
+            new_target_critic,
+            info,
+        ) = _update_jit(
+            self.rng,
+            self.actor,
+            self.critic,
+            self.value,
+            self.target_critic,
+            batch,
+            self.discount,
+            self.tau,
+            self.expectile,
+            self.A_scaling,
+            self.expl_noise,
+        )
+        self.critic = new_critic
+        self.value = new_value
+        self.target_critic = new_target_critic
 
         self.rng = new_rng
         self.actor = new_actor

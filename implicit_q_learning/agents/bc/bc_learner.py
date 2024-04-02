@@ -95,8 +95,8 @@ class BCLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            std_min=1e-1,
-            std_max=1e-0,
+            log_std_min=-10.0,
+            log_std_max=2.0,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,
@@ -134,7 +134,7 @@ class BCLearner(object):
             print("detach transformer encoder of BC actor.")
             self.actor.apply_fn.disable_gradient()
 
-    def update(self, batch: Batch, update_bc: bool = False, utd_ratio=1) -> InfoDict:
+    def update(self, batch: Batch, update_bc: bool = False, utd_ratio=1, **kwargs) -> InfoDict:
         self.step += 1
         new_rng, new_actor, info = _update_bc_jit(self.rng, self.actor, batch, 1.0)
         self.rng = new_rng
