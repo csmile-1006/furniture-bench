@@ -189,7 +189,7 @@ class CalQLLearner(object):
 
         action_dim = actions.shape[-1]
         if target_entropy is None:
-            self.target_entropy = -action_dim / 2
+            self.target_entropy = -action_dim
         else:
             self.target_entropy = target_entropy
 
@@ -374,7 +374,6 @@ class CalQLLearner(object):
         self.rng = new_rng
         self.actor = new_actor
 
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 

@@ -53,59 +53,59 @@ def calql_update_critic(
         log_probs = dist.log_prob(actions)
         return repeated_obs, actions, log_probs
 
+    if cql_max_target_backup:
+        next_obs, next_actions, next_log_probs = compute_action_and_log_prob(
+            key, actor, batch.next_observations, cql_n_actions
+        )
+        next_qs = target_critic.apply(
+            {"params": target_params, **target_critic.extra_variables},
+            next_obs,
+            next_actions,
+            rngs={"dropout": key2},
+        )
+        next_qs = next_qs.min(axis=0)
+        next_qs = next_qs.reshape(batch_size, cql_n_actions)
+        next_log_probs = next_log_probs.reshape(batch_size, cql_n_actions)
+        max_target_indices = jnp.expand_dims(jnp.argmax(next_qs, axis=-1), axis=-1)
+        target_q_values = jnp.take_along_axis(next_qs, max_target_indices, axis=-1).squeeze(-1)
+        next_log_probs = jnp.take_along_axis(next_log_probs, max_target_indices, axis=-1).squeeze(-1)
+    else:
+        dist = actor(batch.next_observations, expl_noise)
+        next_actions = dist.sample(seed=key)
+        next_qs = target_critic.apply(
+            {"params": target_params, **target_critic.extra_variables},
+            batch.next_observations,
+            next_actions,
+            rngs={"dropout": key2},
+        )
+        target_q_values = next_qs.min(axis=0)
+        next_log_probs = dist.log_prob(next_actions)
+
+    if backup_entropy:
+        target_q_values -= temp() * next_log_probs
+
+    target_q = jax.lax.stop_gradient(batch.rewards + discount * batch.masks * target_q_values)
+
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        if cql_max_target_backup:
-            next_obs, next_actions, next_log_probs = compute_action_and_log_prob(
-                key, actor, batch.next_observations, cql_n_actions
-            )
-            next_qs = target_critic.apply(
-                {"params": target_params, **target_critic.extra_variables},
-                next_obs,
-                next_actions,
-                rngs={"dropout": key2},
-            )
-            next_qs = next_qs.min(axis=0)
-            next_qs = next_qs.reshape(batch_size, cql_n_actions)
-            next_log_probs = next_log_probs.reshape(batch_size, cql_n_actions)
-            max_target_indices = jnp.expand_dims(jnp.argmax(next_qs, axis=-1), axis=-1)
-            target_q_values = jnp.take_along_axis(next_qs, max_target_indices, axis=-1).squeeze(-1)
-            next_log_probs = jnp.take_along_axis(next_log_probs, max_target_indices, axis=-1).squeeze(-1)
-        else:
-            dist = actor(batch.next_observations, expl_noise)
-            next_actions = dist.sample(seed=key)
-            next_qs = target_critic.apply(
-                {"params": target_params, **target_critic.extra_variables},
-                batch.next_observations,
-                next_actions,
-                rngs={"dropout": key2},
-            )
-            target_q_values = next_qs.min(axis=0)
-            next_log_probs = dist.log_prob(next_actions)
-
-        if backup_entropy:
-            target_q_values -= temp() * next_log_probs
-
-        target_q = jax.lax.stop_gradient(batch.rewards + discount * batch.masks * target_q_values)
-
         qs, updated_states = critic.apply(
             critic_params,
             batch.observations,
             batch.actions,
             training=True,
-            rngs={"dropout": key3},
+            rngs={"dropout": key6},
             mutable=critic.extra_variables.keys(),
         )
         bellman_loss = (qs - target_q) ** 2
 
         # CQL
         cql_random_actions = jax.random.uniform(
-            key4, shape=(batch_size * cql_n_actions, action_dim), minval=-1.0, maxval=1.0
+            key3, shape=(batch_size * cql_n_actions, action_dim), minval=-1.0, maxval=1.0
         )
         cql_obs, cql_current_actions, cql_current_log_probs = compute_action_and_log_prob(
-            key5, actor, batch.observations, cql_n_actions
+            key4, actor, batch.observations, cql_n_actions
         )
         cql_next_obs, cql_next_actions, cql_next_log_probs = compute_action_and_log_prob(
-            key6, actor, batch.next_observations, cql_n_actions
+            key5, actor, batch.next_observations, cql_n_actions
         )
 
         cql_qs_rand, _ = critic.apply(

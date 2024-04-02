@@ -12,7 +12,7 @@ def get_config():
 
     config.discount = 0.99
     config.use_bc = True
-    config.expl_noise = 0.1
+    config.expl_noise = 1.0
     config.bc_weight = 1.0
     config.detach_actor = True
 
@@ -26,7 +26,7 @@ def get_config():
 
     config.encoder_type = "transformer"
     # transformer setup
-    config.emb_dim = 1024
+    config.emb_dim = 256
     config.depth = 3
     config.num_heads = 8
 

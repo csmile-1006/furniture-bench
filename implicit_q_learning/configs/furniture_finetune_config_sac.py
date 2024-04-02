@@ -12,7 +12,7 @@ def get_config():
 
     config.discount = 0.99
     config.use_bc = True
-    config.expl_noise = 0.1
+    config.expl_noise = 1.0
     config.bc_weight = 1.0
     config.detach_actor = True
 
@@ -20,13 +20,13 @@ def get_config():
 
     config.tau = 0.005  # For soft target updates.
     config.backup_entropy = False
-    config.fixed_alpha = True
+    config.fixed_alpha = False
     config.init_alpha = 1.0
     config.init_temperature = 1.0
 
     config.encoder_type = "transformer"
     # transformer setup
-    config.emb_dim = 1024
+    config.emb_dim = 256
     config.depth = 3
     config.num_heads = 8
 
