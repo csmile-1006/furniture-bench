@@ -48,10 +48,10 @@ class NormalTanhPolicy(nn.Module):
         else:
             log_stds = self.param("OutputLogStd", nn.initializers.zeros, (self.action_dim,))
 
-        log_stds = nn.tanh(log_stds)
-        log_stds = (self.log_std_max - self.log_std_min) * log_stds * 0.5 * (log_stds + 1) + self.log_std_min
+        # log_stds = nn.tanh(log_stds)
+        # log_stds = (self.log_std_max - self.log_std_min) * 0.5 * (log_stds + 1.0) + self.log_std_min
         # log_stds = (self.log_std_max - self.log_std_min) * nn.sigmoid(log_stds) + self.std_min
-        # log_stds = jnp.clip(log_stds, self.log_std_min, self.log_std_max)
+        log_stds = jnp.clip(log_stds, self.log_std_min, self.log_std_max)
 
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)
