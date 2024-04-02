@@ -87,16 +87,6 @@ def calql_update_critic(
     target_q = jax.lax.stop_gradient(batch.rewards + discount * batch.masks * target_q_values)
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        qs, updated_states = critic.apply(
-            critic_params,
-            batch.observations,
-            batch.actions,
-            training=True,
-            rngs={"dropout": key6},
-            mutable=critic.extra_variables.keys(),
-        )
-        bellman_loss = (qs - target_q) ** 2
-
         # CQL
         cql_random_actions = jax.random.uniform(
             key3, shape=(batch_size * cql_n_actions, action_dim), minval=-1.0, maxval=1.0
@@ -107,6 +97,16 @@ def calql_update_critic(
         cql_next_obs, cql_next_actions, cql_next_log_probs = compute_action_and_log_prob(
             key5, actor, batch.next_observations, cql_n_actions
         )
+
+        qs, updated_states = critic.apply(
+            critic_params,
+            batch.observations,
+            batch.actions,
+            training=True,
+            rngs={"dropout": key6},
+            mutable=critic.extra_variables.keys(),
+        )
+        bellman_loss = (qs - target_q) ** 2
 
         cql_qs_rand, _ = critic.apply(
             critic_params,
@@ -142,11 +142,6 @@ def calql_update_critic(
         cql_current_log_probs = cql_current_log_probs.reshape(batch_size, cql_n_actions)
         cql_next_log_probs = cql_next_log_probs.reshape(batch_size, cql_n_actions)
 
-        cql_cat_qs = jnp.concatenate(
-            [cql_qs_rand, jnp.expand_dims(qs, -1), cql_qs_current_actions, cql_qs_next_actions], axis=-1
-        )
-        cql_std_qs = jnp.std(cql_cat_qs, axis=-1)
-
         # CalQL
         if enable_calql:
             lower_bounds = jnp.repeat(batch.mc_returns.reshape(-1, 1), cql_qs_current_actions.shape[2], axis=1)
@@ -157,6 +152,11 @@ def calql_update_critic(
             lower_bounds = jnp.repeat(jnp.expand_dims(lower_bounds, 0), num_qs, axis=0)
             cql_qs_current_actions = jnp.maximum(cql_qs_current_actions, lower_bounds)
             cql_qs_next_actions = jnp.maximum(cql_qs_next_actions, lower_bounds)
+
+        cql_cat_qs = jnp.concatenate(
+            [cql_qs_rand, jnp.expand_dims(qs, -1), cql_qs_next_actions, cql_qs_current_actions], axis=-1
+        )
+        cql_std_qs = jnp.std(cql_cat_qs, axis=-1)
 
         if cql_importance_sample:
             random_density = jnp.log(0.5**action_dim)

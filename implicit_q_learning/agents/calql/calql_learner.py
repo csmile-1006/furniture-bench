@@ -374,6 +374,7 @@ class CalQLLearner(object):
         self.rng = new_rng
         self.actor = new_actor
 
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 
