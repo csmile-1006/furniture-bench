@@ -208,8 +208,8 @@ class SACLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            log_std_min=-10.0,
-            log_std_max=2.0,
+            std_min=0.01,
+            std_max=0.2,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,
@@ -277,11 +277,7 @@ class SACLearner(object):
         return np.clip(actions, -1, 1)
 
     def prepare_online_step(self):
-        print("transfer pre-trained transformer encoder from BC actor.")
-        self.critic = _share_encoder(source=self.actor, target=self.critic)
-        if self.detach_actor:
-            print("detach transformer encoder of BC actor.")
-            self.actor.apply_fn.disable_gradient()
+        print("nothing to do.")
 
     def update(self, batch: Batch, update_bc: bool = False, utd_ratio: int = 1, **kwargs) -> InfoDict:
         self.step += 1

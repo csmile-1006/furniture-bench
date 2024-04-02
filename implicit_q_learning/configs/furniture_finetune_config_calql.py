@@ -10,11 +10,10 @@ def get_config():
 
     config.hidden_dims = (512, 256, 256, 256)
 
-    config.discount = 0.99
+    config.discount = 0.996
     config.use_bc = True
     config.expl_noise = 1.0
     config.bc_weight = 1.0
-    config.detach_actor = True
 
     config.dropout_rate = None
 

@@ -169,7 +169,6 @@ class CalQLLearner(object):
         expl_noise: float = 0.1,
         bc_weight: float = 1.0,
         use_bc: bool = False,
-        detach_actor: bool = False,
         offline_batch_size: int = 128,
         cql_n_actions: int = 10,
         cql_importance_sample: bool = True,
@@ -205,7 +204,6 @@ class CalQLLearner(object):
         self.expl_noise = expl_noise
         self.bc_weight = bc_weight
         self.use_bc = use_bc
-        self.detach_actor = detach_actor
         self.offline_batch_size = offline_batch_size
         self.target_update_period = target_update_period
 
@@ -251,8 +249,8 @@ class CalQLLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            log_std_min=-10.0,
-            log_std_max=2.0,
+            std_min=0.01,
+            std_max=0.2,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,

@@ -26,8 +26,8 @@ class NormalTanhPolicy(nn.Module):
     state_dependent_std: bool = True
     dropout_rate: Optional[float] = None
     log_std_scale: float = 1.0
-    log_std_min: Optional[float] = None
-    log_std_max: Optional[float] = None
+    std_min: Optional[float] = None
+    std_max: Optional[float] = None
     tanh_squash_distribution: bool = True
 
     @nn.compact
@@ -50,8 +50,8 @@ class NormalTanhPolicy(nn.Module):
 
         # log_stds = nn.tanh(log_stds)
         # log_stds = (self.log_std_max - self.log_std_min) * 0.5 * (log_stds + 1.0) + self.log_std_min
-        # log_stds = (self.log_std_max - self.log_std_min) * nn.sigmoid(log_stds) + self.std_min
-        log_stds = jnp.clip(log_stds, self.log_std_min, self.log_std_max)
+        # log_stds = jnp.clip(log_stds, self.log_std_min, self.log_std_max)
+        stds = (self.std_max - self.std_min) * nn.sigmoid(log_stds) + self.std_min
 
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)
@@ -62,7 +62,8 @@ class NormalTanhPolicy(nn.Module):
                 distrax.Block(distrax.Tanh(), ndims=1),
             )
         else:
-            base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds) * expl_noise)
+            # base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds) * expl_noise)
+            base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=stds * expl_noise)
             return base_dist
 
 

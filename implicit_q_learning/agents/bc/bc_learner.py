@@ -45,14 +45,12 @@ class BCLearner(object):
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
         expl_noise: float = 1.0,
-        detach_actor: bool = False,
     ):
         """
         An implementation of Behavior Cloning.
         """
 
         self.expl_noise = expl_noise
-        self.detach_actor = detach_actor
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key = jax.random.split(rng, 2)
@@ -95,8 +93,8 @@ class BCLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            log_std_min=-10.0,
-            log_std_max=2.0,
+            std_min=0.01,
+            std_max=0.2,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,
@@ -130,9 +128,6 @@ class BCLearner(object):
 
     def prepare_online_step(self):
         print("Nothing to do.")
-        if self.detach_actor:
-            print("detach transformer encoder of BC actor.")
-            self.actor.apply_fn.disable_gradient()
 
     def update(self, batch: Batch, update_bc: bool = False, utd_ratio=1, **kwargs) -> InfoDict:
         self.step += 1

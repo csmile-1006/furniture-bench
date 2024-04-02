@@ -548,6 +548,8 @@ def main(_):
         assert FLAGS.agent_type not in [
             "awac",
             "iql",
+            "sac",
+            "calql",
         ], f"{FLAGS.agent_type.upper()} agent do not support BC pre-training."
 
     def batch_to_jax(y):
