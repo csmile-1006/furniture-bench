@@ -19,11 +19,15 @@ def update_v(key: PRNGKey, critic: Model, value: Model, batch: Batch, expectile:
         v, updated_states = value.apply(
             value_params, batch.observations, training=True, rngs={"dropout": key}, mutable=value.extra_variables.keys()
         )
-        value_loss = loss(q - v, expectile).mean()
+        vl = loss(q - v, expectile)
+        value_loss = vl.mean()
         return (
             value_loss,
             {
-                "value_loss": value_loss,
+                "value_loss_mean": vl.mean(),
+                "value_loss_std": vl.std(),
+                "value_loss_min": vl.min(),
+                "value_loss_max": vl.max(),
                 "v_mean": v.mean(),
                 "v_std": v.std(),
                 "v_min": v.min(),
