@@ -25,9 +25,9 @@ def get_config():
 
     config.encoder_type = "transformer"
     # transformer setup
-    config.emb_dim = 256
-    config.depth = 3
-    config.num_heads = 8
+    config.emb_dim = 128
+    config.depth = 2
+    config.num_heads = 2
 
     # critic options
     config.num_qs = 10
