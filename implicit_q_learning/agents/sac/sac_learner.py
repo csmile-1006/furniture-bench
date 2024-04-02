@@ -208,7 +208,7 @@ class SACLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            log_std_min=-20.0,
+            log_std_min=-10.0,
             log_std_max=2.0,
             dropout_rate=dropout_rate,
             state_dependent_std=True,

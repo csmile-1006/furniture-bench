@@ -184,7 +184,7 @@ class CalQLLearner(object):
         enable_calql: bool = True,
     ):
         """
-        An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
+        An implementation of the version of CalQL described in https://arxiv.org/abs/2303.05479
         """
 
         action_dim = actions.shape[-1]
@@ -251,7 +251,7 @@ class CalQLLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            log_std_min=-20.0,
+            log_std_min=-10.0,
             log_std_max=2.0,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
