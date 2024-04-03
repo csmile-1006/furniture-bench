@@ -346,7 +346,7 @@ def make_env(
 
 def make_offline_loader(furniture, env, data_path, batch_size, obs_keys):
     return make_replay_loader(
-        furniture=furniture,
+        env_name=furniture,
         replay_dir=Path(data_path).expanduser(),
         max_size=1e6,
         batch_size=batch_size,
@@ -597,7 +597,7 @@ def main(_):
         max_env_steps=env.furniture.max_env_steps,
     )
     online_loader = make_replay_loader(
-        furniture=FLAGS.env_name.split("/")[-1],
+        env_name=FLAGS.env_name.split("/")[-1],
         replay_dir=Path(buffer_dir).expanduser(),
         max_size=FLAGS.replay_buffer_size,
         batch_size=online_batch_size,
