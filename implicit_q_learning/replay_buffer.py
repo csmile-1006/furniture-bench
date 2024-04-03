@@ -492,7 +492,7 @@ class OfflineReplayBuffer(object):
         next_obs_idx = episode["timesteps"][min(idx + self._nstep, episode_len(episode) - 1)]
         next_observation = {key: episode[key][next_obs_idx] for key in self._obs_keys}
 
-        return Batch(
+        return dict(
             observations=observation,
             actions=action,
             rewards=reward,
