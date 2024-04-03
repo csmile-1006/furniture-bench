@@ -159,7 +159,7 @@ class SACLearner(object):
 
         action_dim = actions.shape[-1]
         if target_entropy is None:
-            self.target_entropy = -action_dim / 2
+            self.target_entropy = -action_dim
         else:
             self.target_entropy = target_entropy
 
