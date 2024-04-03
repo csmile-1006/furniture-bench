@@ -592,10 +592,7 @@ def main(_):
     offline_loader = make_offline_loader(
         str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, offline_batch_size, obs_keys
     )
-    replay_storage = ReplayBufferStorage(
-        replay_dir=Path(buffer_dir).expanduser(),
-        max_env_steps=env.furniture.max_env_steps,
-    )
+    replay_storage = ReplayBufferStorage(replay_dir=Path(buffer_dir).expanduser())
     online_loader = make_replay_loader(
         env_name=FLAGS.env_name.split("/")[-1],
         replay_dir=Path(buffer_dir).expanduser(),
