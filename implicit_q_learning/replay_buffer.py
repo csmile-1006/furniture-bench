@@ -13,8 +13,9 @@ from typing import Sequence
 
 import numpy as np
 import torch
-from dataset_utils import exponential_moving_average, quat_to_theta, transform_phases
-from torch.utils.data import IterableDataset
+from dataset_utils import exponential_moving_average, quat_to_theta
+
+# from torch.utils.data import IterableDataset
 from tqdm import tqdm
 
 Batch = collections.namedtuple(
@@ -63,7 +64,7 @@ def discount_cumsum(x, gamma, terminals):
 
 def load_episode(
     fn,
-    furniture="one_leg",
+    env_name="one_leg",
     reward_type="sparse",
     discount=0.99,
     obs_keys=("image1", "image2"),
@@ -73,20 +74,18 @@ def load_episode(
     reward_stat: dict = None,
     smoothe: bool = False,
 ):
-    timesteps = []
-    observations = {key: [] for key in obs_keys}
     with fn.open("rb") as f:
         episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
         eps_len = episode_len(episode)
-        stacked_timesteps = _get_stacked_timesteps(eps_len, window_size, skip_frame)
+        observations = {key: [] for key in obs_keys}
+        timesteps = _get_stacked_timesteps(eps_len, window_size, skip_frame)
         for i in range(eps_len):
             for key in obs_keys:
                 observations[key].append(episode["observations"][i][key])
-            timesteps.append(stacked_timesteps[i])
         observations = {key: np.asarray(value) for key, value in observations.items()}
 
-        if reward_type == "sparse":
+        if reward_type == "sparse" or reward_type == "dense":
             rewards = episode["rewards"]
         elif reward_type == "step":
             rewards = episode["step_rewards"] / np.max(episode["step_rewards"])
@@ -105,7 +104,7 @@ def load_episode(
                 rewards = np.asarray(exponential_moving_average(rewards))
         elif reward_type == "ours_shaped":
             phases = episode["phases"]
-            rewards = [PHASE_TO_REWARD[furniture][p] for p in phases]
+            rewards = [PHASE_TO_REWARD[env_name][p] for p in phases]
             rewards = np.asarray(rewards, dtype=np.float32)
             # rewards = transform_phases(rewards + (episode["rewards"] / lambda_mr))
 
@@ -114,25 +113,23 @@ def load_episode(
             # delta_our_reward = discount * next_our_reward - our_reward
             # delta_our_reward[-1] = 0.0
             # rewards = delta_our_reward + episode["rewards"]
+        mc_returns = discount_cumsum(episode["rewards"], discount, episode["terminals"])
 
     return dict(
         **observations,
-        # observations=np.asarray(observations),
         timesteps=np.asarray(timesteps),
         actions=episode["actions"],
         rewards=rewards,
         masks=1.0 - episode["terminals"],
         dones_float=episode["terminals"],
-        # next_observations=episode["next_observations"],
-        # next_observations=np.asarray(next_observations),
+        mc_returns=mc_returns,
     )
 
 
 class ReplayBufferStorage:
-    def __init__(self, replay_dir, max_env_steps):
+    def __init__(self, replay_dir):
         self._replay_dir = replay_dir
         replay_dir.mkdir(exist_ok=True)
-        self._max_env_steps = max_env_steps
         self._preload()
 
     def __len__(self):
@@ -157,16 +154,17 @@ class ReplayBufferStorage:
         save_episode(episode, self._replay_dir / eps_fn)
 
 
-class ReplayBuffer(IterableDataset):
+class ReplayBuffer(object):
     def __init__(
         self,
-        furniture,
+        env_name,
         replay_dir,
         max_size,
         num_workers,
         nstep,
         discount,
         fetch_every,
+        batch_size,
         save_snapshot=False,
         reward_type: str = "sparse",
         embedding_dim: int = 1024,
@@ -181,7 +179,7 @@ class ReplayBuffer(IterableDataset):
         prefill_replay_buffer: bool = False,
         offline_replay_dir: str = None,
     ):
-        self._furniture = furniture
+        self._env_name = env_name
         self._replay_dir = replay_dir
         self._size = 0
         self._max_size = max_size
@@ -192,6 +190,7 @@ class ReplayBuffer(IterableDataset):
         self._nstep = nstep
         self._discount = discount
         self._fetch_every = fetch_every
+        self._batch_size = batch_size
         self._samples_since_last_fetch = fetch_every
         self._save_snapshot = save_snapshot
         self._reward_type = reward_type
@@ -217,7 +216,7 @@ class ReplayBuffer(IterableDataset):
         try:
             episode = load_episode(
                 eps_fn,
-                furniture=self._furniture,
+                env_name=self._env_name,
                 reward_type=self._reward_type,
                 discount=self._discount,
                 obs_keys=self._obs_keys,
@@ -301,22 +300,6 @@ class ReplayBuffer(IterableDataset):
         self._samples_since_last_fetch += 1
         return self.__sample()
 
-    def _split_observations(self, obs):
-        if obs.shape[-1] == self._embedding_dim * 2:
-            image1, image2 = np.split(obs, [self._embedding_dim], axis=-1)
-            return dict(image1=image1, image2=image2)
-        elif obs.shape[-1] == self._embedding_dim * 2 + 14:
-            image1, image2, robot_state = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
-            return dict(image1=image1, image2=image2, robot_state=robot_state)
-        elif obs.shape[-1] == self._embedding_dim * 3:
-            image1, image2, text_feature = np.split(obs, [self._embedding_dim, self._embedding_dim * 2], axis=-1)
-            return dict(image1=image1, image2=image2, text_feature=text_feature)
-        else:  # self._embedding_dim * 2 + 14 + self._text_feature_dim
-            image1, image2, robot_state, text_feature = np.split(
-                obs, [self._embedding_dim, self._embedding_dim * 2, self._embedding_dim * 2 + 14], axis=-1
-            )
-            return dict(image1=image1, image2=image2, robot_state=robot_state, text_feature=text_feature)
-
     def __sample(self):
         episode = self._sample_episode()
         idx = np.random.randint(0, episode_len(episode) - self._nstep + 1)
@@ -332,9 +315,7 @@ class ReplayBuffer(IterableDataset):
                 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
             )
 
-        mc_returns = discount_cumsum(episode["rewards"], self._discount, episode["dones_float"])
-        mc_return = mc_returns[idx]
-
+        mc_return = np.zeros_like(episode["rewards"][idx])
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
         for i in range(self._nstep):
@@ -346,7 +327,7 @@ class ReplayBuffer(IterableDataset):
         observation = {key: episode[key][obs_idx] for key in self._obs_keys}
         next_obs_idx = episode["timesteps"][min(idx + self._nstep, episode_len(episode) - 1)]
         next_observation = {key: episode[key][next_obs_idx] for key in self._obs_keys}
-        return Batch(
+        return dict(
             observations=observation,
             actions=action,
             rewards=reward,
@@ -357,19 +338,28 @@ class ReplayBuffer(IterableDataset):
 
     def __iter__(self):
         while True:
-            yield self._sample()
+            batch = {
+                key: [] for key in ["observations", "actions", "rewards", "masks", "next_observations", "mc_returns"]
+            }
+            for _ in range(self._batch_size):
+                elem = self._sample()
+                for key in batch.keys():
+                    batch[key].append(elem[key])
+            batch = {key: np.asarray(value) for key, value in batch.items()}
+            yield Batch(**batch)
 
 
-class OfflineReplayBuffer(IterableDataset):
+class OfflineReplayBuffer(object):
     def __init__(
         self,
-        furniture,
+        env_name,
         replay_dir,
         max_size,
         num_workers,
         nstep,
         discount,
         fetch_every,
+        batch_size,
         save_snapshot=True,
         reward_type: str = "sparse",
         embedding_dim: int = 1024,
@@ -382,7 +372,7 @@ class OfflineReplayBuffer(IterableDataset):
         action_stat: dict = None,
         smoothe: bool = False,
     ):
-        self._furniture = furniture
+        self._env_name = env_name
         self._replay_dir = replay_dir
         self._size = 0
         self._max_size = max_size
@@ -392,6 +382,7 @@ class OfflineReplayBuffer(IterableDataset):
         self._nstep = nstep
         self._discount = discount
         self._fetch_every = fetch_every
+        self._batch_size = batch_size
         self._samples_since_last_fetch = fetch_every
         self._save_snapshot = save_snapshot
         self._reward_type = reward_type
@@ -414,7 +405,7 @@ class OfflineReplayBuffer(IterableDataset):
         try:
             episode = load_episode(
                 eps_fn,
-                furniture=self._furniture,
+                env_name=self._env_name,
                 reward_type=self._reward_type,
                 discount=self._discount,
                 obs_keys=self._obs_keys,
@@ -487,8 +478,7 @@ class OfflineReplayBuffer(IterableDataset):
         action = np.concatenate([delta_pose, delta_theta, gripper_pose], axis=-1)
         action = 2 * ((action - self._action_stat["low"]) / (self._action_stat["high"] - self._action_stat["low"])) - 1
 
-        mc_returns = discount_cumsum(episode["rewards"], self._discount, episode["dones_float"])
-        mc_return = mc_returns[idx]
+        mc_return = episode["mc_returns"][idx]
 
         reward = np.zeros_like(episode["rewards"][idx])
         discount = np.ones_like(episode["masks"][idx])
@@ -513,7 +503,15 @@ class OfflineReplayBuffer(IterableDataset):
 
     def __iter__(self):
         while True:
-            yield self._sample()
+            batch = {
+                key: [] for key in ["observations", "actions", "rewards", "masks", "next_observations", "mc_returns"]
+            }
+            for _ in range(self._batch_size):
+                elem = self._sample()
+                for key in batch.keys():
+                    batch[key].append(elem[key])
+            batch = {key: np.asarray(value) for key, value in batch.items()}
+            yield Batch(**batch)
 
 
 def _worker_init_fn(worker_id):
@@ -523,7 +521,7 @@ def _worker_init_fn(worker_id):
 
 
 def make_replay_loader(
-    furniture,
+    env_name,
     replay_dir,
     max_size,
     batch_size,
@@ -540,13 +538,14 @@ def make_replay_loader(
 
     if buffer_type == "online":
         iterable = ReplayBuffer(
-            furniture,
+            env_name,
             replay_dir,
             max_size_per_worker,
             num_workers,
             nstep,
             discount,
-            fetch_every=500,
+            fetch_every=1000,
+            batch_size=batch_size,
             save_snapshot=save_snapshot,
             reward_type=reward_type,
             num_demos=num_demos,
@@ -554,20 +553,23 @@ def make_replay_loader(
         )
     elif buffer_type == "offline":
         iterable = OfflineReplayBuffer(
-            furniture,
+            env_name,
             replay_dir,
             max_size_per_worker,
             num_workers,
             nstep,
             discount,
             fetch_every=1e6,
+            batch_size=batch_size,
             save_snapshot=save_snapshot,
             reward_type=reward_type,
             num_demos=num_demos,
             **kwargs,
         )
 
-    loader = torch.utils.data.DataLoader(
-        iterable, batch_size=batch_size, num_workers=num_workers, pin_memory=True, worker_init_fn=_worker_init_fn
-    )
-    return loader
+    return iterable
+
+    # loader = torch.utils.data.DataLoader(
+    #     iterable, batch_size=batch_size, num_workers=num_workers, pin_memory=True, worker_init_fn=_worker_init_fn
+    # )
+    # return loader

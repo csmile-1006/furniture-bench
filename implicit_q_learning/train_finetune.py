@@ -552,9 +552,6 @@ def main(_):
             "calql",
         ], f"{FLAGS.agent_type.upper()} agent do not support BC pre-training."
 
-    def batch_to_jax(y):
-        return jax.tree_util.tree_map(lambda x: x.numpy(), y)
-
     offline_loader = make_offline_loader(
         str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, FLAGS.batch_size, obs_keys
     )
@@ -577,7 +574,6 @@ def main(_):
             desc="pre-training using BC" if FLAGS.use_bc else f"pre-training using {FLAGS.agent_type.upper()}",
             total=FLAGS.num_pretraining_steps,
         ):
-            offline_batch = batch_to_jax(offline_batch)
             update_info = agent.update(offline_batch, update_bc=FLAGS.use_bc, offline=True)
             if i % FLAGS.log_interval == 0:
                 for k, v in update_info.items():
@@ -706,7 +702,6 @@ def main(_):
                     offline_replay_iter, online_replay_iter = iter(offline_loader), iter(online_loader)
                 for _ in range(FLAGS.num_envs):
                     offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
-                    offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
                     combined = combine(offline_batch, online_batch)
                     batch = Batch(**combined)
                     if "antmaze" in FLAGS.env_name:
