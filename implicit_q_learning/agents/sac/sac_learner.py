@@ -150,7 +150,6 @@ class SACLearner(object):
         expl_noise: float = 0.1,
         bc_weight: float = 1.0,
         use_bc: bool = False,
-        detach_actor: bool = False,
         offline_batch_size: int = 128,
     ):
         """
@@ -175,7 +174,6 @@ class SACLearner(object):
         self.expl_noise = expl_noise
         self.bc_weight = bc_weight
         self.use_bc = use_bc
-        self.detach_actor = detach_actor
         self.offline_batch_size = offline_batch_size
         self.target_update_period = target_update_period
 
@@ -218,7 +216,7 @@ class SACLearner(object):
             latent_dim=emb_dim,
             encoder_cls=actor_encoder_cls,
             network_cls=actor_cls,
-            stop_gradient=False,
+            stop_gradient=True,
         )
         optimiser = optax.adam(actor_lr)
 
