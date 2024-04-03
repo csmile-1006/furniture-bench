@@ -94,7 +94,7 @@ class BCLearner(object):
             hidden_dims,
             action_dim,
             std_min=1e-5,
-            std_max=1e-2,
+            std_max=1e-1,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,

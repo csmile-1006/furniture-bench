@@ -15,6 +15,9 @@ def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch, expl_noise: float)
             rngs={"dropout": key},
             mutable=actor.extra_variables.keys(),
         )
+        sampled_actions = dist.sample(seed=key)
+        online_log_probs = dist.log_prob(sampled_actions)
+
         log_probs = dist.log_prob(batch.actions)
         a = -log_probs
         actor_loss = a.mean()
@@ -26,6 +29,7 @@ def bc_update_actor(key: PRNGKey, actor: Model, batch: Batch, expl_noise: float)
                 "actor_loss_min": a.min(),
                 "actor_loss_max": a.max(),
                 "actor_loss_std": a.std(),
+                "entropy": -online_log_probs.mean(),
                 "updated_states": updated_states,
             },
         )
