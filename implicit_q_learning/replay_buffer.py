@@ -341,11 +341,27 @@ class ReplayBuffer(object):
             batch = {
                 key: [] for key in ["observations", "actions", "rewards", "masks", "next_observations", "mc_returns"]
             }
+            batch["observations"] = {key: [] for key in self._obs_keys}
+            batch["next_observations"] = {key: [] for key in self._obs_keys}
             for _ in range(self._batch_size):
                 elem = self._sample()
                 for key in batch.keys():
-                    batch[key].append(elem[key])
-            batch = {key: np.asarray(value) for key, value in batch.items()}
+                    if key == "observations" or key == "next_observations":
+                        for _key in self._obs_keys:
+                            batch[key][_key].append(elem[key][_key])
+                    else:
+                        batch[key].append(elem[key])
+
+            def convert_to_numpy(_dict):
+                ret = {}
+                for key in _dict:
+                    if isinstance(_dict[key], dict):
+                        ret[key] = convert_to_numpy(_dict[key])
+                    else:
+                        ret[key] = np.asarray(_dict[key])
+                return ret
+
+            batch = convert_to_numpy(batch)
             yield Batch(**batch)
 
 
@@ -506,11 +522,27 @@ class OfflineReplayBuffer(object):
             batch = {
                 key: [] for key in ["observations", "actions", "rewards", "masks", "next_observations", "mc_returns"]
             }
+            batch["observations"] = {key: [] for key in self._obs_keys}
+            batch["next_observations"] = {key: [] for key in self._obs_keys}
             for _ in range(self._batch_size):
                 elem = self._sample()
                 for key in batch.keys():
-                    batch[key].append(elem[key])
-            batch = {key: np.asarray(value) for key, value in batch.items()}
+                    if key == "observations" or key == "next_observations":
+                        for _key in self._obs_keys:
+                            batch[key][_key].append(elem[key][_key])
+                    else:
+                        batch[key].append(elem[key])
+
+            def convert_to_numpy(_dict):
+                ret = {}
+                for key in _dict:
+                    if isinstance(_dict[key], dict):
+                        ret[key] = convert_to_numpy(_dict[key])
+                    else:
+                        ret[key] = np.asarray(_dict[key])
+                return ret
+
+            batch = convert_to_numpy(batch)
             yield Batch(**batch)
 
 
