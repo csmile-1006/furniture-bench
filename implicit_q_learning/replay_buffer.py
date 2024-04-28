@@ -2,6 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import copy
 import io
 import random
 import traceback
@@ -51,6 +52,29 @@ def _get_stacked_timesteps(length, window_size, skip_frame):
     return stacked_timesteps
 
 
+def phase_crop(episode, start_index, end_index, episode_phase=None, reward_type="sparse"):
+    if episode_phase is None:
+        episode_phase = {}
+    for key, value in episode.items():
+        if isinstance(value, np.ndarray):
+            episode_phase[key] = value[start_index:end_index]
+        elif isinstance(value, dict):
+            # Create a new sub-dictionary if the current item is a dictionary
+            episode_phase[key] = {}
+            # Recursively process the nested dictionary
+            phase_crop(value, start_index, end_index, episode_phase[key])
+        else:
+            episode_phase[key] = value
+        if reward_type == "sparse" and key == "rewards":
+            # Mark success for the phase.
+            episode_phase["rewards"][-1] = 1
+        if key == "terminals":
+            # Mark the last state as terminal.
+            episode_phase["terminals"][-1] = 1
+
+    return episode_phase
+
+
 def load_episode(
     fn,
     furniture="one_leg",
@@ -62,11 +86,38 @@ def load_episode(
     lambda_mr=1.0,
     reward_stat: dict = None,
     smoothe: bool = False,
+    phase: int = -1,
 ):
     observations, next_observations, timesteps = [], [], []
     with fn.open("rb") as f:
         episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
+        if phase != -1:
+            # Delete unnecessary keys.
+            processed_episode = {}
+            for key in [
+                "actions",
+                "observations",
+                "next_observations",
+                "rewards",
+                "terminals",
+                "phases",
+                "multimodal_rewards",
+            ]:
+                processed_episode[key] = copy.deepcopy(episode[key])
+            # Find the start and end index of the phase.
+            phases = processed_episode["phases"]
+            start_index = np.where(phases == phase)[0][0]
+            # Random margin of 10.
+            start_index = np.max([0, start_index - 10])
+            if np.max(phases) == phase:  # The last phase.
+                end_index = len(phases)
+            else:
+                end_index = np.where(phases == phase + 1)[0][0]
+            end_index = np.min([len(phases), end_index + 10])
+            episode_phase = phase_crop(processed_episode, start_index, end_index, reward_type=reward_type)
+            episode = copy.deepcopy(episode_phase)
+
         eps_len = episode_len(episode)
         stacked_timesteps = _get_stacked_timesteps(eps_len, window_size, skip_frame)
         for i in range(eps_len):
@@ -361,6 +412,7 @@ class OfflineReplayBuffer(IterableDataset):
         reward_stat: dict = None,
         action_stat: dict = None,
         smoothe: bool = False,
+        phase: int = -1,
     ):
         self._furniture = furniture
         self._replay_dir = replay_dir
@@ -383,6 +435,7 @@ class OfflineReplayBuffer(IterableDataset):
         self._lambda_mr = lambda_mr
         self._action_stat = action_stat
         self._reward_stat = reward_stat
+        self._phase = phase
         self._smoothe = smoothe
         self._try_fetch()
 
@@ -402,6 +455,7 @@ class OfflineReplayBuffer(IterableDataset):
                 skip_frame=self._skip_frame,
                 lambda_mr=self._lambda_mr,
                 reward_stat=self._reward_stat,
+                phase=self._phase,
             )
         except Exception as e:
             print(f"Failed to load {eps_fn}: {e}")

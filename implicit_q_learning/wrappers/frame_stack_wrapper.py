@@ -47,6 +47,23 @@ class FrameStackWrapper(gym.Wrapper):
         stack = self._frames[idx][0]
         return {key: np.stack(stack[key]) for key in _obs}
 
+    def reset_env_to(self, idx, state):
+        self.env.reset_env_to(idx, state)
+        self.env.refresh()
+
+        self._i[idx] = 0
+        self._frames[idx] = {
+            frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
+            for frame in range(self._skip_frame)
+        }
+        _obs = self.env.get_observation()
+        for frame in range(self._skip_frame):
+            for _ in range(self._num_frames):
+                for key in _obs:
+                    self._frames[idx][frame][key].append(_obs[key][idx])
+        stack = self._frames[idx][0]
+        return {key: np.stack(stack[key]) for key in _obs}
+
     def reset(self):
         self._i = {env_idx: 0 for env_idx in range(self._num_envs)}
         self._frames = {
@@ -57,6 +74,26 @@ class FrameStackWrapper(gym.Wrapper):
             for env_idx in range(self._num_envs)
         }
         _obs = self.env.reset()
+        for env_idx in range(self._num_envs):
+            for frame in range(self._skip_frame):
+                for _ in range(self._num_frames):
+                    for key in _obs:
+                        self._frames[env_idx][frame][key].append(_obs[key][env_idx])
+        return self._transform_observation(_obs)
+    
+    def reset_to(self, state):
+        self._i = {env_idx: 0 for env_idx in range(self._num_envs)}
+        self._frames = {
+            env_idx: {
+                frame: {key: deque([], maxlen=self._num_frames) for key in self.env.observation_space}
+                for frame in range(self._skip_frame)
+            }
+            for env_idx in range(self._num_envs)
+        }
+        self.env.reset()
+        self.env.reset_to(state)
+        self.env.refresh()
+        _obs = self.env.get_observation()
         for env_idx in range(self._num_envs):
             for frame in range(self._skip_frame):
                 for _ in range(self._num_frames):

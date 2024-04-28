@@ -79,6 +79,8 @@ class FurnitureSimEnv(gym.Env):
         act_rot_repr: str = "quat",
         record_dir: str = "./",
         record_every: int = 5,
+        from_skill: int = 0,
+        phase: int = -1,
         **kwargs,
     ):
         """
@@ -115,6 +117,13 @@ class FurnitureSimEnv(gym.Env):
         else:
             self.furniture = furniture_factory(furniture)
 
+        if phase == 2:
+            max_env_steps = 100
+        elif phase == 3:
+            max_env_steps = 150
+        elif phase == 4:
+            max_env_steps = 300
+
         self.furniture.max_env_steps = max_env_steps
         for furn in self.furnitures:
             furn.max_env_steps = max_env_steps
@@ -134,7 +143,9 @@ class FurnitureSimEnv(gym.Env):
         self.init_assembled = init_assembled
         self.np_step_out = np_step_out
         self.channel_first = channel_first
-        self.from_skill = 0  # TODO: Skill benchmark should be implemented in FurnitureSim.
+        self.from_skill = from_skill
+        self.phase = phase
+        assert self.phase >= -1 and self.furniture_name == "one_leg", "Phase is only supported for one_leg."
         self.randomness = str_to_enum(randomness)
         self.high_random_idx = high_random_idx
         self.last_grasp = torch.tensor([-1.0] * num_envs, device=self.device)
@@ -183,6 +194,9 @@ class FurnitureSimEnv(gym.Env):
         # Give noise to a given phase in order to collect failure trajectories at specific phase.
         self.phase_noise = kwargs.get("phase_noise", -1)
         self.phase_counter = 0
+        self.grasp_counter = [0] * self.num_envs
+        self.lift_counter = [0] * self.num_envs
+        self.insertion_counter = [0] * self.num_envs
 
     def _create_ground_plane(self):
         """Creates ground plane."""
@@ -407,11 +421,12 @@ class FurnitureSimEnv(gym.Env):
                     ori = attach_part_pose @ self.furniture.assembled_rel_poses[(attach_to.part_idx, part.part_idx)][0]
                 part.reset_pos[0] = pos
                 part.reset_ori[0] = ori
-            pos = part.reset_pos[self.from_skill]
-            ori = part.reset_ori[self.from_skill]
+            # The scripted agent will move the parts.
+            pos = part.reset_pos[0]
+            ori = part.reset_ori[0]
         else:
-            pos = part.reset_pos[self.from_skill]
-            ori = part.reset_ori[self.from_skill]
+            pos = part.reset_pos[0]
+            ori = part.reset_ori[0]
         return pos, ori
 
     def set_viewer(self):
@@ -615,7 +630,7 @@ class FurnitureSimEnv(gym.Env):
         return gym.spaces.Dict(obs_dict)
 
     @torch.no_grad()
-    def step(self, action):
+    def step(self, action, reset_step=False):
         """Robot takes an action.
 
         Args:
@@ -623,6 +638,8 @@ class FurnitureSimEnv(gym.Env):
                 (num_envs, 8): End-effector delta in [x, y, z, qx, qy, qz, qw, gripper] if self.act_rot_repr == "quat".
                 (num_envs, 10): End-effector delta in [x, y, z, 6D rotation, gripper] if self.act_rot_repr == "rot_6d".
                 (num_envs, 7): End-effector delta in [x, y, z, ax, ay, az, gripper] if self.act_rot_repr == "axis".
+            reset_step:
+                Whether this step is for environment reset. If True, it will not update the environment step count, and will not record the video.
         """
         if isinstance(action, np.ndarray):
             action = torch.from_numpy(action).float().to(device=self.device)
@@ -716,17 +733,36 @@ class FurnitureSimEnv(gym.Env):
         self.isaac_gym.end_access_image_tensors(self.sim)
 
         observation_time_start = time.time()
+        video = not reset_step
         obs = self._get_observation()
         observation_time_end = time.time()
 
         observation_times.append(observation_time_end - observation_time_start)
+
+        for env_idx in range(self.num_envs):
+            # Hard-coded done to check whether gripper maintain the grasp.
+            if self.phase == 0:
+                if self.gripper_width()[env_idx] > 0.01 and self.gripper_width()[env_idx] < 0.015:
+                    self.grasp_counter[env_idx] += 1
+            elif self.phase == 2:  # Pick up the leg.
+                part_idx = 4
+                part_poses = self._get_parts_poses(sim_coord=True)[0]
+                # Check if the leg is lifted.
+                curr_leg_height = part_poses[env_idx][7 * part_idx + 2]  # Z
+                reset_leg_height = self.reset_poses[env_idx][7 * part_idx + 2]
+                if curr_leg_height - reset_leg_height > 0.01:
+                    self.lift_counter[env_idx] += 1
+            elif self.phase == 3:
+                if self._insertion_success():
+                    self.insertion_counter[env_idx] += 1
 
         reward_start_time = time.time()
         reward = self._reward()
         reward_end_time = time.time()
         reward_times.append(reward_end_time - reward_start_time)
 
-        self.env_steps += 1
+        if not reset_step:
+            self.env_steps += 1
 
         return (
             obs,
@@ -750,6 +786,16 @@ class FurnitureSimEnv(gym.Env):
             env_founds = founds[env_idx].cpu().numpy()
             rewards[env_idx] = self.furnitures[env_idx].compute_assemble(env_parts_poses, env_founds)
 
+            if self.phase == 0:
+                done_phase = self.done_with_grasp(env_idx)
+            elif self.phase == 2:
+                done_phase = self.done_with_lift(env_idx)
+            elif self.phase == 3:
+                done_phase = self.done_with_insertion(env_idx)
+            else:
+                done_phase = False
+            if done_phase:
+                rewards[env_idx] = 1.0
         if self.np_step_out:
             return rewards.cpu().numpy()
 
@@ -864,6 +910,13 @@ class FurnitureSimEnv(gym.Env):
         self.isaac_gym.render_all_camera_sensors(self.sim)
         self.isaac_gym.start_access_image_tensors(self.sim)
 
+    def refresh_cam(self):
+        self.isaac_gym.simulate(self.sim)
+        self.isaac_gym.fetch_results(self.sim, True)
+        self.isaac_gym.step_graphics(self.sim)
+        self.isaac_gym.render_all_camera_sensors(self.sim)
+        self.isaac_gym.start_access_image_tensors(self.sim)
+
     def init_ctrl(self):
         # Positional and velocity gains for robot control.
         kp = torch.tensor(sim_config["robot"]["kp"], device=self.device)
@@ -901,16 +954,64 @@ class FurnitureSimEnv(gym.Env):
     def gripper_width(self):
         return self.dof_pos[:, 7:8] + self.dof_pos[:, 8:9]
 
+    def done_with_grasp(self, env_idx):
+        if self.grasp_counter[env_idx] > 5:
+            return True
+        return False
+
+    def done_with_lift(self, env_idx):
+        if self.lift_counter[env_idx] > 5:
+            return True
+        return False
+
+    def _insertion_success(self):
+        # Check insertion failure.
+        part1_name = "square_table_top"
+        part2_name = "square_table_leg4"
+        part1_pose = C.to_homogeneous(
+            self.rb_states[self.part_idxs[part1_name]][0][:3],
+            C.quat2mat(self.rb_states[self.part_idxs[part1_name]][0][3:7]),
+        )
+        part2_pose = C.to_homogeneous(
+            self.rb_states[self.part_idxs[part2_name]][0][:3],
+            C.quat2mat(self.rb_states[self.part_idxs[part2_name]][0][3:7]),
+        )
+        part_idx1 = 0
+        part_idx2 = 4
+        rel_pose = torch.linalg.inv(part1_pose) @ part2_pose
+        assembled_rel_poses = self.furniture.assembled_rel_poses[(part_idx1, part_idx2)]
+        # Do not check the orientation, but only the position.
+        if self.furniture.assembled(
+            rel_pose.cpu().numpy(), assembled_rel_poses, ori_bound=-1, pos_threshold=[0.015, 0.015, 0.02]
+        ):
+            return True
+        return False
+
+    def done_with_insertion(self, env_idx):
+        if self.insertion_counter[env_idx] > 5:
+            return True
+        return False
+
     def _done(self) -> bool:
         dones = torch.zeros((self.num_envs, 1), dtype=torch.bool, device=self.device)
         if self.manual_done:
             return dones
         for env_idx in range(self.num_envs):
             timeout = self.env_steps[env_idx] > self.furniture.max_env_steps
-            if self.furnitures[env_idx].all_assembled() or timeout:
-                dones[env_idx] = 1
-                if timeout:
-                    gym.logger.warn(f"[env] env_idx: {env_idx} timeout")
+            done = False
+            if timeout:
+                done = True
+            elif self.phase == -1 or self.phase == 4:  # Until done.
+                done = self.furnitures[env_idx].all_assembled()
+            elif self.phase == 0:
+                done = self.done_with_grasp(env_idx)
+            elif self.phase == 2:  # Pick up the leg.
+                done = self.done_with_lift(env_idx)
+            elif self.phase == 3:
+                done = self.done_with_insertion(env_idx)
+            # To Tensor
+            done = torch.tensor(done, dtype=torch.bool, device=self.device)
+            dones[env_idx] = done
         if self.np_step_out:
             dones = dones.cpu().numpy().astype(bool)
         return dones
@@ -971,7 +1072,8 @@ class FurnitureSimEnv(gym.Env):
 
         return P, V
 
-    def _get_observation(self, video=True):
+    def _get_observation(self):
+        self.refresh_cam()
         robot_state = self._read_robot_state()
         color_obs = {k: self._get_color_obs(v) for k, v in self.camera_obs.items() if "color" in k}
         depth_obs = {k: torch.stack(v) for k, v in self.camera_obs.items() if "depth" in k}
@@ -999,24 +1101,24 @@ class FurnitureSimEnv(gym.Env):
         #     stacked_img = np.hstack(record_images)
         #     self.video_writer.write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
 
-        for env_idx in range(self.num_envs):
-            if (
-                video
-                and self.record
-                and self.episode_cnts[env_idx]
-                and self.episode_cnts[env_idx] % self.record_every == 0
-                and env_idx % self.num_envs == 0
-            ):
-                record_images = []
-                for k in sorted(color_obs.keys()):
-                    img = color_obs[k][env_idx]
-                    if not self.np_step_out:
-                        img = img.cpu().numpy().copy()
-                    if self.channel_first:
-                        img = img.transpose(1, 2, 0)
-                    record_images.append(img.squeeze())
-                stacked_img = np.vstack(record_images)
-                self.video_writer[env_idx].write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
+        # for env_idx in range(self.num_envs):
+        #     if (
+        #         video
+        #         and self.record
+        #         and self.episode_cnts[env_idx]
+        #         and self.episode_cnts[env_idx] % self.record_every == 0
+        #         and env_idx % self.num_envs == 0
+        #     ):
+        #         record_images = []
+        #         for k in sorted(color_obs.keys()):
+        #             img = color_obs[k][env_idx]
+        #             if not self.np_step_out:
+        #                 img = img.cpu().numpy().copy()
+        #             if self.channel_first:
+        #                 img = img.transpose(1, 2, 0)
+        #             record_images.append(img.squeeze())
+        #         stacked_img = np.vstack(record_images)
+        #         self.video_writer[env_idx].write(cv2.cvtColor(stacked_img, cv2.COLOR_RGB2BGR))
 
         obs = {}
         if isinstance(robot_state, (np.ndarray, torch.Tensor)) or robot_state:  # Check if robot_state is empty.
@@ -1047,10 +1149,20 @@ class FurnitureSimEnv(gym.Env):
     def get_observation(self):
         return self._get_observation()
 
+    def _get_front_cam_image(self):
+        self.refresh_cam()
+        color_obs = {k: self._get_color_obs(v) for k, v in self.camera_obs.items() if "color" in k}
+        obs = color_obs["color_image2"]
+        obs = obs.detach().cpu().numpy()
+        if self.channel_first:
+            obs = np.transpose(obs, (0, 2, 3, 1))
+        # Check if it is the framestack env.
+        return obs
+
     def render(self, mode="rgb_array"):
         if mode != "rgb_array":
             raise NotImplementedError
-        return self._get_observation()["color_image2"]
+        return self._get_front_cam_image()
 
     def is_success(self):
         return [{"task": self.furnitures[env_idx].all_assembled()} for env_idx in range(self.num_envs)]
@@ -1073,11 +1185,36 @@ class FurnitureSimEnv(gym.Env):
         self.refresh()
         self.assemble_idx = 0
         self.phase_counter = 0
+        self.grasp_counter = [0] * self.num_envs
+        self.lift_counter = [0] * self.num_envs
+        self.insertion_counter = [0] * self.num_envs
+
+        if self.from_skill >= 1:  # Run scripted agent to find the reset pose.
+            self.skill_reset()
 
         if self.save_camera_input:
             self._save_camera_input()
+        # self._save_reset_pose()
 
         return self._get_observation()
+
+    def _save_reset_pose(self):
+        parts_poses = self._get_parts_poses(sim_coord=True)[0].cpu().numpy()
+        self.reset_poses = []
+        for env_idx in range(self.num_envs):
+            self.reset_poses.append(parts_poses[env_idx])
+
+    def _get_assembly_script_part(self):
+        """Get the part to assemble in the assembly script."""
+        part_idx1, part_idx2 = self.furniture.should_be_assembled[self.assemble_idx]
+        part1 = self.furniture.parts[part_idx1]
+        part2 = self.furniture.parts[part_idx2]
+        if not part1.pre_assemble_done:
+            return part1
+        elif not part2.pre_assemble_done:
+            return part2
+        else:
+            return part2
 
     def reset_to(self, state):
         """Reset to a specific state.
@@ -1087,6 +1224,7 @@ class FurnitureSimEnv(gym.Env):
         """
         for i in range(self.num_envs):
             self.reset_env_to(i, state[i])
+        self._save_reset_pose()
 
     def reset_env(self, env_idx, reset_franka=True, reset_parts=True):
         """Resets the environment. **MUST refresh in between multiple calls
@@ -1113,23 +1251,53 @@ class FurnitureSimEnv(gym.Env):
         if reset_parts:
             self._reset_parts(env_idx)
         self.env_steps[env_idx] = 0
+        self.grasp_counter[env_idx] = 0
+        self.lift_counter[env_idx] = 0
+        self.insertion_counter[env_idx] = 0
         self.episode_cnts[env_idx] += 1
         self.move_neutral = False
-        if self.video_writer.get(env_idx) is not None:
-            self.video_writer[env_idx].release()
-            self.video_writer[env_idx] = None
-        if self.record and self.episode_cnts[env_idx] % self.record_every == 0 and env_idx % self.num_envs == 0:
-            record_dir = (
-                Path(self.record_dir)
-                / f"env{env_idx}_ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-            )
-            record_dir.mkdir(parents=True, exist_ok=True)
-            self.video_writer[env_idx] = cv2.VideoWriter(
-                str(record_dir / "video.mp4"),
-                cv2.VideoWriter_fourcc("m", "p", "4", "v"),
-                30,
-                (self.img_size[0], self.img_size[1] * 2),  # Wrist and front cameras.
-            )
+        # if self.video_writer.get(env_idx) is not None:
+        #     self.video_writer[env_idx].release()
+        #     self.video_writer[env_idx] = None
+        # if self.record and self.episode_cnts[env_idx] % self.record_every == 0 and env_idx % self.num_envs == 0:
+        #     record_dir = (
+        #         Path(self.record_dir)
+        #         / f"env{env_idx}_ep{self.episode_cnts[env_idx]}_{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        #     )
+        #     record_dir.mkdir(parents=True, exist_ok=True)
+        #     self.video_writer[env_idx] = cv2.VideoWriter(
+        #         str(record_dir / "video.mp4"),
+        #         cv2.VideoWriter_fourcc("m", "p", "4", "v"),
+        #         30,
+        #         (self.img_size[0], self.img_size[1] * 2),  # Wrist and front cameras.
+        #     )
+        self.refresh()
+        # self._save_reset_pose()
+
+    def skill_reset(self, state=None):
+        assert self.num_envs == 1  # Only support single env for now.
+        skill_counter = 0
+        max_steps = 400
+        for i in range(max_steps):
+            action, skill_complete = self.get_assembly_action()
+            self.step(action, reset_step=True)
+            if skill_complete == -1:
+                gym.logger.warn("Skill reset failed.")
+                if state is not None:
+                    self.reset_env_to(0, state)
+                else:
+                    self.reset()
+                break
+            if skill_complete == 1:
+                skill_counter += 1
+            if skill_counter == self.from_skill:  # Done with the skill reset.
+                break  # Reset done.
+        if i == max_steps - 1:
+            gym.logger.warn("Skill reset failed.")
+            if state is not None:
+                self.reset_env_to(0, state)
+            else:
+                self.reset()  # Reset the environment since the reset has failed.
 
     def reset_env_to(self, env_idx, state):
         """Reset to a specific state. **MUST refresh in between multiple calls
@@ -1151,20 +1319,22 @@ class FurnitureSimEnv(gym.Env):
         self._reset_franka(env_idx, dof_pos)
         self._reset_parts(env_idx, state["parts_poses"])
         self.env_steps[env_idx] = 0
+        self.grasp_counter[env_idx] = 0
+        self.lift_counter[env_idx] = 0
+        self.insertion_counter[env_idx] = 0
         self.move_neutral = False
+        self.episode_cnts[env_idx] += 1
+
+        if self.from_skill >= 1:  # Run scripted agent to find the reset pose.
+            self.skill_reset(state)
+        self.refresh()
+        self._save_reset_pose()
 
     def _update_franka_dof_state_buffer(self, dof_pos=None):
         """
         Sets internal tensor state buffer for Franka actor
         """
-        # Low randomness only.
-        if self.from_skill >= 1:
-            dof_pos = torch.from_numpy(self.default_dof_pos)
-            ee_pos = torch.from_numpy(self.furniture.furniture_conf["ee_pos"][self.from_skill])
-            ee_quat = torch.from_numpy(self.furniture.furniture_conf["ee_quat"][self.from_skill])
-            dof_pos = self.robot_model.inverse_kinematics(ee_pos, ee_quat)
-        else:
-            dof_pos = self.default_dof_pos if dof_pos is None else dof_pos
+        dof_pos = self.default_dof_pos if dof_pos is None else dof_pos
 
         # Views for self.dof_states (used with set_dof_state_tensor* function)
         self.dof_pos[:, 0 : self.franka_num_dofs] = torch.tensor(dof_pos, device=self.device, dtype=torch.float32)
@@ -1504,3 +1674,5 @@ class FurnitureSimStateEnv(FurnitureSimEnv):
     def __init__(self, **kwargs):
         obs_keys = DEFAULT_STATE_OBS
         super().__init__(obs_keys=obs_keys, concat_robot_state=True, **kwargs)
+
+

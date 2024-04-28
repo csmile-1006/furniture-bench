@@ -3,6 +3,8 @@ import isaacgym  # noqa: F401
 import os
 from collections import deque
 from pathlib import Path
+import copy
+import pickle
 
 import clip
 import flax.linen as nn
@@ -26,6 +28,7 @@ from rich.console import Console
 from tqdm import trange
 
 from furniture_bench.sim_config import sim_config
+from wrappers.video_recorder_wrapper import VideoRecorderList
 
 console = Console()
 FLAGS = flags.FLAGS
@@ -104,7 +107,9 @@ flags.DEFINE_string(
     "reward model checkpoint base path.",
 )
 flags.DEFINE_boolean("use_text_feature", False, "use text feature for observation.")
-
+flags.DEFINE_boolean("offline_only", False, "Use offline data only (debugging)")
+flags.DEFINE_integer("from_skill", -1, "Initialize environment from this skill.")
+flags.DEFINE_integer("phase", -1, "Phase to train the policy.")
 
 def set_seed(seed):
     import random
@@ -234,6 +239,30 @@ def compute_multimodal_reward(reward_model, **kwargs):
     return output
 
 
+def load_state(data_path, phase=None):
+    if phase > -1:
+        stat_path = data_path / f"states_phase.pkl"
+        console.print(f"load state file from {stat_path}.")
+        with open(stat_path, "rb") as f:
+            state = pickle.load(f)
+
+        # Get state for the specific phase.
+        state[0] = state[0][phase] # one environment only.
+        # Currently it only has one environment.
+        # Expand it to be multiple environment.
+        for i in range(FLAGS.num_envs):
+            state[i] = copy.deepcopy(state[0])
+        return state
+    stat_path = data_path / "states.npz"
+    if stat_path.exists():
+        console.print(f"load state file from {stat_path}.")
+        state = np.load(stat_path, allow_pickle=True)
+        state = {key: state[key] for key in state}
+    else:
+        raise ValueError("no state file in this folder.")
+    return state
+
+
 def load_reward_stat(data_path):
     stat_path = data_path / "reward_stats.npz"
     if stat_path.exists():
@@ -303,25 +332,36 @@ def make_env(
             encoder_type=encoder_type,
             reward_encoder_type=FLAGS.reward_encoder_type,
             headless=True,
-            record=True,
+            record=False,
             resize_img=True,
             randomness=randomness,
             record_every=1,
-            record_dir=record_dir,
+            record_dir=None,
             compute_device_id=FLAGS.device_id,
             graphics_device_id=FLAGS.device_id,
             window_size=FLAGS.reward_window_size,
             skip_frame=FLAGS.reward_skip_frame,
             max_env_steps=sim_config["scripted_timeout"][furniture_name] if "Sim" in env_id else 3000,
             reward_model=reward_model,
+            from_skill=FLAGS.from_skill,    
+            phase=FLAGS.phase,
         )
     else:
         env = gym.make(env_name)
+
+    train_video_recorder = VideoRecorderList()
+    for _ in range(FLAGS.num_envs):
+        train_video_recorder.add_recorder(
+            root_dir=Path(record_dir) / f"env_{_}",
+            render_size=(224, 224),
+            fps=20,
+        )
 
     env = wrappers.SinglePrecision(env)
     env = wrappers.FrameStackWrapper(env, num_frames=FLAGS.window_size, skip_frame=FLAGS.skip_frame)
     env = wrappers.ActionUnnormalizeWrapper(env, action_stat)
     env = wrappers.EpisodeMonitor(env)
+    env = wrappers.SuccessRecordWrapper(env, video_recorder=train_video_recorder)
 
     env.seed(seed)
     env.action_space.seed(seed)
@@ -333,7 +373,7 @@ def make_env(
     return env
 
 
-def make_offline_loader(furniture, env, data_path, batch_size, obs_keys):
+def make_offline_loader(furniture, env, data_path, batch_size, obs_keys, phase=-1):
     return make_replay_loader(
         furniture=furniture,
         replay_dir=Path(data_path).expanduser(),
@@ -355,6 +395,7 @@ def make_offline_loader(furniture, env, data_path, batch_size, obs_keys):
         lambda_mr=FLAGS.lambda_mr,
         action_stat=load_action_stat(Path(data_path)),
         reward_stat=load_reward_stat(Path(data_path)) if "ours" in FLAGS.reward_type else None,
+        phase=phase
     )
 
 
@@ -428,6 +469,7 @@ def main(_):
 
         reward_stat = load_reward_stat(Path(FLAGS.data_path))
 
+    STATES = load_state(Path(FLAGS.data_path), FLAGS.phase)
     action_stat = load_action_stat(Path(FLAGS.data_path))
 
     record_dir = os.path.join(FLAGS.save_dir, "sim_record", FLAGS.env_name, f"{FLAGS.run_name}.{FLAGS.seed}")
@@ -571,7 +613,7 @@ def main(_):
     del offline_loader
 
     offline_loader = make_offline_loader(
-        str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, offline_batch_size, obs_keys
+        str(FLAGS.env_name.split("/")[-1]), env, FLAGS.data_path, FLAGS.batch_size, obs_keys, phase=FLAGS.phase
     )
     replay_storage = ReplayBufferStorage(
         replay_dir=Path(buffer_dir).expanduser(),
@@ -607,10 +649,19 @@ def main(_):
     i = start_step
     eval_returns = []
     trajectories = _initialize_traj_dict()
-    observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
+    observation, done = env.reset_to(STATES), np.zeros((env._num_envs,), dtype=bool)
+
     start_training = FLAGS.num_pretraining_steps + env.furniture.max_env_steps * FLAGS.num_envs
     offline_replay_iter, online_replay_iter = None, None
     num_episodes = 0
+    
+    eval_video_recorder = VideoRecorderList()
+    for _ in range(FLAGS.num_envs):
+        eval_video_recorder.add_recorder(
+            root_dir=Path(record_dir) / f"env_{_}",
+            render_size=(224, 224),
+            fps=20,
+        )
 
     if FLAGS.use_bc:
         agent.prepare_online_step()
@@ -669,7 +720,7 @@ def main(_):
                             env_idx,
                             env.episode_cnts[env_idx],
                         )
-                    new_ob = env.reset_env(env_idx)
+                    new_ob = env.reset_env_to(env_idx, STATES[env_idx])
                     for key in next_observation:
                         next_observation[key][env_idx] = new_ob[key]
                     done[env_idx] = False
@@ -684,8 +735,14 @@ def main(_):
                 for _ in range(FLAGS.num_envs):
                     offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
                     offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
-                    combined = combine(offline_batch, online_batch)
-                    batch = Batch(**combined)
+                    import pdb; pdb.set_trace()
+                    # combined = combine(offline_batch, online_batch)
+                    # batch = Batch(**combined)
+                    if FLAGS.offline_only:
+                        batch = offline_batch
+                    else:
+                        combined = combine(offline_batch, online_batch)
+                        batch = Batch(**combined)
                     if "antmaze" in FLAGS.env_name:
                         batch = Batch(
                             observations=batch.observations,
@@ -706,7 +763,7 @@ def main(_):
 
             if (i - FLAGS.num_pretraining_steps) % FLAGS.eval_interval == 0:
                 env.set_eval_flag()
-                eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
+                eval_stats = evaluate(agent, env, FLAGS.eval_episodes, state=STATES, video_recorder=eval_video_recorder, step=i)
 
                 for k, v in eval_stats.items():
                     wandb.log({f"evaluation/{k}": v}, step=i)
@@ -717,7 +774,7 @@ def main(_):
                     eval_returns,
                     fmt=["%d", "%.1f"],
                 )
-                observation, done = env.reset(), np.zeros((env._num_envs,), dtype=bool)
+                observation, done = env.reset_to(STATES), np.zeros((env._num_envs,), dtype=bool)
                 trajectories = _initialize_traj_dict()
 
                 env.unset_eval_flag()
