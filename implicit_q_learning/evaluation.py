@@ -62,6 +62,10 @@ def evaluate(
                 video_recorder.record(observation[list(observation.keys())[0]][0][-1])
         for env_idx in range(min(env._num_envs, num_episodes)):
             if done[env_idx].item() is True:
+                for k in stats.keys():
+                    stats[k].append(info[f"episode_{env_idx}"][k])
+                if use_video_recorder:
+                    video_recorder.save(f"evaluation_{step}_{ep}")
                 if state is not None:
                     new_ob = env.reset_env_to(env_idx, state[env_idx])
                 else:
@@ -69,10 +73,6 @@ def evaluate(
                 for key in observation:
                     observation[key][env_idx] = new_ob[key]
                 done[env_idx] = False
-                for k in stats.keys():
-                    stats[k].append(info[f"episode_{env_idx}"][k])
-                if use_video_recorder:
-                    video_recorder.save(f"evaluation_{step}_{ep}")
                 ep += 1
                 pbar.update(1)
         pbar.set_postfix({"total_step": f"{total_step}", "num_success": f"{np.sum(stats['success'], dtype=np.int32)}"})

@@ -492,13 +492,14 @@ def main(_):
         dir=wandb_dir,
         entity=FLAGS.wandb_entity,
         mode="online" if FLAGS.wandb else "offline",
-        name=FLAGS.env_name
-        + "-"
-        + str(FLAGS.seed)
-        + "-"
-        + str(FLAGS.data_path.split("/")[-1])
-        + "-"
-        + str(FLAGS.run_name),
+        name=FLAGS.save_dir,
+        # name=FLAGS.env_name
+        # + "-"
+        # + str(FLAGS.seed)
+        # + "-"
+        # + str(FLAGS.data_path.split("/")[-1])
+        # + "-"
+        # + str(FLAGS.run_name),
     )
     wandb.config.update(FLAGS)
 
@@ -735,7 +736,6 @@ def main(_):
                 for _ in range(FLAGS.num_envs):
                     offline_batch, online_batch = next(offline_replay_iter), next(online_replay_iter)
                     offline_batch, online_batch = batch_to_jax(offline_batch), batch_to_jax(online_batch)
-                    import pdb; pdb.set_trace()
                     # combined = combine(offline_batch, online_batch)
                     # batch = Batch(**combined)
                     if FLAGS.offline_only:
