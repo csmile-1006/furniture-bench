@@ -127,6 +127,7 @@ class FurnitureSimEnv(gym.Env):
         self.furniture.max_env_steps = max_env_steps
         for furn in self.furnitures:
             furn.max_env_steps = max_env_steps
+        self.max_env_steps = max_env_steps
 
         self.furniture_name = furniture
         self.num_envs = num_envs
