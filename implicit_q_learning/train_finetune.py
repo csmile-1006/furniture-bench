@@ -657,11 +657,12 @@ def main(_):
     num_episodes = 0
     
     eval_video_recorder = VideoRecorderList()
-    for _ in range(FLAGS.num_envs):
-        eval_video_recorder.add_recorder(
-            root_dir=Path(record_dir) / f"env_{_}",
-            render_size=(224, 224),
-            fps=20,
+    # for _ in range(FLAGS.num_envs):
+    # Only for the first environment.
+    eval_video_recorder.add_recorder(
+        root_dir=Path(record_dir) / "env_0",
+        render_size=(224, 224),
+        fps=20,
         )
 
     if FLAGS.use_bc:
