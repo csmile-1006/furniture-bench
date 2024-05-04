@@ -65,7 +65,7 @@ def evaluate(
                 for k in stats.keys():
                     stats[k].append(info[f"episode_{env_idx}"][k])
                 if use_video_recorder:
-                    video_recorder.save(f"evaluation_{step}_{ep}")
+                    video_recorder.save(f"evaluation_{step}_{ep}", env_idx)
                 if state is not None:
                     new_ob = env.reset_env_to(env_idx, state[env_idx])
                 else:
@@ -75,6 +75,11 @@ def evaluate(
                 done[env_idx] = False
                 ep += 1
                 pbar.update(1)
+                if isinstance(video_recorder, VideoRecorderList):
+                    if is_furniture_env:
+                        video_recorder.init_idx(obs=env.render(mode="rgb_array"), idx=env_idx, enabled=True)
+                    else:
+                        video_recorder.init_idx(obs=observation[list(observation.keys())[0]][0][-1], idx=env_idx, enabled=True)
         pbar.set_postfix({"total_step": f"{total_step}", "num_success": f"{np.sum(stats['success'], dtype=np.int32)}"})
 
     for k, v in stats.items():

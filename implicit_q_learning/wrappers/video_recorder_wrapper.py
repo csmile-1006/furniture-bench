@@ -39,7 +39,7 @@ class VideoRecorderList:
     def __init__(self):
         self.recorders = []
 
-    def add_recorder(self, root_dir: Path, render_size: int = 256, fps: int = 20, target_key: str = "image"):
+    def add_recorder(self, root_dir: Path, render_size: int = 256, fps: int = 40, target_key: str = "image"):
         recorder = VideoRecorder(root_dir, render_size, fps, target_key)
         self.recorders.append(recorder)
 
@@ -48,7 +48,8 @@ class VideoRecorderList:
             recorder.init(obs[i], enabled)
         
     def init_idx(self, obs, idx, enabled=True):
-        self.recorders[idx].init(obs, enabled)
+        if idx < len(self.recorders):
+            self.recorders[idx].init(obs[idx], enabled)
 
     def record(self, obs):
         for i, recorder in enumerate(self.recorders):
