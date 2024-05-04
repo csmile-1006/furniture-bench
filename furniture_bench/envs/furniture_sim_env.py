@@ -961,7 +961,7 @@ class FurnitureSimEnv(gym.Env):
         return False
 
     def done_with_lift(self, env_idx):
-        if self.lift_counter[env_idx] > 5:
+        if self.lift_counter[env_idx] > 10:
             return True
         return False
 
@@ -1195,7 +1195,7 @@ class FurnitureSimEnv(gym.Env):
 
         if self.save_camera_input:
             self._save_camera_input()
-        # self._save_reset_pose()
+        self._save_reset_pose()
 
         return self._get_observation()
 
@@ -1273,7 +1273,7 @@ class FurnitureSimEnv(gym.Env):
         #         (self.img_size[0], self.img_size[1] * 2),  # Wrist and front cameras.
         #     )
         self.refresh()
-        # self._save_reset_pose()
+        self._save_reset_pose()
 
     def skill_reset(self, state=None):
         assert self.num_envs == 1  # Only support single env for now.
