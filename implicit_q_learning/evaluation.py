@@ -52,7 +52,7 @@ def evaluate(
             else:
                 video_recorder.init(obs=observation[list(observation.keys())[0]][0][-1], enabled=True)
     while ep < num_episodes:
-        action = agent.sample_actions(observation, expl_noise=expl_noise)
+        action = agent.sample_actions(observation, expl_noise)
         observation, _, done, info = env.step(action)
         total_step += min(env._num_envs, num_episodes)
         if use_video_recorder:
