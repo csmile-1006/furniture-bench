@@ -200,7 +200,7 @@ class IQLLearner(object):
             std_min=1e-4,
             std_max=3e-2,
             use_tanh=False,
-            obs_keys=obs_keys,
+            # obs_keys=obs_keys,
         )
         actor_def = multiplexer.Multiplexer(
             encoder_cls=actor_encoder_cls,
@@ -218,8 +218,11 @@ class IQLLearner(object):
             actor_def, inputs=[{"params": actor_key, "dropout": actor_dropout_key}, observations], tx=optimiser
         )
 
+        # critic_cls = partial(
+        #     value_net.DoubleCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+        # )
         critic_cls = partial(
-            value_net.DoubleCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+            value_net.DoubleCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm
         )
         critic_def = multiplexer.Multiplexer(
             encoder_cls=critic_encoder_cls,
@@ -233,8 +236,11 @@ class IQLLearner(object):
             tx=optax.adam(learning_rate=critic_lr),
         )
 
+        # value_cls = partial(
+        #     value_net.ValueCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+        # )
         value_cls = partial(
-            value_net.ValueCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm, obs_keys=obs_keys
+            value_net.ValueCritic, hidden_dims, emb_dim, critic_layer_norm=critic_layer_norm
         )
         value_def = multiplexer.Multiplexer(
             encoder_cls=critic_encoder_cls,
@@ -256,11 +262,11 @@ class IQLLearner(object):
         self.target_critic = target_critic
         self.rng = rng
 
-    def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
         self.rng = rng
 
         actions = np.asarray(actions)
@@ -305,7 +311,7 @@ class IQLLearner(object):
         self.rng = new_rng
         self.actor = new_actor
 
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 
