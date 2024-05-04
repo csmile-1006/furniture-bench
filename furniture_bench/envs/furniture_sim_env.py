@@ -975,7 +975,7 @@ class FurnitureSimEnv(gym.Env):
         return False
 
     def done_with_lift(self, env_idx):
-        if self.lift_counter[env_idx] > 10:
+        if self.lift_counter[env_idx] > 5:
             return True
         return False
 
