@@ -110,6 +110,8 @@ flags.DEFINE_boolean("use_text_feature", False, "use text feature for observatio
 flags.DEFINE_boolean("offline_only", False, "Use offline data only (debugging)")
 flags.DEFINE_integer("from_skill", -1, "Initialize environment from this skill.")
 flags.DEFINE_integer("phase", -1, "Phase to train the policy.")
+flags.DEFINE_boolean("gripper_pos_control", False, "Use gripper position control.")
+
 
 def set_seed(seed):
     import random
@@ -345,6 +347,7 @@ def make_env(
             reward_model=reward_model,
             from_skill=FLAGS.from_skill,    
             phase=FLAGS.phase,
+            gripper_pos_control=FLAGS.gripper_pos_control,
         )
     else:
         env = gym.make(env_name)
