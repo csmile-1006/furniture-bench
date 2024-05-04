@@ -152,6 +152,7 @@ class FurnitureSimEnv(gym.Env):
         self.last_grasp = torch.tensor([-1.0] * num_envs, device=self.device)
         self.grasp_margin = 0.02 - 0.001  # To prevent repeating open an close actions.
         self.max_gripper_width = config["robot"]["max_gripper_width"][furniture]
+        self.gripper_pos_control = kwargs.get("gripper_pos_control", True)
 
         self.save_camera_input = save_camera_input
         self.img_size = sim_config["camera"]["resized_img_size" if resize_img else "color_img_size"]
@@ -327,10 +328,15 @@ class FurnitureSimEnv(gym.Env):
             franka_dof_props["damping"][:7].fill(0.0)
             franka_dof_props["friction"][:7] = sim_config["robot"]["arm_frictions"]
             # Grippers
-            franka_dof_props["driveMode"][7:].fill(gymapi.DOF_MODE_EFFORT)
-            franka_dof_props["stiffness"][7:].fill(0)
-            franka_dof_props["damping"][7:].fill(0)
-            franka_dof_props["friction"][7:] = sim_config["robot"]["gripper_frictions"]
+            if self.gripper_pos_control:
+                franka_dof_props["driveMode"][7:].fill(gymapi.DOF_MODE_POS)
+                franka_dof_props["stiffness"][7:].fill(200.0)
+                franka_dof_props["damping"][7:].fill(60.0)
+            else:
+                franka_dof_props["driveMode"][7:].fill(gymapi.DOF_MODE_EFFORT)
+                franka_dof_props["stiffness"][7:].fill(0)
+                franka_dof_props["damping"][7:].fill(0)
+                franka_dof_props["friction"][7:] = sim_config["robot"]["gripper_frictions"]
             franka_dof_props["upper"][7:] = self.max_gripper_width / 2
 
             self.isaac_gym.set_actor_dof_properties(env, franka_handle, franka_dof_props)
@@ -715,11 +721,20 @@ class FurnitureSimEnv(gym.Env):
                 state_dict["jacobian"] = self.jacobian_eef[env_idx].t()  # OSC expect column major
                 torque_action[env_idx, :7] = self.osc_ctrls[env_idx](state_dict)["joint_torques"]
 
-                if grip_sep > 0:
-                    torque_action[env_idx, 7:9] = sim_config["robot"]["gripper_torque"]
+                if self.gripper_pos_control:
+                    grip_action[env_idx, -1] = grip_sep
                 else:
-                    torque_action[env_idx, 7:9] = -sim_config["robot"]["gripper_torque"]
-
+                    grip_action[env_idx, -1] = grip_sep
+                    if grip_sep > 0:
+                        torque_action[env_idx, 7:9] = sim_config["robot"]["gripper_torque"]
+                    else:
+                        torque_action[env_idx, 7:9] = -sim_config["robot"]["gripper_torque"]
+            # Gripper action
+            if self.gripper_pos_control:
+                pos_action[:, 7:9] = grip_action
+                self.isaac_gym.set_dof_position_target_tensor(
+                    self.sim, gymtorch.unwrap_tensor(pos_action)
+            )
             self.isaac_gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(torque_action))
 
             # Update viewer
