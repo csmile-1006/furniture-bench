@@ -21,7 +21,7 @@ def get_config():
     config.tau = 0.005  # For soft target updates.
     config.opt_decay_schedule = None  # Don't decay optimizer lr
 
-    # config.expl_noise = 1.0
+    # config.expl_noise = 0.1
 
     # config.encoder_type = "transformer"
 

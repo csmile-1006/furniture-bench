@@ -262,11 +262,13 @@ class IQLLearner(object):
         self.target_critic = target_critic
         self.rng = rng
 
-    def sample_actions(self, observations: np.ndarray, expl_noise: float = 1.0) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, temperature: float = None) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
+        if temperature is None:
+            temperature = self.temperature
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
         self.rng = rng
 
         actions = np.asarray(actions)
@@ -311,7 +313,7 @@ class IQLLearner(object):
         self.rng = new_rng
         self.actor = new_actor
 
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 
