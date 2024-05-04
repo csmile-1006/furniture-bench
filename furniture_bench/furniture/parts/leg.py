@@ -44,6 +44,9 @@ class Leg(Part):
         self.prev_pose = None
         self._state = "reach_leg_floor_xy"
         self.gripper_action = -1
+        self.first_setting_target = True
+        self.prev_cnt = 0
+        self.curr_cnt = 0
 
     def is_in_reset_ori(
         self, pose: npt.NDArray[np.float32], from_skill, ori_bound
