@@ -93,6 +93,7 @@ def load_episode(
         episode = np.load(f, allow_pickle=True)
         episode = {k: episode[k] for k in episode.keys()}
         if phase != -1:
+            gt_phases = np.cumsum(episode["skills"])
             # Delete unnecessary keys.
             processed_episode = {}
             for key in [
@@ -104,17 +105,17 @@ def load_episode(
                 "phases",
                 "multimodal_rewards",
             ]:
-                processed_episode[key] = copy.deepcopy(episode[key])
+                if key in episode:
+                    processed_episode[key] = copy.deepcopy(episode[key])
             # Find the start and end index of the phase.
-            phases = processed_episode["phases"]
-            start_index = np.where(phases == phase)[0][0]
+            start_index = np.where(gt_phases == phase)[0][0]
             # Random margin of 10.
             start_index = np.max([0, start_index - 10])
-            if np.max(phases) == phase:  # The last phase.
-                end_index = len(phases)
+            if np.max(gt_phases) == phase:  # The last phase.
+                end_index = len(gt_phases)
             else:
-                end_index = np.where(phases == phase + 1)[0][0]
-            end_index = np.min([len(phases), end_index + 10])
+                end_index = np.where(gt_phases == phase + 1)[0][0]
+            end_index = np.min([len(gt_phases), end_index + 10])
             episode_phase = phase_crop(processed_episode, start_index, end_index, reward_type=reward_type)
             episode = copy.deepcopy(episode_phase)
 
