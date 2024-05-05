@@ -43,7 +43,7 @@ def _update_jit(
     discount: float,
     tau: float,
     expectile: float,
-    temperature: float,
+    expl_noise: float,
     utd_ratio: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
     # actor = _share_encoder(source=critic, target=actor)
@@ -52,7 +52,7 @@ def _update_jit(
     key, rng = jax.random.split(rng)
     new_value, value_info = update_v(key, target_critic, value, batch, expectile)
     key, rng = jax.random.split(rng)
-    new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, batch, temperature)
+    new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, batch, expl_noise)
 
     key, rng = jax.random.split(rng)
     new_critic, critic_info = update_q(key, critic, new_value, batch, discount)
@@ -99,7 +99,7 @@ class IQLLearner(object):
         discount: float = 0.99,
         tau: float = 0.005,
         expectile: float = 0.8,
-        temperature: float = 0.1,
+        expl_noise: float = 0.1,
         dropout_rate: Optional[float] = None,
         max_steps: Optional[int] = None,
         opt_decay_schedule: str = "cosine",
@@ -109,6 +109,8 @@ class IQLLearner(object):
         normalize_inputs: bool = True,
         activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.leaky_relu,
         use_sigmareparam: bool = True,
+        std_min: Optional[float] = 1e-3,
+        std_max: Optional[float] = 1e-1,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -117,7 +119,7 @@ class IQLLearner(object):
         self.expectile = expectile
         self.tau = tau
         self.discount = discount
-        self.temperature = temperature
+        self.expl_noise = expl_noise 
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key, target_critic_key = jax.random.split(rng, 5)
@@ -197,8 +199,8 @@ class IQLLearner(object):
             action_dim,
             num_modes=10,
             dropout_rate=dropout_rate,
-            std_min=1e-4,
-            std_max=3e-2,
+            std_min=std_min,
+            std_max=std_max,
             use_tanh=False,
             # obs_keys=obs_keys,
         )
@@ -262,13 +264,13 @@ class IQLLearner(object):
         self.target_critic = target_critic
         self.rng = rng
 
-    def sample_actions(self, observations: np.ndarray, temperature: float = None) -> jnp.ndarray:
+    def sample_actions(self, observations: np.ndarray, expl_noise: float = None) -> jnp.ndarray:
         variables = {"params": self.actor.params}
         if self.actor.extra_variables:
             variables.update(self.actor.extra_variables)
-        if temperature is None:
-            temperature = self.temperature
-        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, temperature)
+        if expl_noise is None:
+            expl_noise = self.expl_noise
+        rng, actions = policy.sample_actions(self.rng, self.actor.apply_fn, variables, observations, expl_noise)
         self.rng = rng
 
         actions = np.asarray(actions)
@@ -303,7 +305,7 @@ class IQLLearner(object):
                 self.discount,
                 self.tau,
                 self.expectile,
-                self.temperature,
+                self.expl_noise,
                 utd_ratio,
             )
             self.critic = new_critic
@@ -313,7 +315,7 @@ class IQLLearner(object):
         self.rng = new_rng
         self.actor = new_actor
 
-        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, temperature=0.0)) ** 2)
+        info["mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations, expl_noise=0.0)) ** 2)
         info["actor_mse"] = jnp.mean((batch.actions - self.sample_actions(batch.observations)) ** 2)
         return info
 

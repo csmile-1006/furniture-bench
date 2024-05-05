@@ -145,6 +145,8 @@ class TD3Learner(object):
         use_td3_bc: bool = False,
         detach_actor: bool = False,
         offline_batch_size: int = 128,
+        std_min: Optional[float] = 1e-3,
+        std_max: Optional[float] = 1e-1,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -232,8 +234,8 @@ class TD3Learner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            std_min=1e-1,
-            std_max=1e-0,
+            std_min=std_min,
+            std_max=std_max,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,

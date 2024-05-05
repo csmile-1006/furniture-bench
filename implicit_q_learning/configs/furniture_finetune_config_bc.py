@@ -11,7 +11,7 @@ def get_config():
     config.hidden_dims = (512, 256, 256, 256)
 
     config.detach_actor = False
-    config.expl_noise = 0.1
+    config.expl_noise = 1.0
 
     config.dropout_rate = None
 
@@ -19,5 +19,8 @@ def get_config():
     config.emb_dim = 256
     config.depth = 3
     config.num_heads = 8
+
+    config.std_min = 1e-3
+    config.std_max = 1e-1
 
     return config

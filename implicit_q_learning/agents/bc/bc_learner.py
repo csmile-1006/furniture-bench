@@ -52,6 +52,8 @@ class BCLearner(object):
         expl_noise: float = 1.0,
         detach_actor: bool = False,
         max_steps: int = 1_000_000,
+        std_min: Optional[float] = 1e-3,
+        std_max: Optional[float] = 1e-1,
     ):
         """
         An implementation of Behavior Cloning.
@@ -104,8 +106,8 @@ class BCLearner(object):
             policy.NormalTanhPolicy,
             hidden_dims,
             action_dim,
-            std_min=1e-1,
-            std_max=1e-0,
+            std_min=std_min,
+            std_max=std_max,
             dropout_rate=dropout_rate,
             state_dependent_std=True,
             tanh_squash_distribution=False,

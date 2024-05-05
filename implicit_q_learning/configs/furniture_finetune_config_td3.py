@@ -17,7 +17,7 @@ def get_config():
     config.policy_delay = 2
     config.alpha = 2.5
     config.use_td3_bc = True
-    config.expl_noise = 0.2
+    config.expl_noise = 1.0
     config.bc_weight = 1.0
     config.detach_actor = True
 
@@ -35,5 +35,8 @@ def get_config():
     config.num_min_qs = 2
     config.critic_max_grad_norm = 1.0
     config.critic_layer_norm = True
+    
+    config.std_min = 1e-3
+    config.std_max = 1e-1
 
     return config

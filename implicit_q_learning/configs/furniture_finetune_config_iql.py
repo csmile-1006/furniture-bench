@@ -22,6 +22,8 @@ def get_config():
     config.opt_decay_schedule = None  # Don't decay optimizer lr
 
     # config.expl_noise = 0.1
+    config.expl_noise = 1.0
+
 
     # config.encoder_type = "transformer"
 
