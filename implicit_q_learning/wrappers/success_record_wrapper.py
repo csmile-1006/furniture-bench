@@ -29,7 +29,7 @@ class SuccessRecordWrapper(gym.ActionWrapper):
             )
         else:
             self.video_recorder.init_idx(
-                obs=self.env.render(mode="rgb_array")[env_idx],
+                obs=self.env.render(mode="rgb_array"),
                 idx=env_idx,
                 enabled=True,
             )
