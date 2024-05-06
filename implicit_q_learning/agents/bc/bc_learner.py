@@ -86,6 +86,7 @@ class BCLearner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys
             )
         else:
             print("[INFO] use TransformerEncoder")
@@ -99,6 +100,7 @@ class BCLearner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys
             )
 
         action_dim = actions.shape[-1]

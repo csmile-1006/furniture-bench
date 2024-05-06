@@ -144,6 +144,7 @@ class IQLLearner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys
             )
             actor_encoder_cls = partial(
                 CrossAttnTransformerEncoder,
@@ -155,6 +156,7 @@ class IQLLearner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys
             )
         else:
             print("[INFO] use TransformerEncoder")
@@ -168,6 +170,7 @@ class IQLLearner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
             )
             actor_encoder_cls = partial(
                 TransformerEncoder,
@@ -179,6 +182,7 @@ class IQLLearner(object):
                 normalize_inputs=normalize_inputs,
                 activations=activations,
                 use_sigmareparam=use_sigmareparam,
+                obs_keys=obs_keys,
             )
 
         action_dim = actions.shape[-1]
