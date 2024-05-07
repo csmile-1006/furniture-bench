@@ -31,7 +31,7 @@ class FrameStackWrapper(gym.Wrapper):
 
     def reset_env(self, idx):
         _obs = self.env.reset_env(idx)
-        self.env.refresh()
+        # self.env.refresh()
 
         self._i[idx] = 0
         self._frames[idx] = {
@@ -49,7 +49,7 @@ class FrameStackWrapper(gym.Wrapper):
 
     def reset_env_to(self, idx, state):
         self.env.reset_env_to(idx, state)
-        self.env.refresh()
+        # self.env.refresh()
 
         self._i[idx] = 0
         self._frames[idx] = {
@@ -92,7 +92,7 @@ class FrameStackWrapper(gym.Wrapper):
         }
         self.env.reset()
         self.env.reset_to(state)
-        self.env.refresh()
+        # self.env.refresh()
         _obs = self.env.get_observation()
         for env_idx in range(self._num_envs):
             for frame in range(self._skip_frame):

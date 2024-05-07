@@ -661,7 +661,7 @@ def main(_):
     
     eval_video_recorder = VideoRecorderList()
     # for _ in range(FLAGS.num_envs):
-    # Only for the first environment.
+    # Only for the first two environments.
     eval_video_recorder.add_recorder(
         root_dir=Path(record_dir) / "env_0",
         render_size=(224, 224),
@@ -674,7 +674,11 @@ def main(_):
         while i <= steps:
             action = agent.sample_actions(observation)
             next_observation, reward, done, info = env.step(action)
-            reward, done = reward.squeeze(), done.squeeze()
+            if FLAGS.num_envs != 1:
+                reward, done = reward.squeeze(), done.squeeze()
+            if FLAGS.num_envs == 1:
+                reward, done = np.array(reward[0]), np.array(done[0])
+            # reward, done = reward.squeeze(), done.squeeze()
 
             for env_idx in range(FLAGS.num_envs):
                 trajectories[env_idx]["observations"].append(
