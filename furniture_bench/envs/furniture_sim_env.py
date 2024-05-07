@@ -1269,9 +1269,6 @@ class FurnitureSimEnv(gym.Env):
             self._reset_franka(env_idx)
         if reset_parts:
             self._reset_parts(env_idx)
-        self.refresh()
-        # Reset controller.
-        self.osc_ctrls[env_idx] = self.create_ctrl(env_idx)
         self.env_steps[env_idx] = 0
         self.grasp_counter[env_idx] = 0
         self.lift_counter[env_idx] = 0
@@ -1348,10 +1345,6 @@ class FurnitureSimEnv(gym.Env):
         self._reset_franka(env_idx, dof_pos, dof_vel, dof_torque)
         self._reset_parts(env_idx, state["parts_poses"])
 
-        self.refresh()
-        # Reset controller.
-        self.osc_ctrls[env_idx] = self.create_ctrl(env_idx)
-
         self.env_steps[env_idx] = 0
         self.grasp_counter[env_idx] = 0
         self.lift_counter[env_idx] = 0
@@ -1416,6 +1409,10 @@ class FurnitureSimEnv(gym.Env):
             gymtorch.unwrap_tensor(actor_idx),
             len(actor_idx)
         )
+        
+        self.refresh()
+        # Reset controller.
+        self.osc_ctrls[env_idx] = self.create_ctrl(env_idx)
 
     def _reset_franka_all(self, dof_pos=None):
         """
