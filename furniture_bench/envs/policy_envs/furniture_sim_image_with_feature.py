@@ -34,7 +34,8 @@ class FurnitureSimImageWithFeature(FurnitureSimEnv):
 
     @property
     def observation_space(self):
-        robot_state_dim = 14
+        # robot_state_dim = 14
+        robot_state_dim = 14 - 6 # No pos and ori vel
         return spaces.Dict(
             dict(
                 robot_state=spaces.Box(-np.inf, np.inf, (robot_state_dim,)),

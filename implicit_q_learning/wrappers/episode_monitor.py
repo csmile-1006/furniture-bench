@@ -27,7 +27,7 @@ class EpisodeMonitor(gym.ActionWrapper):
 
     def reset_env(self, idx):
         obs = self.env.reset_env(idx)
-        self.refresh()
+        # self.refresh()
 
         self.reward_sum[idx] = 0.0
         self.episode_length[idx] = 0
