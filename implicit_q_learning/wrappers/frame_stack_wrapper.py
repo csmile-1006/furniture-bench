@@ -90,7 +90,7 @@ class FrameStackWrapper(gym.Wrapper):
             }
             for env_idx in range(self._num_envs)
         }
-        # self.env.reset()
+        self.env.reset()
         self.env.reset_to(state)
         # self.env.refresh()
         _obs = self.env.get_observation()
