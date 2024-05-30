@@ -198,7 +198,10 @@ def main(_):
 
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
-    root_logdir = os.path.join(FLAGS.save_dir, "tb", str(FLAGS.seed))
+    ckpt_step = FLAGS.ckpt_step or FLAGS.max_steps
+    root_logdir = os.path.join(
+        FLAGS.save_dir, "tb", f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}.{FLAGS.seed}"
+    )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
     env, dataset = make_env_and_dataset(
@@ -219,6 +222,7 @@ def main(_):
         dataset.rewards = max_normalize(dataset.rewards, max_rew)
 
     kwargs = dict(FLAGS.config)
+    print(f"kwargs: {kwargs}")
     if FLAGS.wandb:
         import wandb
 
@@ -278,9 +282,7 @@ def main(_):
         )
 
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
-    ckpt_step = FLAGS.ckpt_step or FLAGS.max_steps
     agent.load(ckpt_dir, ckpt_step)
-
     eval_returns = []
     observation, done = env.reset(), False
     phase = 0
@@ -448,7 +450,7 @@ def main(_):
         #     summary_writer.add_scalar(f'training/{k}', v, info['total']['timesteps'])
 
         # Update as the length of the current trajectory.
-        for update_idx in range(len_curr_traj):
+        for update_idx in tqdm.trange(len_curr_traj, smoothing=0.1, disable=not FLAGS.tqdm, desc="Update", leave=False):
             batch = dataset.sample(FLAGS.batch_size)
             if FLAGS.online_buffer:
                 online_batch = online_dataset.sample(FLAGS.batch_size)
