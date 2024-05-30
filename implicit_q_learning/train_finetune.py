@@ -294,6 +294,7 @@ def main(_):
     masks = []
     next_observations = []
     log_online_avg_reward = []
+    log_online_avg_return = []
     log_phases = []
     collected_data = 0
 
@@ -445,6 +446,7 @@ def main(_):
             dataset.add_trajectory(observations, actions, rewards, masks, done_floats, next_observations)
 
         log_online_avg_reward.append(np.mean(rewards))
+        log_online_avg_return.append(np.sum(rewards))
         log_phases.append(phase)
         # for k, v in info['episode'].items():
         #     summary_writer.add_scalar(f'training/{k}', v, info['total']['timesteps'])
@@ -467,10 +469,12 @@ def main(_):
             else:
                 summary_writer.add_histogram(f"training/{k}", v, i)
         summary_writer.add_scalar("online_average_reward", np.mean(log_online_avg_reward), i)
+        summary_writer.add_scalar("online_average_return", np.mean(log_online_avg_return), i)
         summary_writer.add_scalar("train_phases", np.mean(log_phases), i)
         summary_writer.flush()
 
         log_online_avg_reward = []
+        log_online_avg_return = []
 
         agent.save(finetune_ckpt_dir, i + 1)
 
