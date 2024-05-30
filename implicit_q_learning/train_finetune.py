@@ -14,7 +14,17 @@ from tensorboardX import SummaryWriter
 
 from einops import rearrange
 import wrappers
-from dataset_utils import Batch, D4RLDataset, ReplayBuffer, split_into_trajectories, Dataset, FurnitureDataset
+from dataset_utils import (
+    Batch,
+    D4RLDataset,
+    ReplayBuffer,
+    split_into_trajectories,
+    Dataset,
+    FurnitureDataset,
+    max_normalize,
+    replay_chunk_to_seq,
+    min_max_normalize,
+)
 from evaluation import evaluate
 from learner import Learner
 
@@ -69,9 +79,10 @@ flags.DEFINE_boolean("keyboard", None, "Use phase reward (for logging or trainin
 flags.DEFINE_boolean("save_data", None, "Save the training data.")
 flags.DEFINE_boolean("use_layer_norm", None, "Use layer normalization.")
 flags.DEFINE_boolean("online_buffer", None, "Use separate online buffer.")
-flags.DEFINE_boolean("fixed_init", None, "Use fixed initialization for removing randomness.")
+flags.DEFINE_boolean("fixed_init", None, "Use separate online buffer.")
 flags.DEFINE_boolean("data_collection", None, "Skip the agent update.")
 flags.DEFINE_float("temperature", 0.2, "Action sample temperature.")
+flags.DEFINE_boolean("load_finetune_ckpt", None, "Load the fine-tune checkpoint.")
 
 # DEVICE
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
@@ -98,62 +109,6 @@ def normalize(dataset):
 
     dataset.rewards /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
     dataset.rewards *= 1000.0
-
-
-def min_max_normalize(dataset):
-    max_val = np.max(dataset.rewards)
-    min_val = np.min(dataset.rewards)
-
-    normalized_data = np.array([(x - min_val) / (max_val - min_val) for x in dataset.rewards])
-    normalized_data -= 1  # (0, 1) -> (-1, 0)
-
-    dataset.rewards = normalized_data
-
-
-def max_normalize(rewards, max_rew):
-    """Divide the rewards by the maximum value."""
-    normalized_data = np.array([x / max_rew for x in rewards])
-
-    return normalized_data
-
-
-def replay_chunk_to_seq(trajectories):
-    """From: BPref-v2/bpref_v2/utils/reds_extract_reward.py"""
-    seq = []
-
-    for i in range(FLAGS.window_size - 1):
-        elem = {}
-        elem["is_first"] = i == 0
-        for key in ["observations", "rewards"]:
-            if key == "observations":
-                for _key, _val in trajectories[key][0].items():
-                    elem[_key] = _val
-            elif key == "rewards":
-                try:
-                    elem["reward"] = trajectories[key][0].squeeze()
-                except:
-                    elem["reward"] = trajectories[key][0]
-            elif isinstance(trajectories[key], np.ndarray):
-                elem[key] = trajectories[key][0]
-        seq.append(elem)
-
-    for i in range(len(trajectories["observations"])):
-        elem = {}
-        elem["is_first"] = i == -1
-        for key in ["observations", "rewards"]:
-            if key == "observations":
-                for _key, _val in trajectories[key][i].items():
-                    elem[_key] = _val
-            elif key == "rewards":
-                try:
-                    elem["reward"] = trajectories[key][i].squeeze()
-                except:
-                    elem["reward"] = trajectories[key][i]
-            elif isinstance(trajectories[key], np.ndarray):
-                elem[key] = trajectories[key][i]
-        seq.append(elem)
-
-    return seq
 
 
 def combine(one_dict, other_dict):
@@ -202,13 +157,14 @@ def make_env_and_dataset(
             # np_step_out=False,  # Always output Tensor in this setting. Will change to numpy in this code.
             # channel_first=False,
             randomness="low",
-            compute_device_id=0,
-            graphics_device_id=0,
+            compute_device_id=FLAGS.device_id,
+            graphics_device_id=FLAGS.device_id,
             # gripper_pos_control=True,
             encoder_type="r3m",
             squeeze_done_reward=True,
             phase_reward=FLAGS.phase_reward,
             fixed_init=FLAGS.fixed_init,
+            from_skill=0,
         )
     else:
         env = gym.make(env_name)
@@ -390,11 +346,8 @@ def main(_):
     # Load the fine-tune checkpoint if any.
     ckpt_idx = len(data_files)
     # if ckpt_idx > 0:
-    #     if not FLAGS.data_collection:
-    #         agent.load(finetune_ckpt_dir, ckpt_idx)
-    import pdb
-
-    pdb.set_trace()
+    if not FLAGS.data_collection and FLAGS.load_finetune_ckpt:
+        agent.load(finetune_ckpt_dir, ckpt_idx)
 
     for i in tqdm.tqdm(range(ckpt_idx, FLAGS.max_episodes + 1), smoothing=0.1, disable=not FLAGS.tqdm):
         observations = []
@@ -418,7 +371,8 @@ def main(_):
                 if collect_enum in [CollectEnum.FAIL, CollectEnum.SUCCESS]:
                     done = True
                 print(env.env_steps)
-            phase = max(phase, info["phase"])
+            if "phase" in info:
+                phase = max(phase, info["phase"])
             if not done or "TimeLimit.truncated" in info:
                 mask = 1.0
             else:
@@ -445,20 +399,12 @@ def main(_):
                 "actions": actions,
                 "rewards": rewards,
             }
-            seq = reward_model(replay_chunk_to_seq(x))
+            seq = reward_model(replay_chunk_to_seq(x, FLAGS.window_size))
             rewards = np.asarray([elem[reward_model.PUBLIC_LIKELIHOOD_KEY] for elem in seq])
             if FLAGS.normalization == "min_max":
                 min_max_normalize(rewards)
             if FLAGS.normalization == "max":
                 rewards = max_normalize(rewards, max_rew)
-
-        # Remove RGB from the observations.
-        observations = [
-            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in observations
-        ]
-        next_observations = [
-            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in next_observations
-        ]
 
         if FLAGS.save_data:
             if not os.path.exists(online_data_dir):
@@ -481,6 +427,14 @@ def main(_):
 
             if FLAGS.data_collection:
                 continue
+
+        # Remove RGB from the observations.
+        observations = [
+            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in observations
+        ]
+        next_observations = [
+            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in next_observations
+        ]
 
         # Append to dataset.
         if FLAGS.online_buffer:
@@ -518,11 +472,32 @@ def main(_):
 
         agent.save(finetune_ckpt_dir, i + 1)
 
-        if i % FLAGS.eval_interval == 0 and ("Benchmark" not in FLAGS.env_name):
+        if i % FLAGS.eval_interval == 0 and ("Bench" not in FLAGS.env_name):
             if "Sim" in FLAGS.env_name:
                 log_video = True
+            else:
+                log_video = False
+            if not FLAGS.red_reward:
+                reward_model = None
 
-            eval_stats, log_videos = evaluate(agent, env, FLAGS.eval_episodes, log_video=log_video)
+            if FLAGS.red_reward:
+                eval_stats, log_videos = evaluate(
+                    agent,
+                    env,
+                    FLAGS.eval_episodes,
+                    log_video=log_video,
+                    reward_model=reward_model,
+                    normalization=FLAGS.normalization,
+                    max_rew=max_rew,
+                    window_size=FLAGS.window_size,
+                )
+            else:
+                eval_stats, log_videos = evaluate(
+                    agent,
+                    env,
+                    FLAGS.eval_episodes,
+                    log_video=log_video,
+                )
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
