@@ -25,7 +25,7 @@ flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 5000000, "Eval interval.")
-flags.DEFINE_integer("min_eval_step", 600000, "Eval interval.")
+flags.DEFINE_integer("min_eval_step", 900000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
@@ -199,15 +199,16 @@ def main(_):
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
-    agent = Learner(FLAGS.seed,
-                    env.observation_space.sample(),
-                    env.action_space.sample()[np.newaxis],
-                    max_steps=FLAGS.max_steps,
-                    **kwargs,
-                    use_encoder=FLAGS.use_encoder,
-                    use_layer_norm=FLAGS.use_layer_norm,
-                    opt_decay_schedule=FLAGS.opt_decay_schedule, 
-                    )
+    agent = Learner(
+        FLAGS.seed,
+        env.observation_space.sample(),
+        env.action_space.sample()[np.newaxis],
+        max_steps=FLAGS.max_steps,
+        **kwargs,
+        use_encoder=FLAGS.use_encoder,
+        use_layer_norm=FLAGS.use_layer_norm,
+        opt_decay_schedule=FLAGS.opt_decay_schedule,
+    )
     print(agent)
 
     eval_returns = []
@@ -233,13 +234,18 @@ def main(_):
             summary_writer.flush()
             if log_video:
                 max_length = max(vid.shape[0] for vid in log_videos)  # Find the maximum sequence length
-                padded_vids = np.array([np.pad(vid, ((0, max_length - vid.shape[0]), (0, 0), (0, 0), (0, 0)), 'constant') for vid in log_videos])
+                padded_vids = np.array(
+                    [
+                        np.pad(vid, ((0, max_length - vid.shape[0]), (0, 0), (0, 0), (0, 0)), "constant")
+                        for vid in log_videos
+                    ]
+                )
                 # Make it np.int8
                 padded_vids = padded_vids.astype(np.uint8)
 
                 name = "rollout_video"
                 fps = 20
-                vids = rearrange(padded_vids, 'b t c h w -> (b t) c h w')
+                vids = rearrange(padded_vids, "b t c h w -> (b t) c h w")
                 log_dict = {name: wandb.Video(vids, fps=fps, format="mp4")}
                 # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
                 wandb.log(log_dict, step=i)
