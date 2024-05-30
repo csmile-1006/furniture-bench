@@ -26,15 +26,18 @@ class FurnitureSimImageFeatureWithImage(FurnitureSimEnv):
 
         assert self.num_envs == 1, "FurnitureSimImageFeature supports only 1 env."
 
+        device_id = kwargs["compute_device_id"]
+        self._device = torch.device(f"cuda:{device_id}")
+
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
 
-            self.layer = load_r3m("resnet50")
+            self.layer = load_r3m("resnet50").module.to(self._device)
             self.embedding_dim = 2048
         elif kwargs["encoder_type"] == "vip":
             from vip import load_vip
 
-            self.layer = load_vip()
+            self.layer = load_vip().module.to(self._device)
             self.embedding_dim = 1024
         self.layer.requires_grad_(False)
         self.layer.eval()
@@ -68,13 +71,13 @@ class FurnitureSimImageFeatureWithImage(FurnitureSimEnv):
         # image2 = np.moveaxis(crop_image2, -1, 0)
 
         with torch.no_grad():
-            image1 = torch.tensor(image1).cuda()
-            image2 = torch.tensor(image2).cuda()
+            image1 = torch.tensor(image1).to("cuda")
+            image2 = torch.tensor(image2).to("cuda")
             image1 = self.layer(image1.unsqueeze(0)).squeeze()
             image2 = self.layer(image2.unsqueeze(0)).squeeze()
             image1 = image1.detach().cpu().numpy()
             image2 = image2.detach().cpu().numpy()
-        
+
         # Make it channel last.
         color_image1 = obs["color_image1"].squeeze()
         color_image2 = obs["color_image2"].squeeze()
