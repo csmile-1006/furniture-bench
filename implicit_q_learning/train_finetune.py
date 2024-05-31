@@ -40,6 +40,7 @@ flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluatio
 flags.DEFINE_integer("log_interval", 10, "Logging interval.")
 # flags.DEFINE_integer('eval_interval', 100000, 'Eval interval.')
 flags.DEFINE_integer("eval_interval", 20, "Eval interval.")
+flags.DEFINE_integer("save_interval", 1, "Save interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_string("ckpt_step", None, "Specific checkpoint step")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
@@ -479,7 +480,8 @@ def main(_):
         log_online_avg_reward = []
         log_online_avg_return = []
 
-        agent.save(finetune_ckpt_dir, i + 1)
+        if i % FLAGS.save_interval == 0:
+            agent.save(finetune_ckpt_dir, i + 1)
 
         if i % FLAGS.eval_interval == 0 and ("Bench" not in FLAGS.env_name) and not (i == 0 and FLAGS.from_scratch):
             if "Sim" in FLAGS.env_name:
