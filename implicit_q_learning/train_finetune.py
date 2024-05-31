@@ -460,7 +460,7 @@ def main(_):
         #     summary_writer.add_scalar(f'training/{k}', v, info['total']['timesteps'])
 
         # Update as the length of the current trajectory.
-        if i > FLAGS.prefill_episodes - 1:
+        if i > FLAGS.prefill_episodes:
             for update_idx in tqdm.trange(
                 len_curr_traj, smoothing=0.1, disable=not FLAGS.tqdm, desc="Update", leave=False
             ):
