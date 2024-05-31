@@ -481,7 +481,7 @@ def main(_):
 
         agent.save(finetune_ckpt_dir, i + 1)
 
-        if i % FLAGS.eval_interval == 0 and ("Bench" not in FLAGS.env_name):
+        if i % FLAGS.eval_interval == 0 and ("Bench" not in FLAGS.env_name) and not (i == 0 and FLAGS.from_scratch):
             if "Sim" in FLAGS.env_name:
                 log_video = True
             else:
@@ -535,7 +535,7 @@ def main(_):
             #            eval_returns,
             #            fmt=['%d', '%.1f'])
 
-        if i % FLAGS.eval_interval == 0:
+        if i % FLAGS.eval_interval == 0 and not (i == 0 and FLAGS.from_scratch):
             # Save last step if it is not saved.
             if FLAGS.phase_reward:
                 finetune_ckpt_dir = finetune_ckpt_dir + "-phase-reward"
