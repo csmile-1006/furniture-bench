@@ -487,12 +487,12 @@ def main(_):
         log_online_avg_reward = []
         log_online_avg_return = []
 
-        if i % FLAGS.save_interval == 0:
-            agent.save(finetune_ckpt_dir, i + 1)
+        if (i - FLAGS.prefill_episodes) % FLAGS.save_interval == 0:
+            agent.save(finetune_ckpt_dir, i - FLAGS.prefill_episodes + 1)
 
         if (
             i > FLAGS.prefill_episodes - 1
-            and i % FLAGS.eval_interval == 0
+            and (i - FLAGS.prefill_episodes) % FLAGS.eval_interval == 0
             and ("Bench" not in FLAGS.env_name)
             and not (i == 0 and FLAGS.from_scratch)
         ):
@@ -549,13 +549,17 @@ def main(_):
             #            eval_returns,
             #            fmt=['%d', '%.1f'])
 
-        if i > FLAGS.prefill_episodes - 1 and i % FLAGS.eval_interval == 0 and not (i == 0 and FLAGS.from_scratch):
+        if (
+            i > FLAGS.prefill_episodes - 1
+            and (i - FLAGS.prefill_episodes) % FLAGS.eval_interval == 0
+            and not (i == 0 and FLAGS.from_scratch)
+        ):
             # Save last step if it is not saved.
             if FLAGS.phase_reward:
                 finetune_ckpt_dir = finetune_ckpt_dir + "-phase-reward"
             if not os.path.exists(finetune_ckpt_dir):
                 os.makedirs(finetune_ckpt_dir)
-            agent.save(finetune_ckpt_dir, i)
+            agent.save(finetune_ckpt_dir, i - FLAGS.prefill_episodes)
 
     if FLAGS.wandb:
         wandb.finish()
