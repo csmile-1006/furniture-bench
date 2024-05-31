@@ -474,11 +474,11 @@ def main(_):
                     batch = Batch(**batch)
                 update_info = agent.update(batch, utd_ratio=FLAGS.utd_ratio)
 
-        for k, v in update_info.items():
-            if v.ndim == 0:
-                summary_writer.add_scalar(f"training/{k}", v, i)
-            else:
-                summary_writer.add_histogram(f"training/{k}", v, i)
+            for k, v in update_info.items():
+                if v.ndim == 0:
+                    summary_writer.add_scalar(f"training/{k}", v, i)
+                else:
+                    summary_writer.add_histogram(f"training/{k}", v, i)
         summary_writer.add_scalar("online_average_reward", np.mean(log_online_avg_reward), i)
         summary_writer.add_scalar("online_average_return", np.mean(log_online_avg_return), i)
         summary_writer.add_scalar("train_phases", np.mean(log_phases), i)
@@ -490,7 +490,12 @@ def main(_):
         if i % FLAGS.save_interval == 0:
             agent.save(finetune_ckpt_dir, i + 1)
 
-        if i % FLAGS.eval_interval == 0 and ("Bench" not in FLAGS.env_name) and not (i == 0 and FLAGS.from_scratch):
+        if (
+            i > FLAGS.prefill_episodes - 1
+            and i % FLAGS.eval_interval == 0
+            and ("Bench" not in FLAGS.env_name)
+            and not (i == 0 and FLAGS.from_scratch)
+        ):
             if "Sim" in FLAGS.env_name:
                 log_video = True
             else:
@@ -544,7 +549,7 @@ def main(_):
             #            eval_returns,
             #            fmt=['%d', '%.1f'])
 
-        if i % FLAGS.eval_interval == 0 and not (i == 0 and FLAGS.from_scratch):
+        if i > FLAGS.prefill_episodes - 1 and i % FLAGS.eval_interval == 0 and not (i == 0 and FLAGS.from_scratch):
             # Save last step if it is not saved.
             if FLAGS.phase_reward:
                 finetune_ckpt_dir = finetune_ckpt_dir + "-phase-reward"
