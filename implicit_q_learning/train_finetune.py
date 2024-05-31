@@ -236,6 +236,7 @@ def main(_):
             + "-"
             + str(FLAGS.run_name)
             + "-finetune"
+            + f"-actnoise{FLAGS.temperature}"
             + ("-phase-reward" if FLAGS.phase_reward else ""),
             config=kwargs,
             sync_tensorboard=True,
