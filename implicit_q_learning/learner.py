@@ -12,7 +12,7 @@ import policy
 import value_net
 from actor import update as awr_update_actor
 from common import Batch, InfoDict, Model, PRNGKey
-from critic import update_q, update_v
+from critic import update_value_critic
 
 
 def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
@@ -47,8 +47,9 @@ def _update_jit(
 
         mini_batch = jax.tree_util.tree_map(slice, batch)
 
-        new_value, value_info = update_v(target_critic, new_value, mini_batch, expectile)
-        new_critic, critic_info = update_q(new_critic, new_value, mini_batch, discount)
+        new_value, new_critic, value_critic_info = update_value_critic(
+            new_critic, new_value, target_critic, batch, discount, expectile
+        )
 
     key, rng = jax.random.split(rng)
     new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, mini_batch, temperature)
@@ -61,7 +62,7 @@ def _update_jit(
         new_critic,
         new_value,
         new_target_critic,
-        {**critic_info, **value_info, **actor_info},
+        {**value_critic_info, **actor_info},
     )
 
 
