@@ -124,11 +124,10 @@ def combine(one_dict, other_dict):
             combined[k] = combine(v, other_dict[k])
         else:
             # Use half.
-            v = v[: len(v) // 2]
-            vv = other_dict[k][: len(other_dict[k]) // 2]
-            tmp = np.concatenate([v, vv], axis=0)
+            tmp = np.empty((v.shape[0] // 2 + other_dict[k].shape[0] // 2, *v.shape[1:]), dtype=v.dtype)
+            tmp[0::2] = v[: len(v) // 2]
+            tmp[1::2] = other_dict[k][: len(other_dict[k]) // 2]
             combined[k] = tmp
-
     return combined
 
 
