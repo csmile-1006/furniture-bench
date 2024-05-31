@@ -71,4 +71,4 @@ def update_value_critic(
     new_critic, critic_info = critic.apply_gradient(critic_loss_fn)
     new_value, value_info = value.apply_gradient(value_loss_fn)
 
-    return new_value, new_critic, {**value_info, **critic_info}
+    return new_critic, new_value, {**critic_info, **value_info}

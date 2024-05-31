@@ -47,7 +47,7 @@ def _update_jit(
 
         mini_batch = jax.tree_util.tree_map(slice, batch)
 
-        new_value, new_critic, value_critic_info = update_value_critic(
+        new_critic, new_value, critic_value_info = update_value_critic(
             new_critic, new_value, target_critic, batch, discount, expectile
         )
 
@@ -62,7 +62,7 @@ def _update_jit(
         new_critic,
         new_value,
         new_target_critic,
-        {**value_critic_info, **actor_info},
+        {**critic_value_info, **actor_info},
     )
 
 
