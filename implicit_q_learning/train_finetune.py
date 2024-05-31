@@ -85,6 +85,7 @@ flags.DEFINE_boolean("data_collection", None, "Skip the agent update.")
 flags.DEFINE_float("temperature", 0.2, "Action sample temperature.")
 flags.DEFINE_boolean("load_finetune_ckpt", None, "Load the fine-tune checkpoint.")
 flags.DEFINE_boolean("from_scratch", False, "Train from scratch.")
+flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
 
 # DEVICE
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
@@ -457,15 +458,15 @@ def main(_):
 
         # Update as the length of the current trajectory.
         for update_idx in tqdm.trange(len_curr_traj, smoothing=0.1, disable=not FLAGS.tqdm, desc="Update", leave=False):
-            batch = dataset.sample(FLAGS.batch_size)
+            batch = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
             if FLAGS.online_buffer:
-                online_batch = online_dataset.sample(FLAGS.batch_size)
+                online_batch = online_dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
                 # Merge batch half by half.
                 batch = combine(batch, online_batch)
                 from dataset_utils import Batch
 
                 batch = Batch(**batch)
-            update_info = agent.update(batch)
+            update_info = agent.update(batch, utd_ratio=FLAGS.utd_ratio)
 
         for k, v in update_info.items():
             if v.ndim == 0:
