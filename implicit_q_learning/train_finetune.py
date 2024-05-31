@@ -83,6 +83,7 @@ flags.DEFINE_boolean("fixed_init", None, "Use separate online buffer.")
 flags.DEFINE_boolean("data_collection", None, "Skip the agent update.")
 flags.DEFINE_float("temperature", 0.2, "Action sample temperature.")
 flags.DEFINE_boolean("load_finetune_ckpt", None, "Load the fine-tune checkpoint.")
+flags.DEFINE_boolean("from_scratch", False, "Train from scratch.")
 
 # DEVICE
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
@@ -283,7 +284,8 @@ def main(_):
         )
 
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
-    agent.load(ckpt_dir, ckpt_step)
+    if not FLAGS.from_scratch:
+        agent.load(ckpt_dir, ckpt_step)
     eval_returns = []
     observation, done = env.reset(), False
     phase = 0
