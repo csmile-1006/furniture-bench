@@ -49,6 +49,7 @@ flags.DEFINE_integer("iter_n", -1, "Reward relabeling iteration")
 flags.DEFINE_boolean("use_layer_norm", None, "Use layer normalization.")
 flags.DEFINE_boolean("fixed_init", None, "Use separate online buffer.")
 flags.DEFINE_integer("trial", 0, "Trial number.")
+flags.DEFINE_float("temperature", 0.1, "Action noise temperature.")
 
 # REDS
 flags.DEFINE_string("task_name", "furniture_one_leg", "Name of task name.")
