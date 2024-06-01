@@ -203,7 +203,7 @@ def main(_):
 
     ckpt_step = FLAGS.ckpt_step or FLAGS.max_steps
     root_logdir = os.path.join(
-        FLAGS.save_dir, "tb", f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}.{FLAGS.seed}"
+        FLAGS.save_dir, "tb", f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}"
     )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
