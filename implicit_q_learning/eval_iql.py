@@ -48,6 +48,7 @@ flags.DEFINE_integer("iter_n", -1, "Reward relabeling iteration")
 
 flags.DEFINE_boolean("use_layer_norm", None, "Use layer normalization.")
 flags.DEFINE_boolean("fixed_init", None, "Use separate online buffer.")
+flags.DEFINE_integer("trial", 0, "Trial number.")
 
 # REDS
 flags.DEFINE_string("task_name", "furniture_one_leg", "Name of task name.")
@@ -168,7 +169,7 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     ckpt_step = FLAGS.ckpt_step
-    root_logdir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
+    root_logdir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}.{FLAGS.trial}")
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
     env, dataset = make_env_and_dataset(
@@ -203,7 +204,8 @@ def main(_):
             + "-finetune"
             + f"-actnoise{FLAGS.temperature}"
             + ("-phase-reward" if FLAGS.phase_reward else "")
-            + "-eval",
+            + "-eval"
+            + f"-step{FLAGS.ckpt_step}",
             config=kwargs,
             sync_tensorboard=True,
         )
