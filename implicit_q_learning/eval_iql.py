@@ -204,7 +204,6 @@ def main(_):
             + str(FLAGS.run_name)
             + "-finetune"
             + f"-actnoise{FLAGS.temperature}"
-            + ("-phase-reward" if FLAGS.phase_reward else "")
             + "-eval"
             + f"-step{FLAGS.ckpt_step}",
             config=kwargs,
