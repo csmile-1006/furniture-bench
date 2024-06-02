@@ -308,7 +308,7 @@ def main(_):
         assert FLAGS.keyboard
 
     finetune_ckpt_dir = os.path.join(
-        FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}.{FLAGS.seed}"
+        FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}"
     )
 
     # Load the online data.
