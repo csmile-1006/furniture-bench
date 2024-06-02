@@ -175,7 +175,8 @@ def main(_):
 
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
-        FLAGS.seed,
+        # FLAGS.seed,
+        FLAGS.trial,
         FLAGS.data_path,
         FLAGS.red_reward,
         FLAGS.iter_n,
@@ -213,7 +214,7 @@ def main(_):
     summary_writer = SummaryWriter(root_logdir, write_to_disk=True)
 
     agent = Learner(
-        FLAGS.seed,
+        FLAGS.trial,
         env.observation_space.sample(),
         env.action_space.sample()[np.newaxis],
         max_steps=1e6,
