@@ -170,7 +170,9 @@ def main(_):
     jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
 
     ckpt_step = FLAGS.ckpt_step
-    root_logdir = os.path.join(FLAGS.save_dir, "eval", f"{FLAGS.run_name}.{FLAGS.seed}.{FLAGS.trial}")
+    root_logdir = os.path.join(
+        FLAGS.save_dir, "eval", f"{FLAGS.run_name}.{FLAGS.seed}.step{FLAGS.ckpt_step}.{FLAGS.trial}"
+    )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
     env, dataset = make_env_and_dataset(
