@@ -203,7 +203,9 @@ def main(_):
 
     ckpt_step = FLAGS.ckpt_step or FLAGS.max_steps
     root_logdir = os.path.join(
-        FLAGS.save_dir, "tb", f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}"
+        FLAGS.save_dir,
+        "tb",
+        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}",
     )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
@@ -308,7 +310,9 @@ def main(_):
         assert FLAGS.keyboard
 
     finetune_ckpt_dir = os.path.join(
-        FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}"
+        FLAGS.save_dir,
+        "ckpt",
+        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}",
     )
 
     # Load the online data.
@@ -539,9 +543,10 @@ def main(_):
                 name = "rollout_video"
                 fps = 20
                 vids = rearrange(padded_vids, "b t c h w -> (b t) c h w")
-                log_dict = {name: wandb.Video(vids, fps=fps, format="mp4")}
-                # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
-                wandb.log(log_dict, step=i)
+                if FLAGS.wandb:
+                    log_dict = {name: wandb.Video(vids, fps=fps, format="mp4")}
+                    # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
+                    wandb.log(log_dict, step=i)
 
             # eval_returns.append((i, eval_stats['return']))
             # np.savetxt(os.path.join(FLAGS.save_dir, f'{FLAGS.seed}.txt'),

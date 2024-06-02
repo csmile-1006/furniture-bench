@@ -21,7 +21,7 @@ def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
     return target_critic.replace(params=new_target_params)
 
 
-@partial(jax.jit, static_argnames=("utd_ratio"))
+@partial(jax.jit, static_argnames=("utd_ratio", "num_qs", "num_min_qs"))
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
@@ -34,10 +34,15 @@ def _update_jit(
     expectile: float,
     temperature: float,
     utd_ratio: int,
+    num_qs: int,
+    num_min_qs: int,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
 
+    new_actor = actor
     new_value = value
     new_critic = critic
+    new_target_critic = target_critic
+
     for i in range(utd_ratio):
 
         def slice(x):
@@ -47,14 +52,17 @@ def _update_jit(
 
         mini_batch = jax.tree_util.tree_map(slice, batch)
 
+        key, rng = jax.random.split(rng)
         new_critic, new_value, critic_value_info = update_value_critic(
-            new_critic, new_value, target_critic, batch, discount, expectile
+            key, new_critic, new_value, new_target_critic, mini_batch, discount, expectile, num_qs, num_min_qs
         )
+        new_target_critic = target_update(new_critic, new_target_critic, tau)
 
-    key, rng = jax.random.split(rng)
-    new_actor, actor_info = awr_update_actor(key, actor, target_critic, new_value, mini_batch, temperature)
-
-    new_target_critic = target_update(new_critic, target_critic, tau)
+        if utd_ratio == 1 or (utd_ratio > 1 and (i + 1) % 5 == 0):
+            key, rng = jax.random.split(rng)
+            new_actor, actor_info = awr_update_actor(key, actor, new_target_critic, new_value, mini_batch, temperature)
+        else:
+            new_actor, actor_info = actor, {}
 
     return (
         rng,
@@ -62,7 +70,7 @@ def _update_jit(
         new_critic,
         new_value,
         new_target_critic,
-        {**critic_value_info, **actor_info},
+        {**actor_info, **critic_value_info},
     )
 
 
@@ -85,6 +93,8 @@ class Learner(object):
         opt_decay_schedule: str = "cosine",
         use_encoder: bool = False,
         use_layer_norm: bool = False,
+        num_qs: int = 2,
+        num_min_qs: int = 2,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -125,7 +135,14 @@ class Learner(object):
 
         actor = Model.create(actor_def, inputs=[actor_key, observations], tx=optimiser)
 
-        critic_def = value_net.DoubleCritic(hidden_dims, use_encoder=use_encoder, use_layer_norm=use_layer_norm)
+        critic_cls = partial(
+            value_net.Critic,
+            hidden_dims=hidden_dims,
+            use_encoder=use_encoder,
+            use_layer_norm=use_layer_norm,
+        )
+        critic_def = value_net.Ensemble(net_cls=critic_cls, num=num_qs)
+        # critic_def = value_net.DoubleCritic(hidden_dims, use_encoder=use_encoder, use_layer_norm=use_layer_norm)
         critic = Model.create(
             critic_def,
             inputs=[critic_key, observations, actions],
@@ -146,6 +163,9 @@ class Learner(object):
         self.value = value
         self.target_critic = target_critic
         self.rng = rng
+
+        self.num_qs = num_qs
+        self.num_min_qs = num_min_qs
 
     def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
         rng, actions = policy.sample_actions(
@@ -176,6 +196,8 @@ class Learner(object):
             self.expectile,
             self.temperature,
             utd_ratio,
+            self.num_qs,
+            self.num_min_qs,
         )
 
         self.rng = new_rng

@@ -1,9 +1,8 @@
-from typing import Callable, Sequence, Tuple, Dict
+from typing import Callable, Dict, Sequence, Tuple, Type
 
 import jax.numpy as jnp
+from common import MLP, Encoder
 from flax import linen as nn
-
-from common import MLP, Encoder, Encoder
 
 
 class ValueCritic(nn.Module):
@@ -15,7 +14,7 @@ class ValueCritic(nn.Module):
     def __call__(self, observations: Dict[str, jnp.ndarray]) -> jnp.ndarray:
         features = []
         for k, v in observations.items():
-            if self.use_encoder and (k == 'image1' or k == 'image2'):
+            if self.use_encoder and (k == "image1" or k == "image2"):
                 features.append(Encoder()(v))
             else:
                 features.append(v)
@@ -29,14 +28,16 @@ class Critic(nn.Module):
     hidden_dims: Sequence[int]
     activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     use_encoder: bool = False
-    training: bool = False,
+    training: bool = (False,)
     use_layer_norm: bool = False  # Add layer normalization option
 
     @nn.compact
-    def __call__(self, observations: Dict[str, jnp.ndarray], actions: jnp.ndarray, training:bool=False) -> jnp.ndarray:
+    def __call__(
+        self, observations: Dict[str, jnp.ndarray], actions: jnp.ndarray, training: bool = False
+    ) -> jnp.ndarray:
         features = []
         for k, v in observations.items():
-            if self.use_encoder and (k == 'image1' or k == 'image2'):
+            if self.use_encoder and (k == "image1" or k == "image2"):
                 features.append(Encoder()(v))
             else:
                 features.append(v)
@@ -57,14 +58,34 @@ class DoubleCritic(nn.Module):
     use_layer_norm: bool = False  # Add layer normalization option
 
     @nn.compact
-    def __call__(self, observations: jnp.ndarray,
-                 actions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        critic1 = Critic(self.hidden_dims,
-                         activations=self.activations,
-                         use_encoder=self.use_encoder,
-                         use_layer_norm=self.use_layer_norm)(observations, actions)
-        critic2 = Critic(self.hidden_dims,
-                         activations=self.activations,
-                         use_encoder=self.use_encoder,
-                         use_layer_norm=self.use_layer_norm)(observations, actions)
+    def __call__(self, observations: jnp.ndarray, actions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        critic1 = Critic(
+            self.hidden_dims,
+            activations=self.activations,
+            use_encoder=self.use_encoder,
+            use_layer_norm=self.use_layer_norm,
+        )(observations, actions)
+        critic2 = Critic(
+            self.hidden_dims,
+            activations=self.activations,
+            use_encoder=self.use_encoder,
+            use_layer_norm=self.use_layer_norm,
+        )(observations, actions)
         return critic1, critic2
+
+
+class Ensemble(nn.Module):
+    net_cls: Type[nn.Module]
+    num: int = 2
+
+    @nn.compact
+    def __call__(self, *args):
+        ensemble = nn.vmap(
+            self.net_cls,
+            variable_axes={"params": 0},
+            split_rngs={"params": True, "dropout": True},
+            in_axes=None,
+            out_axes=0,
+            axis_size=self.num,
+        )
+        return ensemble()(*args)
