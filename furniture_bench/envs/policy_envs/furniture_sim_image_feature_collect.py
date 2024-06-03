@@ -5,7 +5,7 @@ import torch
 
 from furniture_bench.config import config
 from furniture_bench.envs.furniture_sim_env import FurnitureSimEnv
-from furniture_bench.envs.legacy_envs.furniture_sim_legacy_env import FurnitureSimEnvLegacy # Deprecated.
+from furniture_bench.envs.legacy_envs.furniture_sim_legacy_env import FurnitureSimEnvLegacy  # Deprecated.
 from furniture_bench.perception.image_utils import resize, resize_crop
 from furniture_bench.robot.robot_state import filter_and_concat_robot_state
 
@@ -20,12 +20,14 @@ class FurnitureSimImageFeatureCollect(FurnitureSimEnv):
 
         assert self.num_envs == 1, "FurnitureSimImageFeature supports only 1 env."
 
-        kwargs['encoder_type'] = "r3m"
+        kwargs["encoder_type"] = "r3m"
+        device_id = kwargs["compute_device_id"]
+        self._device = torch.device(f"cuda:{device_id}")
 
         if kwargs["encoder_type"] == "r3m":
             from r3m import load_r3m
 
-            self.layer = load_r3m("resnet50")
+            self.layer = load_r3m("resnet50").module.to(self._device)
             self.embedding_dim = 2048
         elif kwargs["encoder_type"] == "vip":
             from vip import load_vip
@@ -51,9 +53,9 @@ class FurnitureSimImageFeatureCollect(FurnitureSimEnv):
     def _get_observation(self):
         obs = super()._get_observation()
 
-        if isinstance(obs['robot_state'],  dict):
+        if isinstance(obs["robot_state"], dict):
             # For legacy envs.
-            obs['robot_state'] = filter_and_concat_robot_state(obs["robot_state"])
+            obs["robot_state"] = filter_and_concat_robot_state(obs["robot_state"])
 
         robot_state = obs["robot_state"].squeeze()
         image1 = obs["color_image1"].squeeze()
@@ -69,10 +71,12 @@ class FurnitureSimImageFeatureCollect(FurnitureSimEnv):
             image2 = self.layer(image2.unsqueeze(0)).squeeze()
             image1 = image1.detach().cpu().numpy()
             image2 = image2.detach().cpu().numpy()
-        
-        robot_state = robot_state.detach().cpu().numpy()
-        
-        color_image1 = obs['color_image1'].squeeze().detach().cpu().numpy()
-        color_image2 = obs['color_image2'].squeeze().detach().cpu().numpy()
 
-        return dict(robot_state=robot_state, image1=image1, image2=image2, color_image1=color_image1, color_image2=color_image2)
+        robot_state = robot_state.detach().cpu().numpy()
+
+        color_image1 = obs["color_image1"].squeeze().detach().cpu().numpy()
+        color_image2 = obs["color_image2"].squeeze().detach().cpu().numpy()
+
+        return dict(
+            robot_state=robot_state, image1=image1, image2=image2, color_image1=color_image1, color_image2=color_image2
+        )

@@ -1,4 +1,5 @@
 """Define data collection class that rollout the environment, get action from the interface (e.g., teleoperation, automatic scripts), and save data."""
+
 import time
 import pickle
 from datetime import datetime
@@ -89,7 +90,7 @@ class DataCollector:
                 graphics_device_id=graphics_device_id,
                 gripper_pos_control=gripper_pos_control,
                 phase_reward=phase_reward,
-                fixed_init=fixed_init
+                fixed_init=fixed_init,
             )
         else:
             if randomness == "med":
@@ -114,12 +115,14 @@ class DataCollector:
             # Refer: implicit_q_learning/test_offline.py
             assert not scripted
             from learner import Learner
+            import jax
+            jax.config.update("jax_default_device", jax.devices()[compute_device_id])
             self.agent = Learner(
-                42, # Random number for seed
+                42,  # Random number for seed
                 self.env.observation_space.sample(),
                 self.env.action_space.sample()[np.newaxis],
                 max_steps=1000000,
-                use_encoder=False
+                use_encoder=False,
             )
             self.agent.load(ckpt_dir, ckpt_step)
         self.ckpt_dir = ckpt_dir
@@ -163,7 +166,7 @@ class DataCollector:
                     skill_complete = int(collect_enum == CollectEnum.SKILL)
                     if skill_complete == 1:
                         self.skill_set.append(skill_complete)
-                if self.ckpt_dir: # Use policy.
+                if self.ckpt_dir:  # Use policy.
                     obs_without_image = {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"}
                     action = self.agent.sample_actions(obs_without_image, temperature=0.6)
             if self.device_interface is None:
@@ -255,9 +258,7 @@ class DataCollector:
 
             # Label reward.
             if collect_enum == CollectEnum.REWARD:
-                rew = self.env.furniture.manual_assemble_label(
-                    self.device_interface.rew_key
-                )
+                rew = self.env.furniture.manual_assemble_label(self.device_interface.rew_key)
                 if rew == 0:
                     # Correction the label.
                     self.rews[self.last_reward_idx] = 0
@@ -317,17 +318,14 @@ class DataCollector:
                 self.skills.append(skill_complete)
             obs = next_obs
 
-        print(
-            f"Collected {self.traj_counter} / {self.num_demos} successful trajectories!"
-        )
-
+        print(f"Collected {self.traj_counter} / {self.num_demos} successful trajectories!")
 
     def save_and_reset(self, collect_enum: CollectEnum, info):
         """Saves the collected data and reset the environment."""
         self.save(collect_enum, info)
         print(f"Saved {self.traj_counter} trajectories in this run.")
         print("Failure phase counter: ", self.failure_phase_counter)
-        
+
         return self.reset()
 
     def reset(self):
@@ -356,7 +354,7 @@ class DataCollector:
 
     def save(self, collect_enum: CollectEnum, info):
         print(f"Length of trajectory: {len(self.obs)}")
-        
+
         data_name = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
         if collect_enum == CollectEnum.SUCCESS:
             data_name = f"{data_name}_success"
