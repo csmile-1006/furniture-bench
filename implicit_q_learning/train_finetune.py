@@ -63,7 +63,7 @@ config_flags.DEFINE_config_file(
 
 flags.DEFINE_multi_string("data_path", "", "Path to data.")
 flags.DEFINE_string("normalization", "", "")
-flags.DEFINE_integer("iter_n", -1, "Reward relabeling iteration")
+flags.DEFINE_string("iter_n", "-1", "Reward relabeling iteration")
 
 
 # REDS
@@ -182,6 +182,10 @@ def make_env_and_dataset(
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
+        if FLAGS.iter_n.isdigit():
+            iter_n = f"iter_{FLAGS.iter_n}"
+        else:
+            iter_n = FLAGS.iter_n
         dataset = FurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
     else:
         dataset = D4RLDataset(env)
