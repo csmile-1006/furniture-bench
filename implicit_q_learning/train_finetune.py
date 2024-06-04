@@ -446,6 +446,17 @@ def main(_):
             if FLAGS.data_collection:
                 continue
 
+        if i % FLAGS.log_interval == 0:
+            train_log_videos = np.asarray(
+                [obs["color_image2"].transpose(2, 0, 1) for obs in observations], dtype=np.uint8
+            )
+            name = "train_video"
+            fps = 20
+            if FLAGS.wandb:
+                log_dict = {name: wandb.Video(train_log_videos, fps=fps, format="mp4")}
+                # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
+                wandb.log(log_dict, step=i)
+
         # Remove RGB from the observations.
         observations = [
             {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in observations
@@ -489,7 +500,7 @@ def main(_):
         summary_writer.add_scalar("online_average_reward", np.mean(log_online_avg_reward), i)
         summary_writer.add_scalar("online_average_return", np.mean(log_online_avg_return), i)
         summary_writer.add_scalar("train_phases", np.mean(log_phases), i)
-        summary_writer.add_scalar("episode_phaes", phase, i)
+        summary_writer.add_scalar("episode_phase", phase, i)
         summary_writer.flush()
 
         log_online_avg_reward = []
