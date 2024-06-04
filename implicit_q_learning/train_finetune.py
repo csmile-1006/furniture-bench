@@ -489,6 +489,7 @@ def main(_):
         summary_writer.add_scalar("online_average_reward", np.mean(log_online_avg_reward), i)
         summary_writer.add_scalar("online_average_return", np.mean(log_online_avg_return), i)
         summary_writer.add_scalar("train_phases", np.mean(log_phases), i)
+        summary_writer.add_scalar("episode_phaes", phase, i)
         summary_writer.flush()
 
         log_online_avg_reward = []
