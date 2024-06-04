@@ -25,14 +25,14 @@ flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
 flags.DEFINE_integer("eval_interval", 5000000, "Eval interval.")
-flags.DEFINE_integer("min_eval_step", 600000, "Eval interval.")
+flags.DEFINE_integer("min_eval_step", 900000, "Eval interval.")
 flags.DEFINE_integer("ckpt_interval", 100000, "Ckpt interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("red_reward", False, "Use learned reward")
 # flags.DEFINE_string("data_path", '', "Path to data.")
-flags.DEFINE_multi_string("data_path", '', "Path to data.")
+flags.DEFINE_multi_string("data_path", "", "Path to data.")
 config_flags.DEFINE_config_file(
     "config",
     "default.py",
@@ -40,14 +40,18 @@ config_flags.DEFINE_config_file(
     lock_config=False,
 )
 flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
-flags.DEFINE_string("encoder_type", '', 'vip or r3m')
-flags.DEFINE_boolean('wandb', False, 'Use wandb')
-flags.DEFINE_string('wandb_project', '', 'wandb project')
-flags.DEFINE_string('wandb_entity', '', 'wandb entity')
-flags.DEFINE_string('normalization', '', '')
-flags.DEFINE_integer('iter_n', -1, 'Reward relabeling iteration')
-flags.DEFINE_boolean('use_layer_norm', False, 'Use layer normalization')
-flags.DEFINE_boolean('phase_reward', False, 'Use phase reward.')
+flags.DEFINE_string("encoder_type", "", "vip or r3m")
+flags.DEFINE_boolean("wandb", False, "Use wandb")
+flags.DEFINE_string("wandb_project", "", "wandb project")
+flags.DEFINE_string("wandb_entity", "", "wandb entity")
+flags.DEFINE_string("normalization", "", "")
+flags.DEFINE_string("iter_n", "-1", "Reward relabeling iteration")
+flags.DEFINE_boolean("use_layer_norm", False, "Use layer normalization")
+flags.DEFINE_boolean("phase_reward", False, "Use phase reward.")
+flags.DEFINE_boolean("fixed_init", None, "Use fixed initialization for removing randomness.")
+
+# DEVICE
+flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
 
 flags.DEFINE_string("opt_decay_schedule", "cosine", "")
 
@@ -79,9 +83,7 @@ def min_max_normalize(dataset):
     max_val = np.max(dataset.rewards)
     min_val = np.min(dataset.rewards)
 
-    normalized_data = np.array(
-        [(x - min_val) / (max_val - min_val) for x in dataset.rewards]
-    )
+    normalized_data = np.array([(x - min_val) / (max_val - min_val) for x in dataset.rewards])
     normalized_data -= 1  # (0, 1) -> (-1, 0)
 
     dataset.rewards = normalized_data
@@ -96,10 +98,16 @@ def max_normalize(dataset):
     dataset.rewards = normalized_data
 
 
-def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: bool,
-                         encoder_type: str, red_reward: bool=False,
-                         normalization:str = None,
-                         iter_n: int = -1) -> Tuple[gym.Env, D4RLDataset]:
+def make_env_and_dataset(
+    env_name: str,
+    seed: int,
+    data_path: str,
+    use_encoder: bool,
+    encoder_type: str,
+    red_reward: bool = False,
+    normalization: str = None,
+    iter_n: int = -1,
+) -> Tuple[gym.Env, D4RLDataset]:
     if "Furniture" in env_name:
         import furniture_bench
 
@@ -120,11 +128,12 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
             # np_step_out=False,  # Always output Tensor in this setting. Will change to numpy in this code.
             # channel_first=False,
             randomness="low",
-            compute_device_id=0,
-            graphics_device_id=0,
+            compute_device_id=FLAGS.device_id,
+            graphics_device_id=FLAGS.device_id,
             # gripper_pos_control=True,
             encoder_type="r3m",
-            phase_reward=FLAGS.phase_reward
+            phase_reward=FLAGS.phase_reward,
+            fixed_init=FLAGS.fixed_init,
         )
     else:
         env = gym.make(env_name)
@@ -139,9 +148,11 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
-        dataset = FurnitureDataset(
-            data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n
-        )
+        if FLAGS.iter_n.isdigit():
+            iter_n = f"iter_{FLAGS.iter_n}"
+        else:
+            iter_n = FLAGS.iter_n
+        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
     else:
         dataset = D4RLDataset(env)
 
@@ -161,33 +172,47 @@ def make_env_and_dataset(env_name: str, seed: int, data_path: str, use_encoder: 
 
 
 def main(_):
+    import jax
+
+    jax.config.update("jax_default_device", jax.devices()[FLAGS.device_id])
+
     os.makedirs(FLAGS.save_dir, exist_ok=True)
     tb_dir = os.path.join(FLAGS.save_dir, "tb", f"{FLAGS.run_name}.{FLAGS.seed}")
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
 
-    env, dataset = make_env_and_dataset(FLAGS.env_name, FLAGS.seed, FLAGS.data_path,
-                                        FLAGS.use_encoder, FLAGS.encoder_type,
-                                        FLAGS.red_reward, FLAGS.normalization, FLAGS.iter_n)
+    env, dataset = make_env_and_dataset(
+        FLAGS.env_name,
+        FLAGS.seed,
+        FLAGS.data_path,
+        FLAGS.use_encoder,
+        FLAGS.encoder_type,
+        FLAGS.red_reward,
+        FLAGS.normalization,
+        FLAGS.iter_n,
+    )
 
     kwargs = dict(FLAGS.config)
     if FLAGS.wandb:
-        wandb.init(project=FLAGS.wandb_project,
-                   entity=FLAGS.wandb_entity,
-                   name=FLAGS.env_name + '-' + str(FLAGS.seed) + '-' + str(FLAGS.run_name),
-                   config=kwargs,
-                   sync_tensorboard=True)
+        wandb.init(
+            project=FLAGS.wandb_project,
+            entity=FLAGS.wandb_entity,
+            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.run_name),
+            config=kwargs,
+            sync_tensorboard=True,
+        )
 
     summary_writer = SummaryWriter(tb_dir, write_to_disk=True)
 
-    agent = Learner(FLAGS.seed,
-                    env.observation_space.sample(),
-                    env.action_space.sample()[np.newaxis],
-                    max_steps=FLAGS.max_steps,
-                    **kwargs,
-                    use_encoder=FLAGS.use_encoder,
-                    use_layer_norm=FLAGS.use_layer_norm,
-                    opt_decay_schedule=FLAGS.opt_decay_schedule, 
-                    )
+    agent = Learner(
+        FLAGS.seed,
+        env.observation_space.sample(),
+        env.action_space.sample()[np.newaxis],
+        max_steps=FLAGS.max_steps,
+        **kwargs,
+        use_encoder=FLAGS.use_encoder,
+        use_layer_norm=FLAGS.use_layer_norm,
+        opt_decay_schedule=FLAGS.opt_decay_schedule,
+    )
     print(agent)
 
     eval_returns = []
@@ -213,13 +238,18 @@ def main(_):
             summary_writer.flush()
             if log_video:
                 max_length = max(vid.shape[0] for vid in log_videos)  # Find the maximum sequence length
-                padded_vids = np.array([np.pad(vid, ((0, max_length - vid.shape[0]), (0, 0), (0, 0), (0, 0)), 'constant') for vid in log_videos])
+                padded_vids = np.array(
+                    [
+                        np.pad(vid, ((0, max_length - vid.shape[0]), (0, 0), (0, 0), (0, 0)), "constant")
+                        for vid in log_videos
+                    ]
+                )
                 # Make it np.int8
                 padded_vids = padded_vids.astype(np.uint8)
 
                 name = "rollout_video"
                 fps = 20
-                vids = rearrange(padded_vids, 'b t c h w -> (b t) c h w')
+                vids = rearrange(padded_vids, "b t c h w -> (b t) c h w")
                 log_dict = {name: wandb.Video(vids, fps=fps, format="mp4")}
                 # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
                 wandb.log(log_dict, step=i)

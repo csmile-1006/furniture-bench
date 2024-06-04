@@ -18,8 +18,4 @@ def get_config():
 
     config.tau = 0.005  # For soft target updates.
 
-    # Critic Ensemble
-    config.num_qs = 2
-    config.num_min_qs = 2
-
     return config
