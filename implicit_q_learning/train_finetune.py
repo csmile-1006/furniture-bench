@@ -498,7 +498,8 @@ def main(_):
             agent.save(finetune_ckpt_dir, i - FLAGS.prefill_episodes + 1)
 
         if (
-            i > FLAGS.prefill_episodes - 1
+            False
+            and i > FLAGS.prefill_episodes - 1
             and (i - FLAGS.prefill_episodes) % FLAGS.eval_interval == 0
             and ("Bench" not in FLAGS.env_name)
             and not (i == 0 and FLAGS.from_scratch)
