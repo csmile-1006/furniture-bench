@@ -30,6 +30,10 @@ from learner import Learner
 
 from furniture_bench.data.collect_enum import CollectEnum
 
+
+import matplotlib.pyplot as plt
+import imageio
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
@@ -90,6 +94,7 @@ flags.DEFINE_integer("prefill_episodes", 0, "Pre-fill episodes.")
 
 # DEVICE
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
+flags.DEFINE_boolean("save_gif", True, "Save reward and observation in gif")
 
 
 def normalize(dataset):
@@ -113,6 +118,40 @@ def normalize(dataset):
 
     dataset.rewards /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
     dataset.rewards *= 1000.0
+
+
+def gif_maker(gif_dir, observations, rewards, phases, file_index):
+    filenames = []
+    
+    if not os.path.exists('gif_test'):
+        os.makedirs('gif_test')
+
+    for i in tqdm.tqdm(range(len(observations))):
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        
+        image = observations[i]['color_image2'].astype(np.uint8)
+        
+        ax[0].imshow(image)
+        ax[0].axis('off') 
+
+        ax2 = ax[1].twinx()
+        ax[1].plot(rewards[:i+1])
+        ax2.plot(phases[:i+1], color="pink", linestyle="dashed")
+        ax[1].set_xlim(0, i)
+        ax[1].set_ylim(np.min(rewards[:i+1]), np.max(rewards[:i+1]) + 0.05 * np.abs(np.max(rewards[:i+1])))
+        
+        filename = f"{gif_dir}/frame_{i:03d}.png"
+        filenames.append(filename)
+        plt.savefig(filename)
+        plt.close(fig)
+
+    with imageio.get_writer(f'{gif_dir}/{file_index}.gif', mode='I', duration=5) as writer:
+        for filename in filenames:
+            image = imageio.imread(filename)
+            writer.append_data(image)
+
+    for filename in filenames:
+        os.remove(filename)
 
 
 def combine(one_dict, other_dict):
@@ -153,7 +192,8 @@ def make_env_and_dataset(
             env_id,
             furniture=furniture_name,
             # max_env_steps=600,
-            headless=True,
+            # headless=True,
+            headless=False,
             num_envs=1,  # Only support 1 for now.
             manual_done=False,
             # resize_img=True,
@@ -424,6 +464,13 @@ def main(_):
             if FLAGS.normalization == "max":
                 rewards = max_normalize(rewards, max_rew)
 
+        if FLAGS.save_gif:
+            gif_dir = os.path.join(finetune_ckpt_dir, "gifs")
+            if not os.path.exists(gif_dir):
+                os.makedirs(gif_dir)
+            gif_maker(gif_dir, observations, rewards, done_floats, i)
+            print(f"Saved gif at {gif_dir}")
+
         if FLAGS.save_data:
             if not os.path.exists(online_data_dir):
                 os.makedirs(online_data_dir)
@@ -455,7 +502,7 @@ def main(_):
             if FLAGS.wandb:
                 log_dict = {name: wandb.Video(train_log_videos, fps=fps, format="mp4")}
                 # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
-                wandb.log(log_dict, step=i)
+                wandb.log(log_dict, step=i)        
 
         # Remove RGB from the observations.
         observations = [
