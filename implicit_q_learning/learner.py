@@ -36,12 +36,15 @@ def _update_jit(
     utd_ratio: int,
     num_qs: int,
     num_min_qs: int,
+    weights: Optional[jnp.ndarray] = None,
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
 
     new_actor = actor
     new_value = value
     new_critic = critic
     new_target_critic = target_critic
+
+    td_errors = []
 
     for i in range(utd_ratio):
 
@@ -51,12 +54,23 @@ def _update_jit(
             return x[batch_size * i : batch_size * (i + 1)]
 
         mini_batch = jax.tree_util.tree_map(slice, batch)
+        mini_weights = jax.tree_util.tree_map(slice, weights) if weights is not None else None
 
         key, rng = jax.random.split(rng)
         new_critic, new_value, critic_value_info = update_value_critic(
-            key, new_critic, new_value, new_target_critic, mini_batch, discount, expectile, num_qs, num_min_qs
+            key,
+            new_critic,
+            new_value,
+            new_target_critic,
+            mini_batch,
+            discount,
+            expectile,
+            num_qs,
+            num_min_qs,
+            mini_weights,
         )
         new_target_critic = target_update(new_critic, new_target_critic, tau)
+        td_errors.append(critic_value_info["td_error"])
         if utd_ratio == 1 or (utd_ratio > 1 and (i + 1) % 5 == 0):
             key, rng = jax.random.split(rng)
             new_actor, actor_info = awr_update_actor(key, actor, new_target_critic, new_value, mini_batch, temperature)
@@ -69,7 +83,7 @@ def _update_jit(
         new_critic,
         new_value,
         new_target_critic,
-        {**actor_info, **critic_value_info},
+        {**actor_info, **critic_value_info, "total_td_error": jnp.concatenate(td_errors, axis=0)},
     )
 
 
@@ -175,7 +189,9 @@ class Learner(object):
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
 
-    def update(self, batch: Batch, utd_ratio: int = 1) -> InfoDict:
+    def update(self, batch: Batch, utd_ratio: int = 1, weights=None) -> InfoDict:
+        if weights is None:
+            weights = jnp.ones(batch.rewards.shape)
         (
             new_rng,
             new_actor,
@@ -197,6 +213,7 @@ class Learner(object):
             utd_ratio,
             self.num_qs,
             self.num_min_qs,
+            weights,
         )
 
         self.rng = new_rng

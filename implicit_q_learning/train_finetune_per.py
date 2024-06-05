@@ -531,27 +531,30 @@ def main(_):
                 len_curr_traj, smoothing=0.1, disable=not FLAGS.tqdm, desc="Update", leave=False
             ):
                 if FLAGS.online_buffer:
-                    batch, batch_indices = dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio // 2))
+                    weights = np.ones((FLAGS.batch_size * FLAGS.utd_ratio,), dtype=np.float32)
+                    batch, batch_indices, _weights = dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio // 2))
                     online_batch = online_dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio // 2))
                     # Merge batch half by half.
                     batch = combine(batch, online_batch)
+                    weights[::2] = _weights
                 else:
-                    batch, batch_indices = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
+                    batch, batch_indices, weights = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
 
                 from dataset_utils import Batch
 
                 batch = Batch(**batch)
 
-                update_info = agent.update(batch, utd_ratio=FLAGS.utd_ratio)
+                update_info = agent.update(batch, utd_ratio=FLAGS.utd_ratio, weights=weights)
 
-                td_error = update_info["td_error"]
-                del update_info["td_error"]
+                td_error = update_info["total_td_error"]
+                update_info["td_error"] = update_info["td_error"].mean()
+                update_info["total_td_error"] = update_info["total_td_error"].mean()
                 if FLAGS.online_buffer:
                     # UPDATE PRIORITIES only for offline buffer.
                     td_error = td_error[::2]
-                    dataset.update_priorities(batch_indices[-int(FLAGS.batch_size // 2) :], td_error)
-                else:
-                    dataset.update_priorities(batch_indices[-FLAGS.batch_size :], td_error)
+                    # dataset.update_priorities(batch_indices[-int(FLAGS.batch_size // 2) :], td_error)
+                # else:
+                dataset.update_priorities(batch_indices, td_error)
 
             for k, v in update_info.items():
                 if v.ndim == 0:

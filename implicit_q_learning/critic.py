@@ -66,6 +66,7 @@ def update_value_critic(
     expectile: float,
     num_qs: 10,
     num_min_qs: 2,
+    weights: jnp.ndarray = None,
 ) -> Tuple[Model, Model, InfoDict]:
     # critic loss function
     next_v = value(batch.next_observations)
@@ -73,8 +74,12 @@ def update_value_critic(
 
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         qs = critic.apply({"params": critic_params}, batch.observations, batch.actions)
-        critic_loss = ((qs - target_q) ** 2).mean()
-        return critic_loss, {"critic_loss": critic_loss, "qs": qs.mean()}
+        critic_loss = (weights * (qs - target_q) ** 2).mean()
+        return critic_loss, {
+            "critic_loss": critic_loss,
+            "qs": qs.mean(),
+            "td_error": jnp.abs(qs - target_q).mean(axis=0),
+        }
 
     # value loss function
     actions = batch.actions

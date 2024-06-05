@@ -636,7 +636,7 @@ class PrioritizedFurnitureDataset(Dataset):
         self.beta = min(1.0, self.beta_start + self.frame * (1.0 - self.beta_start) / self.beta_frames)
         self.frame += 1
 
-        return batch, indx
+        return batch, indx, weights
 
     def update_priorities(self, indices, priorities):
         for idx, priority in zip(indices, priorities):
