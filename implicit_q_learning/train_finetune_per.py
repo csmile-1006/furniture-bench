@@ -250,7 +250,7 @@ def main(_):
     root_logdir = os.path.join(
         FLAGS.save_dir,
         "tb",
-        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}",
+        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-per-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}",
     )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
@@ -282,6 +282,7 @@ def main(_):
             entity=FLAGS.wandb_entity,
             name=FLAGS.env_name
             + "-"
+            + "PER"
             + str(FLAGS.seed)
             + "-"
             + str(FLAGS.run_name)
@@ -357,7 +358,7 @@ def main(_):
     finetune_ckpt_dir = os.path.join(
         FLAGS.save_dir,
         "ckpt",
-        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}",
+        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-per-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}",
     )
 
     # Load the online data.
