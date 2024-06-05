@@ -90,7 +90,11 @@ def update_value_critic(
     def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
         qs = critic.apply({"params": critic_params}, batch.observations, batch.actions)
         critic_loss = ((qs - target_q) ** 2).mean()
-        return critic_loss, {"critic_loss": critic_loss, "qs": qs.mean()}
+        return critic_loss, {
+            "critic_loss": critic_loss,
+            "qs": qs.mean(),
+            "td_error": jnp.abs(qs - target_q).mean(axis=0),
+        }
 
     new_critic, critic_info = critic.apply_gradient(critic_loss_fn)
     return new_critic, new_value, {**critic_info, **value_info}

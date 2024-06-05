@@ -17,10 +17,11 @@ import wrappers
 from dataset_utils import (
     Batch,
     D4RLDataset,
-    ReplayBuffer,
+    # ReplayBuffer,
     split_into_trajectories,
     Dataset,
-    FurnitureDataset,
+    PrioritizedFurnitureDataset,
+    # FurnitureDataset,
     max_normalize,
     replay_chunk_to_seq,
     min_max_normalize,
@@ -122,30 +123,30 @@ def normalize(dataset):
 
 def gif_maker(gif_dir, observations, rewards, phases, file_index):
     filenames = []
-    
-    if not os.path.exists('gif_test'):
-        os.makedirs('gif_test')
+
+    if not os.path.exists("gif_test"):
+        os.makedirs("gif_test")
 
     for i in tqdm.tqdm(range(len(observations))):
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        
-        image = observations[i]['color_image2'].astype(np.uint8)
-        
+
+        image = observations[i]["color_image2"].astype(np.uint8)
+
         ax[0].imshow(image)
-        ax[0].axis('off') 
+        ax[0].axis("off")
 
         ax2 = ax[1].twinx()
-        ax[1].plot(rewards[:i+1])
-        ax2.plot(phases[:i+1], color="pink", linestyle="dashed")
+        ax[1].plot(rewards[: i + 1])
+        ax2.plot(phases[: i + 1], color="pink", linestyle="dashed")
         ax[1].set_xlim(0, i)
-        ax[1].set_ylim(np.min(rewards[:i+1]), np.max(rewards[:i+1]) + 0.05 * np.abs(np.max(rewards[:i+1])))
-        
+        ax[1].set_ylim(np.min(rewards[: i + 1]), np.max(rewards[: i + 1]) + 0.05 * np.abs(np.max(rewards[: i + 1])))
+
         filename = f"{gif_dir}/frame_{i:03d}.png"
         filenames.append(filename)
         plt.savefig(filename)
         plt.close(fig)
 
-    with imageio.get_writer(f'{gif_dir}/{file_index}.gif', mode='I', duration=5) as writer:
+    with imageio.get_writer(f"{gif_dir}/{file_index}.gif", mode="I", duration=5) as writer:
         for filename in filenames:
             image = imageio.imread(filename)
             writer.append_data(image)
@@ -163,9 +164,9 @@ def combine(one_dict, other_dict):
             combined[k] = combine(v, other_dict[k])
         else:
             # Use half.
-            tmp = np.empty((v.shape[0] // 2 + other_dict[k].shape[0] // 2, *v.shape[1:]), dtype=v.dtype)
-            tmp[0::2] = v[: len(v) // 2]
-            tmp[1::2] = other_dict[k][: len(other_dict[k]) // 2]
+            tmp = np.empty((v.shape[0] + other_dict[k].shape[0], *v.shape[1:]), dtype=v.dtype)
+            tmp[0::2] = v[: len(v)]
+            tmp[1::2] = other_dict[k][: len(other_dict[k])]
             combined[k] = tmp
     return combined
 
@@ -226,7 +227,7 @@ def make_env_and_dataset(
             iter_n = f"iter_{FLAGS.iter_n}"
         else:
             iter_n = FLAGS.iter_n
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
+        dataset = PrioritizedFurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
     else:
         dataset = D4RLDataset(env)
 
@@ -502,7 +503,7 @@ def main(_):
             if FLAGS.wandb:
                 log_dict = {name: wandb.Video(train_log_videos, fps=fps, format="mp4")}
                 # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
-                wandb.log(log_dict, step=i)        
+                wandb.log(log_dict, step=i)
 
         # Remove RGB from the observations.
         observations = [
@@ -525,19 +526,32 @@ def main(_):
         #     summary_writer.add_scalar(f'training/{k}', v, info['total']['timesteps'])
 
         # Update as the length of the current trajectory.
-        if i > FLAGS.prefill_episodes:
+        if i >= FLAGS.prefill_episodes:
             for update_idx in tqdm.trange(
                 len_curr_traj, smoothing=0.1, disable=not FLAGS.tqdm, desc="Update", leave=False
             ):
-                batch = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
                 if FLAGS.online_buffer:
-                    online_batch = online_dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
+                    batch, batch_indices = dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio // 2))
+                    online_batch = online_dataset.sample(int(FLAGS.batch_size * FLAGS.utd_ratio // 2))
                     # Merge batch half by half.
                     batch = combine(batch, online_batch)
-                    from dataset_utils import Batch
+                else:
+                    batch, batch_indices = dataset.sample(FLAGS.batch_size * FLAGS.utd_ratio)
 
-                    batch = Batch(**batch)
+                from dataset_utils import Batch
+
+                batch = Batch(**batch)
+
                 update_info = agent.update(batch, utd_ratio=FLAGS.utd_ratio)
+
+                td_error = update_info["td_error"]
+                del update_info["td_error"]
+                if FLAGS.online_buffer:
+                    # UPDATE PRIORITIES only for offline buffer.
+                    td_error = td_error[::2]
+                    dataset.update_priorities(batch_indices[-int(FLAGS.batch_size // 2) :], td_error)
+                else:
+                    dataset.update_priorities(batch_indices[-FLAGS.batch_size :], td_error)
 
             for k, v in update_info.items():
                 if v.ndim == 0:

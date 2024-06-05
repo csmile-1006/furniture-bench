@@ -421,3 +421,223 @@ class ReplayBuffer(Dataset):
 
         self.insert_index = (self.insert_index + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
+
+
+class PrioritizedFurnitureDataset(Dataset):
+
+    def __init__(
+        self,
+        data_path,
+        clip_to_eps: bool = True,
+        eps: float = 1e-5,
+        use_encoder: bool = False,
+        red_reward: bool = False,
+        iter_n: str = "-1",
+        alpha: float = 0.6,
+        beta_start: float = 0.4,
+        beta_frames: int = 1000000,
+    ):
+        if isinstance(data_path, list):
+            datasets = []
+            for path in data_path:
+                with open(path, "rb") as f:
+                    datasets.append(pickle.load(f))
+            # Merge the dataset.
+            dataset = {}
+            # Find the joint keys.
+            joint_keys = []
+            for dataset in datasets:
+                keys = set(dataset.keys())
+                joint_keys.append(keys)
+            joint_keys = set.intersection(*joint_keys)
+
+            for key in joint_keys:
+                dataset[key] = np.concatenate([d[key] for d in datasets], axis=0)
+        else:
+            with open(data_path, "rb") as f:
+                dataset = pickle.load(f)
+        print(f"Loaded data from {data_path}")
+
+        # if clip_to_eps:
+        #     lim = 1 - eps
+        #     dataset["actions"] = np.clip(dataset["actions"], -lim, lim)
+
+        dones_float = np.zeros_like(dataset["rewards"], dtype=np.float32)
+
+        # if use_encoder:
+        #     # Preprocess the image.
+        #     for i in range(len(dataset['observations'])):
+        #         # dataset['observations'][i]['image_feature'] = dataset['observations'][i]['image_feature'] / 255.0
+        #         # dataset['next_observations'][i]['image_feature'] = dataset['next_observations'][i]['image_feature'] / 255.0
+        #         for img in ['image1', 'image2']:
+        #             for obs in ['observations', 'next_observations']:
+        #                 dataset[obs][i][img] = dataset[obs][i][img] / 255.0
+        #                 dataset[obs][i][img][:, :, 0] = (dataset[obs][i][img][:, :, 0] - 0.485) / 0.229
+        #                 dataset[obs][i][img][:, :, 1] = (dataset[obs][i][img][:, :, 1] - 0.456) / 0.224
+        #                 dataset[obs][i][img][:, :, 2] = (dataset[obs][i][img][:, :, 2] - 0.406) / 0.225
+
+        for i in range(len(dones_float) - 1):
+            if (
+                np.linalg.norm(
+                    dataset["observations"][i + 1]["robot_state"] - dataset["next_observations"][i]["robot_state"]
+                )
+                > 1e-6
+                or dataset["terminals"][i] == 1.0
+            ):
+                dones_float[i] = 1
+            else:
+                dones_float[i] = 0
+
+        dones_float[-1] = 1
+
+        if red_reward:
+            assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
+            rewards = dataset[f"reds_rewards_{iter_n}"]
+        else:
+            rewards = dataset["rewards"]
+
+        # PER
+        self.priorities = np.zeros((int(1e6),), dtype=np.float32)
+        self.alpha = alpha
+        self.beta_start = beta_start
+        self.beta_frames = beta_frames
+        self.beta = beta_start
+        self.frame = 1
+
+        super().__init__(
+            dataset["observations"],
+            actions=dataset["actions"],
+            rewards=rewards,
+            masks=1.0 - dataset["terminals"],
+            dones_float=dones_float,
+            next_observations=dataset["next_observations"],
+            size=len(dataset["observations"]),
+            use_encoder=use_encoder,
+        )
+
+        self.priorities[: self.size] = 1.0
+
+    def add_trajectory(self, observations, actions, rewards, masks, dones_float, next_observations):
+        if self.observations is None:
+            self.observations = observations
+            self.actions = np.array(actions)
+            self.rewards = np.array(rewards)
+            self.masks = np.array(masks)
+            self.dones_float = np.array(dones_float)
+            self.next_observations = next_observations
+            self.size = len(observations)
+            return
+        self.observations = np.concatenate([self.observations, observations], axis=0)
+        self.actions = np.concatenate([self.actions, actions], axis=0)
+        self.rewards = np.concatenate([self.rewards, rewards], axis=0)
+        self.masks = np.concatenate([self.masks, masks], axis=0)
+        self.dones_float = np.concatenate([self.dones_float, dones_float], axis=0)
+        self.next_observations = np.concatenate([self.next_observations, next_observations], axis=0)
+
+        max_priority = self.priorities.max() if self.size > 0 else 1.0
+        self.priorities[self.size : self.size + len(observations)] = max_priority
+        self.size += len(observations)
+
+    def sample(self, batch_size: int) -> Batch:
+        priorities = self.priorities[: self.size]
+
+        probs = priorities**self.alpha
+        probs /= probs.sum()
+
+        indx = np.random.choice(self.size, size=batch_size, p=probs)
+        # indx = np.random.randint(self.size, size=batch_size)
+
+        obs_img1 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
+        obs_img2 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
+        next_obs_img1 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
+        next_obs_img2 = jnp.zeros([batch_size, 224, 224, 3], dtype=jnp.float32)
+
+        if self.use_encoder:
+            # Preprocess the image.
+            for i in indx:
+                obs_img1 = obs_img1.at[i].set(jnp.array(self.observations[i]["image1"] / 255.0))
+                obs_img1 = obs_img1.at[i, :, :, 0].add(-0.485)
+                obs_img1 = obs_img1.at[i, :, :, 1].add(-0.456)
+                obs_img1 = obs_img1.at[i, :, :, 2].add(-0.406)
+                obs_img1 = obs_img1.at[i, :, :, 0].divide(0.229)
+                obs_img1 = obs_img1.at[i, :, :, 1].divide(0.224)
+                obs_img1 = obs_img1.at[i, :, :, 2].divide(0.225)
+
+                obs_img2 = obs_img2.at[i].set(jnp.array(self.observations[i]["image2"] / 255.0))
+                obs_img2 = obs_img2.at[i, :, :, 0].add(-0.485)
+                obs_img2 = obs_img2.at[i, :, :, 1].add(-0.456)
+                obs_img2 = obs_img2.at[i, :, :, 2].add(-0.406)
+                obs_img2 = obs_img2.at[i, :, :, 0].divide(0.229)
+                obs_img2 = obs_img2.at[i, :, :, 1].divide(0.224)
+                obs_img2 = obs_img2.at[i, :, :, 2].divide(0.225)
+
+                next_obs_img1 = next_obs_img1.at[i].set(jnp.array(self.next_observations[i]["image1"] / 255.0))
+                next_obs_img1 = next_obs_img1.at[i, :, :, 0].add(-0.485)
+                next_obs_img1 = next_obs_img1.at[i, :, :, 1].add(-0.456)
+                next_obs_img1 = next_obs_img1.at[i, :, :, 2].add(-0.406)
+                next_obs_img1 = next_obs_img1.at[i, :, :, 0].divide(0.229)
+                next_obs_img1 = next_obs_img1.at[i, :, :, 1].divide(0.224)
+                next_obs_img1 = next_obs_img1.at[i, :, :, 2].divide(0.225)
+
+                next_obs_img2 = next_obs_img2.at[i].set(jnp.array(self.next_observations[i]["image2"] / 255.0))
+                next_obs_img2 = next_obs_img2.at[i, :, :, 0].add(-0.485)
+                next_obs_img2 = next_obs_img2.at[i, :, :, 1].add(-0.456)
+                next_obs_img2 = next_obs_img2.at[i, :, :, 2].add(-0.406)
+                next_obs_img2 = next_obs_img2.at[i, :, :, 0].divide(0.229)
+                next_obs_img2 = next_obs_img2.at[i, :, :, 1].divide(0.224)
+                next_obs_img2 = next_obs_img2.at[i, :, :, 2].divide(0.225)
+
+                # self.next_observations[i][img] = self.next_observations[i][img] / 255.0
+                # self.next_observations[i][img][:, :, 0] = (self.next_observations[i][img][:, :, 0] - 0.485) / 0.229
+                # self.next_observations[i][img][:, :, 1] = (self.next_observations[i][img][:, :, 1] - 0.456) / 0.224
+                # self.next_observations[i][img][:, :, 2] = (self.next_observations[i][img][:, :, 2] - 0.406) / 0.225
+        if self.use_encoder:
+            batch = Batch(
+                observations={
+                    "image1": obs_img1,
+                    "image2": obs_img2,
+                    "robot_state": jnp.array([self.observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
+                },
+                actions=self.actions[indx],
+                rewards=self.rewards[indx],
+                masks=self.masks[indx],
+                next_observations={
+                    "image1": next_obs_img1,
+                    "image2": next_obs_img2,
+                    "robot_state": jnp.array(
+                        [self.next_observations[i]["robot_state"] for i in indx], dtype=jnp.float32
+                    ),
+                },
+            )
+        else:
+            batch = Batch(
+                observations={
+                    "image1": jnp.array([self.observations[i]["image1"] for i in indx], dtype=jnp.float32),
+                    "image2": jnp.array([self.observations[i]["image2"] for i in indx], dtype=jnp.float32),
+                    "robot_state": jnp.array([self.observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
+                },
+                actions=self.actions[indx],
+                rewards=self.rewards[indx],
+                masks=self.masks[indx],
+                next_observations={
+                    "image1": jnp.array([self.next_observations[i]["image1"] for i in indx], dtype=jnp.float32),
+                    "image2": jnp.array([self.next_observations[i]["image2"] for i in indx], dtype=jnp.float32),
+                    "robot_state": jnp.array(
+                        [self.next_observations[i]["robot_state"] for i in indx], dtype=jnp.float32
+                    ),
+                },
+            )
+
+        total = self.size
+        weights = (total * probs[indx]) ** (-self.beta)
+        weights /= weights.max()
+        weights = jnp.array(weights, dtype=jnp.float32)
+
+        self.beta = min(1.0, self.beta_start + self.frame * (1.0 - self.beta_start) / self.beta_frames)
+        self.frame += 1
+
+        return batch, indx
+
+    def update_priorities(self, indices, priorities):
+        for idx, priority in zip(indices, priorities):
+            self.priorities[idx] = priority
