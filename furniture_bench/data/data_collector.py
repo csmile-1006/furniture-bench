@@ -3,6 +3,7 @@ import time
 import pickle
 from datetime import datetime
 from pathlib import Path
+import uuid
 
 import cv2
 import gym
@@ -112,6 +113,9 @@ class DataCollector:
             # Refer: implicit_q_learning/test_offline.py
             assert not scripted
             from learner import Learner
+            import jax
+
+            jax.config.update("jax_default_device", jax.devices()[compute_device_id])
             self.agent = Learner(
                 42, # Random number for seed
                 self.env.observation_space.sample(),
@@ -340,6 +344,7 @@ class DataCollector:
         print(f"Length of trajectory: {len(self.obs)}")
         
         data_name = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+        data_name = f"{data_name}_{str(uuid.uuid4())[:2]}"
         if collect_enum == CollectEnum.SUCCESS:
             data_name = f"{data_name}_success"
         elif collect_enum == CollectEnum.FAIL:

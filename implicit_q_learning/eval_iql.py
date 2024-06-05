@@ -175,7 +175,9 @@ def main(_):
 
     ckpt_step = FLAGS.ckpt_step
     root_logdir = os.path.join(
-        FLAGS.save_dir, "eval", f"{FLAGS.run_name}.{FLAGS.seed}.step{FLAGS.ckpt_step}.{FLAGS.trial}"
+        FLAGS.save_dir,
+        "eval",
+        f"{FLAGS.run_name}.{FLAGS.seed}.step{FLAGS.ckpt_step}.noise{FLAGS.temperature}.trial{FLAGS.trial}",
     )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
@@ -266,6 +268,7 @@ def main(_):
             log_video=log_video,
             reward_model=reward_model,
             normalization=FLAGS.normalization,
+            temperature=FLAGS.temperature,
             max_rew=max_rew,
             window_size=FLAGS.window_size,
         )

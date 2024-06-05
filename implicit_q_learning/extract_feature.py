@@ -18,7 +18,7 @@ flags.DEFINE_boolean("use_r3m", False, "Use r3m to encode images.")
 flags.DEFINE_boolean("use_vip", False, "Use vip to encode images.")
 flags.DEFINE_integer("num_threads", int(8), "Set number of threads of PyTorch")
 flags.DEFINE_integer("num_demos", None, "Number of demos to convert")
-flags.DEFINE_integer('batch_size', 512, 'Batch size for encoding images')
+flags.DEFINE_integer("batch_size", 512, "Batch size for encoding images")
 
 
 def main(_):
@@ -26,7 +26,7 @@ def main(_):
         print(f"Setting torch.num_threads to {FLAGS.num_threads}")
         torch.set_num_threads(FLAGS.num_threads)
 
-    env_type = 'Image'
+    env_type = "Image"
     env_id = f"Furniture-{env_type}-Dummy-v0"
     furniture = FLAGS.furniture
     demo_dir = FLAGS.demo_dir
@@ -42,31 +42,40 @@ def main(_):
     if FLAGS.use_r3m:
         # Use R3M for the image encoder.
         from r3m import load_r3m
-        encoder = load_r3m('resnet50')
+
+        encoder = load_r3m("resnet50")
 
     if FLAGS.use_vip:
         # Use VIP for the image encoder.
         from vip import load_vip
+
         encoder = load_vip()
 
     if FLAGS.use_r3m or FLAGS.use_vip:
         encoder.eval()
         for param in encoder.parameters():
             param.requires_grad = False
-        encoder.to('cuda')
+        encoder.to("cuda")
         device = torch.device("cuda")
 
-    files = list(dir_path.glob('*.pkl'))
+    files = list(dir_path.glob("*.pkl"))
     len_files = len(files)
-    
+
     # Create reds rewards keys
     # Read the first file to get the keys
+    translator = {
+        "reds_rewardss50_f200_from50_f300_from300_phase_reg": "reds_rewards_s50_f200_from50_f300_from300_phase_reg",
+        "reds_rewardss50_f200_from50_phase_reg": "reds_rewards_s50_f200_from50_phase_reg",
+    }
+    reversed_translator = {v: k for k, v in translator.items()}
     with open(files[0], "rb") as f:
         reds_rewards = {}
         x = pickle.load(f)
         for key in x.keys():
-            if "reds_rewards_iter" in key:
+            if "reds_rewards_iter" in key or "reds_rewards_s" in key:
                 reds_rewards[key] = []
+            if key in translator:
+                reds_rewards[translator[key]] = []
 
     if len_files == 0:
         raise ValueError(f"No pkl files found in {dir_path}")
@@ -78,9 +87,9 @@ def main(_):
         with open(file_path, "rb") as f:
             x = pickle.load(f)
 
-            if len(x['observations']) == len(x['actions']):
+            if len(x["observations"]) == len(x["actions"]):
                 # Dummy
-                x['observations'].append(x['observations'][-1])
+                x["observations"].append(x["observations"][-1])
             l = len(x["observations"])
 
             if FLAGS.use_r3m or FLAGS.use_vip:
@@ -89,7 +98,7 @@ def main(_):
                 img1 = torch.from_numpy(np.stack(img1))
                 img2 = torch.from_numpy(np.stack(img2))
 
-                feature_dim = 2048 if FLAGS.use_r3m else 1024 
+                feature_dim = 2048 if FLAGS.use_r3m else 1024
                 img1_feature = np.zeros((l, feature_dim), dtype=np.float32)
                 img2_feature = np.zeros((l, feature_dim), dtype=np.float32)
 
@@ -100,8 +109,12 @@ def main(_):
                             img1 = img1.permute(0, 3, 1, 2)
                         if img2.shape[1] != 3:
                             img2 = img2.permute(0, 3, 1, 2)
-                        img1_feature[i:i+FLAGS.batch_size] = encoder(img1[i:i+FLAGS.batch_size].to(device)).cpu().detach().numpy()
-                        img2_feature[i:i+FLAGS.batch_size] = encoder(img2[i:i+FLAGS.batch_size].to(device)).cpu().detach().numpy()
+                        img1_feature[i : i + FLAGS.batch_size] = (
+                            encoder(img1[i : i + FLAGS.batch_size].to(device)).cpu().detach().numpy()
+                        )
+                        img2_feature[i : i + FLAGS.batch_size] = (
+                            encoder(img2[i : i + FLAGS.batch_size].to(device)).cpu().detach().numpy()
+                        )
 
             for i in range(l - 1):
                 if FLAGS.use_r3m or FLAGS.use_vip:
@@ -110,28 +123,35 @@ def main(_):
                     image2 = img2_feature[i]
                     next_image2 = img2_feature[i + 1]
                 else:
-                    image1 = np.moveaxis(x['observations'][i]['color_image1'], 0, -1)
-                    next_image1 = np.moveaxis(x['observations'][i + 1]['color_image1'], 0, -1)
-                    image2 = np.moveaxis(x['observations'][i]['color_image2'], 0, -1)
-                    next_image2 = np.moveaxis(x['observations'][i + 1]['color_image2'], 0, -1)
+                    image1 = np.moveaxis(x["observations"][i]["color_image1"], 0, -1)
+                    next_image1 = np.moveaxis(x["observations"][i + 1]["color_image1"], 0, -1)
+                    image2 = np.moveaxis(x["observations"][i]["color_image2"], 0, -1)
+                    next_image2 = np.moveaxis(x["observations"][i + 1]["color_image2"], 0, -1)
 
-                obs_.append({
-                    # 'image_feature': feature1,
-                    'image1': image1,
-                    'image2': image2,
-                    'robot_state': x["observations"][i]['robot_state']
-                })
-                next_obs_.append({
-                    # 'image_feature': next_feature1,
-                    'image1': next_image1,
-                    'image2': next_image2,
-                    'robot_state': x["observations"][i + 1]['robot_state']
-                })
+                obs_.append(
+                    {
+                        # 'image_feature': feature1,
+                        "image1": image1,
+                        "image2": image2,
+                        "robot_state": x["observations"][i]["robot_state"],
+                    }
+                )
+                next_obs_.append(
+                    {
+                        # 'image_feature': next_feature1,
+                        "image1": next_image1,
+                        "image2": next_image2,
+                        "robot_state": x["observations"][i + 1]["robot_state"],
+                    }
+                )
 
                 action_.append(x["actions"][i])
                 reward_.append(x["rewards"][i])
                 for kew, rews in reds_rewards.items():
-                    rews.append(x[kew][i])
+                    if kew in translator.values():
+                        rews.append(x[reversed_translator[kew]][i])
+                    else:
+                        rews.append(x[kew][i])
                     # red_reward_.append(x["reds_rewards"][i])
                 done_.append(1 if i == l - 2 else 0)
 
@@ -146,7 +166,7 @@ def main(_):
         # Update the dataset with reds rewards
         dataset[key] = np.array(rews)
 
-    path = f'data/{env_type}/{furniture}.pkl' if FLAGS.out_file_path is None else FLAGS.out_file_path
+    path = f"data/{env_type}/{furniture}.pkl" if FLAGS.out_file_path is None else FLAGS.out_file_path
     path = Path(path)
     path.parent.mkdir(exist_ok=True, parents=True)
 
