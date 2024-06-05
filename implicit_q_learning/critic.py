@@ -67,6 +67,15 @@ def update_value_critic(
     num_qs: 10,
     num_min_qs: 2,
 ) -> Tuple[Model, Model, InfoDict]:
+    # critic loss function
+    next_v = value(batch.next_observations)
+    target_q = batch.rewards + discount * batch.masks * next_v
+
+    def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
+        qs = critic.apply({"params": critic_params}, batch.observations, batch.actions)
+        critic_loss = ((qs - target_q) ** 2).mean()
+        return critic_loss, {"critic_loss": critic_loss, "qs": qs.mean()}
+
     # value loss function
     actions = batch.actions
     target_params = subsample_ensemble(key, target_critic.params, num_min_qs, num_qs)
@@ -81,16 +90,7 @@ def update_value_critic(
             "v": v.mean(),
         }
 
+    new_critic, critic_info = critic.apply_gradient(critic_loss_fn)
     new_value, value_info = value.apply_gradient(value_loss_fn)
 
-    # critic loss function
-    next_v = new_value(batch.next_observations)
-    target_q = batch.rewards + discount * batch.masks * next_v
-
-    def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-        qs = critic.apply({"params": critic_params}, batch.observations, batch.actions)
-        critic_loss = ((qs - target_q) ** 2).mean()
-        return critic_loss, {"critic_loss": critic_loss, "qs": qs.mean()}
-
-    new_critic, critic_info = critic.apply_gradient(critic_loss_fn)
     return new_critic, new_value, {**critic_info, **value_info}
