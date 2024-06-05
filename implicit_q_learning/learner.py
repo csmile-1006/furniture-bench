@@ -56,13 +56,12 @@ def _update_jit(
         new_critic, new_value, critic_value_info = update_value_critic(
             key, new_critic, new_value, new_target_critic, mini_batch, discount, expectile, num_qs, num_min_qs
         )
-        new_target_critic = target_update(new_critic, new_target_critic, tau)
-
         if utd_ratio == 1 or (utd_ratio > 1 and (i + 1) % 5 == 0):
             key, rng = jax.random.split(rng)
             new_actor, actor_info = awr_update_actor(key, actor, new_target_critic, new_value, mini_batch, temperature)
         else:
             new_actor, actor_info = actor, {}
+        new_target_critic = target_update(new_critic, new_target_critic, tau)
 
     return (
         rng,
