@@ -55,6 +55,7 @@ flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("red_reward", False, "Use learned reward")
 flags.DEFINE_boolean("viper_reward", False, "Use learned reward")
 flags.DEFINE_boolean("drs_reward", False, "Use learned reward")
+flags.DEFINE_enum("reward_type", "REDS", ["REDS", "DrS", "VIPER"], "Type of reward model.")
 flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m")
 flags.DEFINE_boolean("wandb", True, "Use wandb")
@@ -348,8 +349,8 @@ def main(_):
             videogpt_path=os.path.join(FLAGS.ckpt_path, f"{domain}_videogpt_l4_s4"),
             camera_key=FLAGS.image_keys.split("|")[0],
             reward_scale=None,
-            minibatch_size=FLAGS.batch_size,
-            encoding_minibatch_size=FLAGS.batch_size,
+            minibatch_size=16,
+            encoding_minibatch_size=16,
         )
 
     if FLAGS.drs_reward:
@@ -497,7 +498,7 @@ def main(_):
                 "actions": actions,
                 "rewards": phases,
             }
-            seq = reward_model(replay_chunk_to_seq(x, FLAGS.window_size))
+            seq = reward_model(replay_chunk_to_seq(x, FLAGS.window_size, FLAGS.skip_frame, FLAGS.reward_type))
             rewards = np.asarray([elem[reward_model.PUBLIC_LIKELIHOOD_KEY] for elem in seq])
             if FLAGS.normalization == "min_max":
                 min_max_normalize(rewards)
