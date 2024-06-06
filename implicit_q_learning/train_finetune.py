@@ -180,6 +180,8 @@ def make_env_and_dataset(
     use_encoder: bool,
     encoder_type: str,
     red_reward: bool = False,
+    viper_reward: bool = False,
+    drs_reward: bool = False,
     iter_n: int = -1,
 ) -> Tuple[gym.Env, D4RLDataset]:
     if "Furniture" in env_name:
@@ -229,7 +231,14 @@ def make_env_and_dataset(
             iter_n = f"iter_{FLAGS.iter_n}"
         else:
             iter_n = FLAGS.iter_n
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
+        dataset = FurnitureDataset(
+            data_path,
+            use_encoder=use_encoder,
+            red_reward=red_reward,
+            viper_reward=viper_reward,
+            drs_reward=drs_reward,
+            iter_n=iter_n,
+        )
     else:
         dataset = D4RLDataset(env)
 
@@ -262,7 +271,9 @@ def main(_):
         FLAGS.data_path,
         FLAGS.use_encoder,
         FLAGS.encoder_type,
-        FLAGS.red_reward or FLAGS.viper_reward or FLAGS.drs_reward,
+        FLAGS.red_reward,
+        FLAGS.viper_reward,
+        FLAGS.drs_reward,
         FLAGS.iter_n,
     )
 

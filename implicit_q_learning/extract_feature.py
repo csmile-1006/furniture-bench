@@ -66,6 +66,8 @@ def main(_):
     translator = {
         "reds_rewardss50_f200_from50_f300_from300_phase_reg": "reds_rewards_s50_f200_from50_f300_from300_phase_reg",
         "reds_rewardss50_f200_from50_phase_reg": "reds_rewards_s50_f200_from50_phase_reg",
+        "drs_rewardss100_f300": "drs_rewards_s100_f300",
+        "viper_rewardss100_f300": "viper_rewards_s100_f300",
     }
     reversed_translator = {v: k for k, v in translator.items()}
     with open(files[0], "rb") as f:

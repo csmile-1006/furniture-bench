@@ -300,6 +300,8 @@ class FurnitureDataset(Dataset):
         eps: float = 1e-5,
         use_encoder: bool = False,
         red_reward: bool = False,
+        viper_reward: bool = False,
+        drs_reward: bool = False,
         iter_n: str = "-1",
     ):
         if isinstance(data_path, list):
@@ -355,9 +357,16 @@ class FurnitureDataset(Dataset):
 
         dones_float[-1] = 1
 
+        assert np.sum(red_reward + viper_reward + drs_reward) <= 1, "Only one reward type can be selected."
         if red_reward:
             assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
             rewards = dataset[f"reds_rewards_{iter_n}"]
+        if viper_reward:
+            assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
+            rewards = dataset[f"viper_rewards_{iter_n}"]
+        if drs_reward:
+            assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
+            rewards = dataset[f"drs_rewards_{iter_n}"]
         else:
             rewards = dataset["rewards"]
 
