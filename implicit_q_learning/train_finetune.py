@@ -61,7 +61,7 @@ flags.DEFINE_boolean("drs_reward", False, "Use learned reward")
 flags.DEFINE_enum("reward_type", "REDS", ["REDS", "DrS", "VIPER"], "Type of reward model.")
 flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m")
-flags.DEFINE_boolean("wandb", True, "Use wandb")
+flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "furniture-reward", "wandb project")
 flags.DEFINE_string("wandb_entity", "clvr", "wandb entity")
 config_flags.DEFINE_config_file(
@@ -74,6 +74,9 @@ config_flags.DEFINE_config_file(
 flags.DEFINE_multi_string("data_path", "", "Path to data.")
 flags.DEFINE_string("normalization", "", "")
 flags.DEFINE_string("iter_n", "-1", "Reward relabeling iteration")
+flags.DEFINE_boolean("use_learned_reward", False, "Use learned reward")
+flags.DEFINE_string("reward_suffix", "-1", "Reward suffix")
+flags.DEFINE_string("reward_type", "REDS", "Reward type")
 
 
 # REDS
@@ -88,6 +91,7 @@ flags.DEFINE_boolean("phase_reward", None, "Use phase reward (for logging or tra
 
 flags.DEFINE_boolean("keyboard", None, "Use phase reward (for logging or training)")
 flags.DEFINE_boolean("save_data", None, "Save the training data.")
+flags.DEFINE_boolean("eval", None, "Evaluation.")
 flags.DEFINE_boolean("use_layer_norm", None, "Use layer normalization.")
 flags.DEFINE_boolean("online_buffer", None, "Use separate online buffer.")
 flags.DEFINE_boolean("fixed_init", None, "Use separate online buffer.")
@@ -232,8 +236,12 @@ def make_env_and_dataset(
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
-        if FLAGS.iter_n.isdigit():
-            iter_n = f"iter_{FLAGS.iter_n}"
+        # if FLAGS.iter_n.isdigit():
+        #     iter_n = f"iter_{FLAGS.iter_n}"
+        # else:
+        #     iter_n = FLAGS.iter_n
+        if use_learned_reward:
+            reward_name = f"{reward_suffix}"
         else:
             iter_n = FLAGS.iter_n
         dataset = FurnitureDataset(
@@ -340,23 +348,53 @@ def main(_):
         policy_ddpg_bc=FLAGS.policy_ddpg_bc,
     )
 
-    if FLAGS.red_reward:
+    if FLAGS.use_learned_reward:
         # load reward model.
-        from bpref_v2.reward_model.rfe_reward_model import RFERewardModel
+        if FLAGS.reward_type == "REDS":
+            from bpref_v2.reward_model.rfe_reward_model import RFERewardModel
 
-        reward_model = RFERewardModel(
-            task=FLAGS.task_name,
-            model_name=FLAGS.rm_type,
-            rm_path=FLAGS.ckpt_path,
-            camera_keys=FLAGS.image_keys.split("|"),
-            reward_scale=None,
-            window_size=FLAGS.window_size,
-            skip_frame=FLAGS.skip_frame,
-            reward_model_device=0,
-            encoding_minibatch_size=16,
-            use_task_reward=False,
-            use_scale=False,
-        )
+            reward_model = RFERewardModel(
+                task=FLAGS.task_name,
+                model_name=FLAGS.rm_type,
+                rm_path=FLAGS.ckpt_path,
+                camera_keys=FLAGS.image_keys.split("|"),
+                reward_scale=None,
+                window_size=FLAGS.window_size,
+                skip_frame=FLAGS.skip_frame,
+                reward_model_device=0,
+                encoding_minibatch_size=16,
+                use_task_reward=False,
+                use_scale=False,
+            )
+        elif FLAGS.reward_type == 'DRS':
+            from bpref_v2.reward_model.drs_reward_model import DrsRewardModel
+            
+            reward_model = DrsRewardModel(
+                task=FLAGS.task_name,
+                model_name="DRS",
+                rm_path=FLAGS.ckpt_path,
+                camera_keys=FLAGS.image_keys.split("|"),
+                reward_scale=None,
+                window_size=FLAGS.window_size,
+                skip_frame=FLAGS.skip_frame,
+                reward_model_device=0,
+                encoding_minibatch_size=16,
+                use_task_reward=False,
+                use_scale=False,
+            )
+        elif FLAGS.reward_type == 'VIPER':
+            from viper_rl.videogpt.reward_models.videogpt_reward_model import VideoGPTRewardModel
+            
+            domain, task = FLAGS.task_name.split("_", 1)
+            reward_model = VideoGPTRewardModel(
+                task=FLAGS.task_name,
+                vqgan_path=os.path.join(FLAGS.ckpt_path, f"{domain}_vqgan"),
+                videogpt_path=os.path.join(FLAGS.ckpt_path, f"{domain}_videogpt_l4_s4"),
+                camera_key=FLAGS.image_keys.split("|")[0],
+                reward_scale=None,
+                minibatch_size=4,
+                encoding_minibatch_size=4,
+            )
 
     if FLAGS.viper_reward:
         # load reward model
@@ -397,6 +435,7 @@ def main(_):
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     if not FLAGS.from_scratch:
         agent.load(ckpt_dir, ckpt_step)
+        
     eval_returns = []
     observation, done = env.reset(), False
     phase = 0
@@ -469,7 +508,10 @@ def main(_):
     ckpt_idx = len(data_files)
     # if ckpt_idx > 0:
     if not FLAGS.data_collection and FLAGS.load_finetune_ckpt:
-        agent.load(finetune_ckpt_dir, ckpt_idx)
+        # breakpoint()
+        agent.load(finetune_ckpt_dir, ckpt_idx - FLAGS.prefill_episodes)
+        print(f"Loading fine-tune checkpoint {finetune_ckpt_dir} at {ckpt_idx - FLAGS.prefill_episodes}")
+    data_rew_min = np.min(dataset.rewards)
 
     for i in tqdm.tqdm(
         range(ckpt_idx, FLAGS.max_episodes + FLAGS.prefill_episodes + 1), smoothing=0.1, disable=not FLAGS.tqdm
@@ -501,6 +543,8 @@ def main(_):
                 _, collect_enum = device_interface.get_action()
                 if collect_enum in [CollectEnum.FAIL, CollectEnum.SUCCESS]:
                     done = True
+                if collect_enum == CollectEnum.REWARD:
+                    reward = device_interface.rew_key
                 print(env.env_steps)
             if "phase" in info:
                 phase = max(phase, info["phase"])
@@ -517,6 +561,9 @@ def main(_):
             phases.append(phase)
 
             observation = next_observation
+            
+        env.robot.reset('low')
+        
         if device_interface and collect_enum == CollectEnum.FAIL:
             # Skip the data saving, agent update, and evaluation.
             continue
@@ -531,21 +578,59 @@ def main(_):
                 "actions": actions,
                 "rewards": phases,
             }
-            seq = reward_model(replay_chunk_to_seq(x, FLAGS.window_size, FLAGS.skip_frame, FLAGS.reward_type))
+            if FLAGS.reward_type == "DRS":
+                drs = True
+            else:
+                drs = False
+            if FLAGS.reward_type == "VIPER":
+                viper = True
+            else:
+                viper = False
+
+            if viper:
+                if x["observations"][0]["color_image1"].shape[0] == 3:
+                    for i in range(len(x["observations"])):
+                        x["observations"][i]["color_image1"] = x["observations"][i]["color_image1"].transpose((1, 2, 0))
+                        x["observations"][i]["color_image2"] = x["observations"][i]["color_image2"].transpose((1, 2, 0))
+            seq = reward_model(replay_chunk_to_seq(x, FLAGS.window_size, drs=drs, viper=viper))
             rewards = np.asarray([elem[reward_model.PUBLIC_LIKELIHOOD_KEY] for elem in seq])
             if FLAGS.normalization == "min_max":
                 min_max_normalize(rewards)
             if FLAGS.normalization == "max":
                 rewards = max_normalize(rewards, max_rew)
+                
+            if len(rewards) < 500:
+                # rewards[-1] = 5 * np.min(dataset.rewards)
+                rewards[-1] = 5 * data_rew_min
 
         if FLAGS.save_gif:
             gif_dir = os.path.join(finetune_ckpt_dir, "gifs")
             if not os.path.exists(gif_dir):
                 os.makedirs(gif_dir)
             gif_maker(gif_dir, observations, rewards, done_floats, i)
+            print('rewards:', rewards)
             print(f"Saved gif at {gif_dir}")
 
-        if FLAGS.save_data:
+        if i % FLAGS.log_interval == 0:
+            train_log_videos = np.asarray(
+                [obs["color_image2"].transpose(2, 0, 1) for obs in observations], dtype=np.uint8
+            )
+            name = "train_video"
+            fps = 20
+            if FLAGS.wandb:
+                log_dict = {name: wandb.Video(train_log_videos, fps=fps, format="mp4")}
+                # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
+                wandb.log(log_dict, step=i)        
+
+        # Remove RGB from the observations.
+        observations = [
+            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in observations
+        ]
+        next_observations = [
+            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in next_observations
+        ]
+        
+        if FLAGS.save_data and not FLAGS.eval:
             if not os.path.exists(online_data_dir):
                 os.makedirs(online_data_dir)
             data_name = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
@@ -599,7 +684,7 @@ def main(_):
         #     summary_writer.add_scalar(f'training/{k}', v, info['total']['timesteps'])
 
         # Update as the length of the current trajectory.
-        if i > FLAGS.prefill_episodes:
+        if i > FLAGS.prefill_episodes and not FLAGS.eval:
             for update_idx in tqdm.trange(
                 len_curr_traj, smoothing=0.1, disable=not FLAGS.tqdm, desc="Update", leave=False
             ):
