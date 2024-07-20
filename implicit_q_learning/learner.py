@@ -188,6 +188,9 @@ class Learner(object):
         return q
 
     def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+        if 'parts_poses' in observations:
+            del observations['parts_poses']
+
         rng, actions = policy.sample_actions(
             self.rng, self.actor.apply_fn, self.actor.params, observations, temperature
         )
