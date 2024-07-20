@@ -167,6 +167,20 @@ class Learner(object):
         self.num_qs = num_qs
         self.num_min_qs = num_min_qs
 
+    def logprob(self, observations: np.ndarray, actions: np.ndarray) -> jnp.ndarray:
+        """Compute the log probability of the actions under the current policy."""
+        return policy.logprob(self.actor.apply_fn, self.actor.params, observations, actions)
+
+    def q_value(self, observations: np.ndarray, actions: np.ndarray) -> jnp.ndarray:
+        """Compute the Q value of the actions under the current policy."""
+        # return self.critic.apply_fn(self.critic.params, observations, actions)
+        from critic import subsample_ensemble
+        key, _ = jax.random.split(self.rng)
+        target_params = subsample_ensemble(key, self.target_critic.params, self.num_min_qs, self.num_qs)
+        qs = self.target_critic.apply({"params": target_params}, observations, actions)
+        q = jnp.min(qs, axis=0)
+        return q
+
     def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
         rng, actions = policy.sample_actions(
             self.rng, self.actor.apply_fn, self.actor.params, observations, temperature
@@ -175,6 +189,11 @@ class Learner(object):
 
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
+
+    def dist_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+        """Get the disctribution of actions."""
+        dists = policy.dist_actions(self.actor.apply_fn, self.actor.params, observations, temperature) 
+        return dists
 
     def update(self, batch: Batch, utd_ratio: int = 1) -> InfoDict:
         (

@@ -329,6 +329,11 @@ class FurnitureDataset(Dataset):
         #                 dataset[obs][i][img][:, :, 1] = (dataset[obs][i][img][:, :, 1] - 0.456) / 0.224
         #                 dataset[obs][i][img][:, :, 2] = (dataset[obs][i][img][:, :, 2] - 0.406) / 0.225
 
+        if isinstance(dataset['observations'][0]['robot_state'], dict):
+            from furniture_bench.robot.robot_state import filter_and_concat_robot_state
+            for i in range(len(dataset['observations'])):
+                dataset['observations'][i]['robot_state'] = filter_and_concat_robot_state(dataset['observations'][i]['robot_state'])
+                dataset['next_observations'][i]['robot_state'] = filter_and_concat_robot_state(dataset['next_observations'][i]['robot_state'])
         for i in range(len(dones_float) - 1):
             if (np.linalg.norm(dataset["observations"][i + 1]['robot_state'] -
                                dataset["next_observations"][i]['robot_state']) > 1e-6
@@ -341,7 +346,8 @@ class FurnitureDataset(Dataset):
         
         if red_reward:
             assert iter_n != -1, "Need to specify the relabeling iteration for red_reward."
-            rewards = dataset[f'reds_rewards_iter_{iter_n}']
+            # rewards = dataset[f'reds_rewards_iter_{iter_n}']
+            rewards = dataset[f'reds_rewards_{iter_n}']
         else:
             rewards = dataset['rewards']
 

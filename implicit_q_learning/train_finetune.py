@@ -4,6 +4,8 @@ import pickle
 from datetime import datetime
 from typing import Tuple
 import glob
+import copy
+import random
 
 import gym
 import numpy as np
@@ -12,6 +14,7 @@ from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 
+import jax.numpy as jnp
 from einops import rearrange
 import wrappers
 from dataset_utils import (
@@ -168,6 +171,7 @@ def make_env_and_dataset(
             phase_reward=FLAGS.phase_reward,
             fixed_init=FLAGS.fixed_init,
             from_skill=0,
+            gpu=FLAGS.device_id
         )
     else:
         env = gym.make(env_name)
@@ -218,6 +222,13 @@ def main(_):
         FLAGS.red_reward,
         FLAGS.iter_n,
     )
+    offline_traj_for_log = []
+    with open(FLAGS.data_path[0], 'rb') as f:
+        offline_data = pickle.load(f)
+        terminal_idxs =  np.where(offline_data['terminals'] == 1)[0]
+        offline_traj_for_log.append((offline_data['observations'][:terminal_idxs[0]], offline_data['actions'][:terminal_idxs[0]]))
+        for i in range(len(terminal_idxs) - 1):
+            offline_traj_for_log.append((offline_data['observations'][terminal_idxs[i]:terminal_idxs[i+1]], offline_data['actions'][terminal_idxs[i]:terminal_idxs[i+1]]))
 
     if FLAGS.normalization == "min_max":
         min_max_normalize(dataset)
@@ -241,8 +252,8 @@ def main(_):
             + "-"
             + str(FLAGS.run_name)
             + "-finetune"
-            + f"-actnoise{FLAGS.temperature}"
-            + ("-phase-reward" if FLAGS.phase_reward else ""),
+            + f"-actnoise{FLAGS.temperature}",
+            # + ("-phase-reward" if FLAGS.phase_reward else ""),
             config=kwargs,
             sync_tensorboard=True,
         )
@@ -332,6 +343,7 @@ def main(_):
             next_observations=None,
             size=0,
         )
+    online_traj_for_log = []
     for data_file in tqdm.tqdm(data_files):
         with open(data_file, "rb") as f:
             data = pickle.load(f)
@@ -354,6 +366,8 @@ def main(_):
                     data["done_floats"],
                     data["next_observations"],
                 )
+            # Tuple of observations and actions.
+            online_traj_for_log.append((data['observations'], data['actions']))
 
     # Load the fine-tune checkpoint if any.
     ckpt_idx = len(data_files)
@@ -371,12 +385,18 @@ def main(_):
         masks = []
         next_observations = []
 
+        online_stds = []
+
         observation, done = env.reset(), False
         phase = 0
 
         while not done:
             obs_without_rgb = {k: v for k, v in observation.items() if k != "color_image1" and k != "color_image2"}
             action = agent.sample_actions(obs_without_rgb, temperature=FLAGS.temperature)
+            # Get std for logging.
+            dists = agent.dist_actions(obs_without_rgb)
+            std = dists.stddev()
+            online_stds.append(std)
             action = np.clip(action, -1, 1)
             next_observation, reward, done, info = env.step(action)
 
@@ -482,8 +502,25 @@ def main(_):
                     summary_writer.add_scalar(f"training/{k}", v, i)
                 else:
                     summary_writer.add_histogram(f"training/{k}", v, i)
-        summary_writer.add_scalar("online_average_reward", np.mean(log_online_avg_reward), i)
-        summary_writer.add_scalar("online_average_return", np.mean(log_online_avg_return), i)
+
+        # Compute the average logprob for the offline and online data.
+        offline_logprob, offline_q_value = compute_logprob_q_value(agent, offline_traj_for_log)
+        online_logprob, online_q_value = compute_logprob_q_value(agent, online_traj_for_log)
+
+        # Flatten and compute the average.
+        avg_offline_logprob = np.mean(np.concatenate(offline_logprob))
+        avg_online_logprob = np.mean(np.concatenate(online_logprob))
+        avg_offline_q_value = np.mean(np.concatenate(offline_q_value))
+        avg_online_q_value = np.mean(np.concatenate(online_q_value))
+
+        summary_writer.add_scalar("offline/average_logprob", avg_offline_logprob, i)
+        summary_writer.add_scalar("online/average_logprob", avg_online_logprob, i)
+        summary_writer.add_scalar("offline/average_q_value", avg_offline_q_value, i)
+        summary_writer.add_scalar("online/average_q_value", avg_online_q_value, i)
+ 
+        summary_writer.add_scalar("online/average_reward", np.mean(log_online_avg_reward), i)
+        summary_writer.add_scalar("online/average_return", np.mean(log_online_avg_return), i)
+        summary_writer.add_scalar("online/average_std", np.mean(online_stds), i)
         summary_writer.add_scalar("train_phases", np.mean(log_phases), i)
         summary_writer.flush()
 
@@ -518,12 +555,15 @@ def main(_):
                     window_size=FLAGS.window_size,
                 )
             else:
-                eval_stats, log_videos = evaluate(
+                eval_stats, log_videos, eval_traj_for_logging = evaluate(
                     agent,
                     env,
                     FLAGS.eval_episodes,
                     log_video=log_video,
                 )
+            eval_logprob, eval_q_value = compute_logprob_q_value(agent, eval_traj_for_logging)
+            summary_writer.add_scalar("evaluation/average_logprob", np.mean(np.concatenate(eval_logprob)), i)
+            summary_writer.add_scalar("evaluation/average_q_value", np.mean(np.concatenate(eval_q_value)), i)
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
@@ -559,14 +599,49 @@ def main(_):
             and not (i == 0 and FLAGS.from_scratch)
         ):
             # Save last step if it is not saved.
-            if FLAGS.phase_reward:
-                finetune_ckpt_dir = finetune_ckpt_dir + "-phase-reward"
+            # if FLAGS.phase_reward:
+            #     finetune_ckpt_dir = finetune_ckpt_dir + "-phase-reward"
             if not os.path.exists(finetune_ckpt_dir):
                 os.makedirs(finetune_ckpt_dir)
             agent.save(finetune_ckpt_dir, i - FLAGS.prefill_episodes)
 
     if FLAGS.wandb:
         wandb.finish()
+
+
+def compute_logprob_q_value(agent, traj_for_log):
+    log_probs = []
+    q_values = []
+
+    # Randomly sample 50 from traj_for_log for speed.
+    sample_n = min(50, len(traj_for_log))
+    traj_for_log_subset  = random.sample(traj_for_log, sample_n)
+    for obs, act in traj_for_log_subset: # For each trajectory.
+        # Deepcopy for obs.
+        obs = copy.deepcopy(obs)
+        # Flatten robot state.
+        from furniture_bench.robot.robot_state import filter_and_concat_robot_state
+        if isinstance(obs[0]['robot_state'], dict):
+            for robot_state_idx in range(len(obs)):
+                obs[robot_state_idx]['robot_state'] = filter_and_concat_robot_state(obs[robot_state_idx]['robot_state'])
+        # List of dictionary to dictionary of list.
+        obs = {k: [obs[i][k] for i in range(len(obs))] for k in obs[0].keys()}
+        # Remove `color_image` if exists.
+        if 'color_image1' in obs:
+            obs.pop('color_image1')
+            obs.pop('color_image2')
+        # To jnp array.
+        obs = {k: jnp.array(v) for k, v in obs.items()}
+        act = jnp.array(act)
+        # Remove parts_poses if exists.
+        if 'parts_poses' in obs:
+            obs.pop('parts_poses')
+        log_prob = agent.logprob(obs, act)
+        log_probs.append(log_prob)
+        q_value = agent.q_value(obs, act)
+        q_values.append(q_value)
+
+    return log_probs, q_values
 
 
 if __name__ == "__main__":

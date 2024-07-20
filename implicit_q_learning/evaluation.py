@@ -22,6 +22,8 @@ def evaluate(
     
     sum_success = 0
     learned_sum_rewards = []
+
+    eval_traj_for_logging = []
     for ep_idx in tqdm(range(num_episodes)):
         observations = []
         actions = []
@@ -31,14 +33,12 @@ def evaluate(
         phase = 0
         ep_video = []
         while not done:
-            if reward_model is not None:
-                observations.append(observation)
+            observations.append(observation)
             obs_without_rgb = {k: v for k, v in observation.items() if k != 'color_image1' and k != 'color_image2'}
             action = agent.sample_actions(obs_without_rgb, temperature=temperature)
             observation, rew, done, info = env.step(action)
-            if reward_model is not None:
-                actions.append(action)
-                rewards.append(rew)
+            actions.append(action)
+            rewards.append(rew)
             phase = max(phase, info['phase'])
             sum_reward += rew
             
@@ -46,7 +46,8 @@ def evaluate(
                 # Save first two episodes.
                 # Make it channel first.
                 ep_video.append(observation['color_image2'])
-
+        eval_traj_for_logging.append((observations, actions))
+        
         if reward_model is not None:
             # compute reds reward
             x = {
@@ -79,11 +80,11 @@ def evaluate(
     # print("Sum of rewards: ", sum_reward)
     # for k, v in stats.items():
         # stats[k] = np.mean(v)
-    stats['gt_sum_of_reward'] = sum_reward
+    stats['gt_avg_of_reward'] = sum_reward / num_episodes
     # stats['success_rate'] = sum_reward / num_episodes
     stats['success_rate'] = sum_success / num_episodes
     stats['phase'] = np.mean(log_phases)
     if reward_model is not None:
         stats['learned_sum_of_reward'] = np.mean(learned_sum_rewards)
 
-    return stats, log_videos
+    return stats, log_videos, eval_traj_for_logging
