@@ -57,6 +57,7 @@ flags.DEFINE_boolean("fixed_init", None, "Use fixed initialization for removing 
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
 
 flags.DEFINE_string("opt_decay_schedule", "cosine", "")
+flags.DEFINE_boolean("policy_ddpg_bc", None, "Use DDPG-BC for policy extraction")
 
 
 def normalize(dataset):
@@ -226,6 +227,7 @@ def main(_):
         use_encoder=FLAGS.use_encoder,
         use_layer_norm=FLAGS.use_layer_norm,
         opt_decay_schedule=FLAGS.opt_decay_schedule,
+        policy_ddpg_bc=FLAGS.policy_ddpg_bc,
     )
     print(agent)
 
