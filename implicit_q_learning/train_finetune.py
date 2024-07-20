@@ -100,7 +100,8 @@ flags.DEFINE_integer("prefill_episodes", 0, "Pre-fill episodes.")
 
 # DEVICE
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
-flags.DEFINE_boolean("save_gif", True, "Save reward and observation in gif")
+flags.DEFINE_boolean("save_gif", None, "Save reward and observation in gif")
+flags.DEFINE_boolean("policy_ddpg_bc", None, "Use DDPG-BC for policy extraction")
 
 
 def normalize(dataset):
@@ -200,8 +201,8 @@ def make_env_and_dataset(
             env_id,
             furniture=furniture_name,
             # max_env_steps=600,
-            # headless=True,
-            headless=False,
+            headless=True,
+            # headless=False,
             num_envs=1,  # Only support 1 for now.
             manual_done=False,
             # resize_img=True,
@@ -336,6 +337,7 @@ def main(_):
         use_encoder=FLAGS.use_encoder,
         opt_decay_schedule=None,
         use_layer_norm=FLAGS.use_layer_norm,
+        policy_ddpg_bc=FLAGS.policy_ddpg_bc,
     )
 
     if FLAGS.red_reward:
@@ -646,8 +648,7 @@ def main(_):
             agent.save(finetune_ckpt_dir, i - FLAGS.prefill_episodes + 1)
 
         if (
-            False
-            and i > FLAGS.prefill_episodes - 1
+            i > FLAGS.prefill_episodes - 1
             and (i - FLAGS.prefill_episodes) % FLAGS.eval_interval == 0
             and ("Bench" not in FLAGS.env_name)
             and not (i == 0 and FLAGS.from_scratch)
