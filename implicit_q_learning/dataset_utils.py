@@ -29,28 +29,31 @@ def min_max_normalize(dataset):
     dataset.rewards = normalized_data
 
 
-def replay_chunk_to_seq(trajectories, window_size, skip_frame, reward_type):
+def replay_chunk_to_seq(trajectories, window_size, drs=False, viper=False):
+    """From: BPref-v2/bpref_v2/utils/reds_extract_reward.py"""
     seq = []
-    if reward_type == "DrS":
-        semi_sparse_rewards = trajectories["rewards"]
+    if drs:
+        semi_sparse_rewards = np.cumsum(trajectories["rewards"], axis=0)
+    window_len = 4 * window_size - 1 if viper else window_size - 1
 
-    for i in range(window_size * skip_frame - 1):
+    for i in range(window_len):
         elem = {}
         elem["is_first"] = i == 0
         for key in ["observations", "rewards"]:
             if key == "observations":
-                for _key, _val in trajectories[key][0].items():
-                    if _key == "color_image2" and reward_type == "VIPER":
+                for _key, _val in trajectories[key][i].items():
+                    if _key == "color_image2" and viper:
                         image = _val
-                        image = np.array(
-                            Image.fromarray(image.astype(np.uint8)).resize((64, 64), Image.Resampling.NEAREST)
-                        )
+                        image = np.array(Image.fromarray(image.astype(np.uint8)).resize((64, 64), Image.Resampling.NEAREST))
                         elem[_key] = image
                     else:
                         elem[_key] = _val
             elif key == "rewards":
                 try:
-                    elem["reward"] = trajectories[key][0].squeeze()
+                    if drs:
+                        elem["reward"] = semi_sparse_rewards[i].squeeze()
+                    else:
+                        elem["reward"] = trajectories[key][0].squeeze()
                 except:
                     elem["reward"] = trajectories[key][0]
             elif isinstance(trajectories[key], np.ndarray):
@@ -62,26 +65,21 @@ def replay_chunk_to_seq(trajectories, window_size, skip_frame, reward_type):
         elem["is_first"] = i == -1
         for key in ["observations", "rewards"]:
             if key == "observations":
-                for _key, _val in trajectories[key][0].items():
-                    if _key == "color_image2" and reward_type == "VIPER":
+                for _key, _val in trajectories[key][i].items():
+                    if _key == "color_image2" and viper:
                         image = _val
-                        image = np.array(
-                            Image.fromarray(image.astype(np.uint8)).resize((128, 128), Image.Resampling.NEAREST)
-                        )
+                        image = np.array(Image.fromarray(image.astype(np.uint8)).resize((64, 64), Image.Resampling.NEAREST))
                         elem[_key] = image
                     else:
                         elem[_key] = _val
             elif key == "rewards":
                 try:
-                    if reward_type == "DrS":
+                    if drs:
                         elem["reward"] = semi_sparse_rewards[i].squeeze()
                     else:
                         elem["reward"] = trajectories[key][i].squeeze()
                 except:
-                    if reward_type == "DrS":
-                        elem["reward"] = semi_sparse_rewards[i]
-                    else:
-                        elem["reward"] = trajectories[key][i]
+                    elem["reward"] = trajectories[key][i]
             elif isinstance(trajectories[key], np.ndarray):
                 elem[key] = trajectories[key][i]
         seq.append(elem)
