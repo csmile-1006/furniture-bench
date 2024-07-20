@@ -4,6 +4,8 @@ import pickle
 from datetime import datetime
 from typing import Tuple
 import glob
+import copy
+import random
 
 import gym
 import numpy as np
@@ -12,6 +14,7 @@ from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 
+import jax.numpy as jnp
 from einops import rearrange
 import wrappers
 from dataset_utils import (
@@ -53,6 +56,9 @@ flags.DEFINE_integer("replay_buffer_size", 2000000, "Replay buffer size (=max_st
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("red_reward", False, "Use learned reward")
+flags.DEFINE_boolean("viper_reward", False, "Use learned reward")
+flags.DEFINE_boolean("drs_reward", False, "Use learned reward")
+flags.DEFINE_enum("reward_type", "REDS", ["REDS", "DrS", "VIPER"], "Type of reward model.")
 flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m")
 flags.DEFINE_boolean("wandb", False, "Use wandb")
@@ -126,30 +132,30 @@ def normalize(dataset):
 
 def gif_maker(gif_dir, observations, rewards, phases, file_index):
     filenames = []
-    
-    if not os.path.exists('gif_test'):
-        os.makedirs('gif_test')
+
+    if not os.path.exists("gif_test"):
+        os.makedirs("gif_test")
 
     for i in tqdm.tqdm(range(len(observations))):
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        
-        image = observations[i]['color_image2'].astype(np.uint8)
-        
+
+        image = observations[i]["color_image2"].astype(np.uint8)
+
         ax[0].imshow(image)
-        ax[0].axis('off') 
+        ax[0].axis("off")
 
         ax2 = ax[1].twinx()
-        ax[1].plot(rewards[:i+1])
-        ax2.plot(phases[:i+1], color="pink", linestyle="dashed")
+        ax[1].plot(rewards[: i + 1])
+        ax2.plot(phases[: i + 1], color="pink", linestyle="dashed")
         ax[1].set_xlim(0, i)
-        ax[1].set_ylim(np.min(rewards[:i+1]), np.max(rewards[:i+1]) + 0.05 * np.abs(np.max(rewards[:i+1])))
-        
+        ax[1].set_ylim(np.min(rewards[: i + 1]), np.max(rewards[: i + 1]) + 0.05 * np.abs(np.max(rewards[: i + 1])))
+
         filename = f"{gif_dir}/frame_{i:03d}.png"
         filenames.append(filename)
         plt.savefig(filename)
         plt.close(fig)
 
-    with imageio.get_writer(f'{gif_dir}/{file_index}.gif', mode='I', duration=5) as writer:
+    with imageio.get_writer(f"{gif_dir}/{file_index}.gif", mode="I", duration=5) as writer:
         for filename in filenames:
             image = imageio.imread(filename)
             writer.append_data(image)
@@ -180,8 +186,10 @@ def make_env_and_dataset(
     data_path: str,
     use_encoder: bool,
     encoder_type: str,
-    use_learned_reward: bool = False,
-    reward_suffix: str = "-1",
+    red_reward: bool = False,
+    viper_reward: bool = False,
+    drs_reward: bool = False,
+    iter_n: int = -1,
 ) -> Tuple[gym.Env, D4RLDataset]:
     if "Furniture" in env_name:
         import furniture_bench
@@ -212,6 +220,7 @@ def make_env_and_dataset(
             phase_reward=FLAGS.phase_reward,
             fixed_init=FLAGS.fixed_init,
             from_skill=0,
+            gpu=FLAGS.device_id
         )
     else:
         env = gym.make(env_name)
@@ -233,8 +242,15 @@ def make_env_and_dataset(
         if use_learned_reward:
             reward_name = f"{reward_suffix}"
         else:
-            reward_name = 'rewards'
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, reward_name=reward_name)
+            iter_n = FLAGS.iter_n
+        dataset = FurnitureDataset(
+            data_path,
+            use_encoder=use_encoder,
+            red_reward=red_reward,
+            viper_reward=viper_reward,
+            drs_reward=drs_reward,
+            iter_n=iter_n,
+        )
     else:
         dataset = D4RLDataset(env)
 
@@ -267,9 +283,18 @@ def main(_):
         FLAGS.data_path,
         FLAGS.use_encoder,
         FLAGS.encoder_type,
-        FLAGS.use_learned_reward,
-        FLAGS.reward_suffix,
+        FLAGS.red_reward,
+        FLAGS.viper_reward,
+        FLAGS.drs_reward,
+        FLAGS.iter_n,
     )
+    offline_traj_for_log = []
+    with open(FLAGS.data_path[0], 'rb') as f:
+        offline_data = pickle.load(f)
+        terminal_idxs =  np.where(offline_data['terminals'] == 1)[0]
+        offline_traj_for_log.append((offline_data['observations'][:terminal_idxs[0]], offline_data['actions'][:terminal_idxs[0]]))
+        for i in range(len(terminal_idxs) - 1):
+            offline_traj_for_log.append((offline_data['observations'][terminal_idxs[i]:terminal_idxs[i+1]], offline_data['actions'][terminal_idxs[i]:terminal_idxs[i+1]]))
 
     if FLAGS.normalization == "min_max":
         min_max_normalize(dataset)
@@ -293,8 +318,8 @@ def main(_):
             + "-"
             + str(FLAGS.run_name)
             + "-finetune"
-            + f"-actnoise{FLAGS.temperature}"
-            + ("-phase-reward" if FLAGS.phase_reward else ""),
+            + f"-actnoise{FLAGS.temperature}",
+            # + ("-phase-reward" if FLAGS.phase_reward else ""),
             config=kwargs,
             sync_tensorboard=True,
         )
@@ -369,6 +394,42 @@ def main(_):
                 encoding_minibatch_size=4,
             )
 
+    if FLAGS.viper_reward:
+        # load reward model
+
+        import sys
+
+        sys.path.append("/home/changyeon/NeurIPS2024/workspace/viper_rl")
+        from viper_rl.videogpt.reward_models.videogpt_reward_model import VideoGPTRewardModel
+
+        domain, task = FLAGS.task_name.split("_", 1)
+        reward_model = VideoGPTRewardModel(
+            task=FLAGS.task_name,
+            vqgan_path=os.path.join(FLAGS.ckpt_path, f"{domain}_vqgan"),
+            videogpt_path=os.path.join(FLAGS.ckpt_path, f"{domain}_videogpt_l4_s4"),
+            camera_key=FLAGS.image_keys.split("|")[0],
+            reward_scale=None,
+            minibatch_size=16,
+            encoding_minibatch_size=16,
+        )
+
+    if FLAGS.drs_reward:
+        from bpref_v2.reward_model.drs_reward_model import DrsRewardModel
+
+        reward_model = DrsRewardModel(
+            task=FLAGS.task_name,
+            model_name="DRS",
+            rm_path=FLAGS.ckpt_path,
+            camera_keys=FLAGS.image_keys.split("|"),
+            reward_scale=None,
+            window_size=FLAGS.window_size,
+            skip_frame=FLAGS.skip_frame,
+            reward_model_device=0,
+            encoding_minibatch_size=FLAGS.batch_size,
+            use_task_reward=False,
+            use_scale=False,
+        )
+
     ckpt_dir = os.path.join(FLAGS.save_dir, "ckpt", f"{FLAGS.run_name}.{FLAGS.seed}")
     if not FLAGS.from_scratch:
         agent.load(ckpt_dir, ckpt_step)
@@ -415,6 +476,7 @@ def main(_):
             next_observations=None,
             size=0,
         )
+    online_traj_for_log = []
     for data_file in tqdm.tqdm(data_files):
         with open(data_file, "rb") as f:
             data = pickle.load(f)
@@ -437,6 +499,8 @@ def main(_):
                     data["done_floats"],
                     data["next_observations"],
                 )
+            # Tuple of observations and actions.
+            online_traj_for_log.append((data['observations'], data['actions']))
 
     # Load the fine-tune checkpoint if any.
     ckpt_idx = len(data_files)
@@ -453,9 +517,12 @@ def main(_):
         observations = []
         actions = []
         rewards = []
+        phases = []
         done_floats = []
         masks = []
         next_observations = []
+
+        online_stds = []
 
         observation, done = env.reset(), False
         phase = 0
@@ -463,6 +530,10 @@ def main(_):
         while not done:
             obs_without_rgb = {k: v for k, v in observation.items() if k != "color_image1" and k != "color_image2"}
             action = agent.sample_actions(obs_without_rgb, temperature=FLAGS.temperature)
+            # Get std for logging.
+            dists = agent.dist_actions(obs_without_rgb)
+            std = dists.stddev()
+            online_stds.append(std)
             action = np.clip(action, -1, 1)
             next_observation, reward, done, info = env.step(action)
 
@@ -485,6 +556,7 @@ def main(_):
             done_floats.append(float(done))
             masks.append(mask)
             next_observations.append(next_observation)
+            phases.append(phase)
 
             observation = next_observation
             
@@ -497,12 +569,12 @@ def main(_):
         assert len_curr_traj == len(actions) == len(rewards) == len(masks) == len(next_observations)
         assert done_floats[-1] == 1.0
 
-        if FLAGS.use_learned_reward:
+        if FLAGS.red_reward or FLAGS.viper_reward or FLAGS.drs_reward:
             # compute reds reward
             x = {
                 "observations": observations,
                 "actions": actions,
-                "rewards": rewards,
+                "rewards": phases,
             }
             if FLAGS.reward_type == "DRS":
                 drs = True
@@ -578,6 +650,25 @@ def main(_):
             if FLAGS.data_collection:
                 continue
 
+        if i % FLAGS.log_interval == 0:
+            train_log_videos = np.asarray(
+                [obs["color_image2"].transpose(2, 0, 1) for obs in observations], dtype=np.uint8
+            )
+            name = "train_video"
+            fps = 20
+            if FLAGS.wandb:
+                log_dict = {name: wandb.Video(train_log_videos, fps=fps, format="mp4")}
+                # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
+                wandb.log(log_dict, step=i)
+
+        # Remove RGB from the observations.
+        observations = [
+            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in observations
+        ]
+        next_observations = [
+            {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in next_observations
+        ]
+
         # Append to dataset.
         if FLAGS.online_buffer:
             online_dataset.add_trajectory(observations, actions, rewards, masks, done_floats, next_observations)
@@ -610,8 +701,25 @@ def main(_):
                     summary_writer.add_scalar(f"training/{k}", v, i)
                 else:
                     summary_writer.add_histogram(f"training/{k}", v, i)
-        summary_writer.add_scalar("online_average_reward", np.mean(log_online_avg_reward), i)
-        summary_writer.add_scalar("online_average_return", np.mean(log_online_avg_return), i)
+
+        # Compute the average logprob for the offline and online data.
+        offline_logprob, offline_q_value = compute_logprob_q_value(agent, offline_traj_for_log)
+        online_logprob, online_q_value = compute_logprob_q_value(agent, online_traj_for_log)
+
+        # Flatten and compute the average.
+        avg_offline_logprob = np.mean(np.concatenate(offline_logprob))
+        avg_online_logprob = np.mean(np.concatenate(online_logprob))
+        avg_offline_q_value = np.mean(np.concatenate(offline_q_value))
+        avg_online_q_value = np.mean(np.concatenate(online_q_value))
+
+        summary_writer.add_scalar("offline/average_logprob", avg_offline_logprob, i)
+        summary_writer.add_scalar("online/average_logprob", avg_online_logprob, i)
+        summary_writer.add_scalar("offline/average_q_value", avg_offline_q_value, i)
+        summary_writer.add_scalar("online/average_q_value", avg_online_q_value, i)
+ 
+        summary_writer.add_scalar("online/average_reward", np.mean(log_online_avg_reward), i)
+        summary_writer.add_scalar("online/average_return", np.mean(log_online_avg_return), i)
+        summary_writer.add_scalar("online/average_std", np.mean(online_stds), i)
         summary_writer.add_scalar("train_phases", np.mean(log_phases), i)
         summary_writer.add_scalar("episode_phase", phase, i)
         summary_writer.flush()
@@ -633,7 +741,7 @@ def main(_):
                 log_video = True
             else:
                 log_video = False
-            if not FLAGS.red_reward:
+            if not FLAGS.red_reward and not FLAGS.viper_reward and not FLAGS.drs_reward:
                 reward_model = None
 
             if FLAGS.red_reward:
@@ -648,12 +756,15 @@ def main(_):
                     window_size=FLAGS.window_size,
                 )
             else:
-                eval_stats, log_videos = evaluate(
+                eval_stats, log_videos, eval_traj_for_logging = evaluate(
                     agent,
                     env,
                     FLAGS.eval_episodes,
                     log_video=log_video,
                 )
+            eval_logprob, eval_q_value = compute_logprob_q_value(agent, eval_traj_for_logging)
+            summary_writer.add_scalar("evaluation/average_logprob", np.mean(np.concatenate(eval_logprob)), i)
+            summary_writer.add_scalar("evaluation/average_q_value", np.mean(np.concatenate(eval_q_value)), i)
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
@@ -689,14 +800,49 @@ def main(_):
             and not (i == 0 and FLAGS.from_scratch)
         ):
             # Save last step if it is not saved.
-            if FLAGS.phase_reward:
-                finetune_ckpt_dir = finetune_ckpt_dir + "-phase-reward"
+            # if FLAGS.phase_reward:
+            #     finetune_ckpt_dir = finetune_ckpt_dir + "-phase-reward"
             if not os.path.exists(finetune_ckpt_dir):
                 os.makedirs(finetune_ckpt_dir)
             agent.save(finetune_ckpt_dir, i - FLAGS.prefill_episodes)
 
     if FLAGS.wandb:
         wandb.finish()
+
+
+def compute_logprob_q_value(agent, traj_for_log):
+    log_probs = []
+    q_values = []
+
+    # Randomly sample 50 from traj_for_log for speed.
+    sample_n = min(50, len(traj_for_log))
+    traj_for_log_subset  = random.sample(traj_for_log, sample_n)
+    for obs, act in traj_for_log_subset: # For each trajectory.
+        # Deepcopy for obs.
+        obs = copy.deepcopy(obs)
+        # Flatten robot state.
+        from furniture_bench.robot.robot_state import filter_and_concat_robot_state
+        if isinstance(obs[0]['robot_state'], dict):
+            for robot_state_idx in range(len(obs)):
+                obs[robot_state_idx]['robot_state'] = filter_and_concat_robot_state(obs[robot_state_idx]['robot_state'])
+        # List of dictionary to dictionary of list.
+        obs = {k: [obs[i][k] for i in range(len(obs))] for k in obs[0].keys()}
+        # Remove `color_image` if exists.
+        if 'color_image1' in obs:
+            obs.pop('color_image1')
+            obs.pop('color_image2')
+        # To jnp array.
+        obs = {k: jnp.array(v) for k, v in obs.items()}
+        act = jnp.array(act)
+        # Remove parts_poses if exists.
+        if 'parts_poses' in obs:
+            obs.pop('parts_poses')
+        log_prob = agent.logprob(obs, act)
+        log_probs.append(log_prob)
+        q_value = agent.q_value(obs, act)
+        q_values.append(q_value)
+
+    return log_probs, q_values
 
 
 if __name__ == "__main__":

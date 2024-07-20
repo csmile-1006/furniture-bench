@@ -1,6 +1,7 @@
 import collections
 import pickle
 from typing import Optional, Dict
+from PIL import Image
 
 # import d4rl
 import gym
@@ -28,20 +29,31 @@ def min_max_normalize(dataset):
     dataset.rewards = normalized_data
 
 
-def replay_chunk_to_seq(trajectories, window_size):
+def replay_chunk_to_seq(trajectories, window_size, drs=False, viper=False):
     """From: BPref-v2/bpref_v2/utils/reds_extract_reward.py"""
     seq = []
+    if drs:
+        semi_sparse_rewards = np.cumsum(trajectories["rewards"], axis=0)
+    window_len = 4 * window_size - 1 if viper else window_size - 1
 
-    for i in range(window_size - 1):
+    for i in range(window_len):
         elem = {}
         elem["is_first"] = i == 0
         for key in ["observations", "rewards"]:
             if key == "observations":
-                for _key, _val in trajectories[key][0].items():
-                    elem[_key] = _val
+                for _key, _val in trajectories[key][i].items():
+                    if _key == "color_image2" and viper:
+                        image = _val
+                        image = np.array(Image.fromarray(image.astype(np.uint8)).resize((64, 64), Image.Resampling.NEAREST))
+                        elem[_key] = image
+                    else:
+                        elem[_key] = _val
             elif key == "rewards":
                 try:
-                    elem["reward"] = trajectories[key][0].squeeze()
+                    if drs:
+                        elem["reward"] = semi_sparse_rewards[i].squeeze()
+                    else:
+                        elem["reward"] = trajectories[key][0].squeeze()
                 except:
                     elem["reward"] = trajectories[key][0]
             elif isinstance(trajectories[key], np.ndarray):
@@ -54,10 +66,18 @@ def replay_chunk_to_seq(trajectories, window_size):
         for key in ["observations", "rewards"]:
             if key == "observations":
                 for _key, _val in trajectories[key][i].items():
-                    elem[_key] = _val
+                    if _key == "color_image2" and viper:
+                        image = _val
+                        image = np.array(Image.fromarray(image.astype(np.uint8)).resize((64, 64), Image.Resampling.NEAREST))
+                        elem[_key] = image
+                    else:
+                        elem[_key] = _val
             elif key == "rewards":
                 try:
-                    elem["reward"] = trajectories[key][i].squeeze()
+                    if drs:
+                        elem["reward"] = semi_sparse_rewards[i].squeeze()
+                    else:
+                        elem["reward"] = trajectories[key][i].squeeze()
                 except:
                     elem["reward"] = trajectories[key][i]
             elif isinstance(trajectories[key], np.ndarray):
@@ -278,6 +298,8 @@ class FurnitureDataset(Dataset):
         eps: float = 1e-5,
         use_encoder: bool = False,
         red_reward: bool = False,
+        viper_reward: bool = False,
+        drs_reward: bool = False,
         iter_n: str = "-1",
     ):
         if isinstance(data_path, list):
@@ -319,6 +341,11 @@ class FurnitureDataset(Dataset):
         #                 dataset[obs][i][img][:, :, 1] = (dataset[obs][i][img][:, :, 1] - 0.456) / 0.224
         #                 dataset[obs][i][img][:, :, 2] = (dataset[obs][i][img][:, :, 2] - 0.406) / 0.225
 
+        if isinstance(dataset['observations'][0]['robot_state'], dict):
+            from furniture_bench.robot.robot_state import filter_and_concat_robot_state
+            for i in range(len(dataset['observations'])):
+                dataset['observations'][i]['robot_state'] = filter_and_concat_robot_state(dataset['observations'][i]['robot_state'])
+                dataset['next_observations'][i]['robot_state'] = filter_and_concat_robot_state(dataset['next_observations'][i]['robot_state'])
         for i in range(len(dones_float) - 1):
             if (
                 np.linalg.norm(
@@ -333,9 +360,17 @@ class FurnitureDataset(Dataset):
 
         dones_float[-1] = 1
 
+        assert np.sum(red_reward + viper_reward + drs_reward) <= 1, "Only one reward type can be selected."
         if red_reward:
+            assert iter_n != -1, "Need to specify the relabeling iteration for red_reward."
+            # rewards = dataset[f'reds_rewards_iter_{iter_n}']
+            rewards = dataset[f'reds_rewards_{iter_n}']
+        if viper_reward:
             assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
-            rewards = dataset[f"reds_rewards_{iter_n}"]
+            rewards = dataset[f"viper_rewards_{iter_n}"]
+        if drs_reward:
+            assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
+            rewards = dataset[f"drs_rewards_{iter_n}"]
         else:
             rewards = dataset["rewards"]
 

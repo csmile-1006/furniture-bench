@@ -31,6 +31,9 @@ flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("red_reward", False, "Use learned reward")
+flags.DEFINE_boolean("viper_reward", False, "Use learned reward")
+flags.DEFINE_boolean("drs_reward", False, "Use learned reward")
+flags.DEFINE_enum("reward_type", "REDS", ["REDS", "DrS", "VIPER"], "Type of reward model.")
 # flags.DEFINE_string("data_path", '', "Path to data.")
 flags.DEFINE_multi_string("data_path", "", "Path to data.")
 config_flags.DEFINE_config_file(
@@ -54,6 +57,7 @@ flags.DEFINE_boolean("fixed_init", None, "Use fixed initialization for removing 
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
 
 flags.DEFINE_string("opt_decay_schedule", "cosine", "")
+flags.DEFINE_boolean("policy_ddpg_bc", None, "Use DDPG-BC for policy extraction")
 
 
 def normalize(dataset):
@@ -105,6 +109,8 @@ def make_env_and_dataset(
     use_encoder: bool,
     encoder_type: str,
     red_reward: bool = False,
+    viper_reward: bool = False,
+    drs_reward: bool = False,
     normalization: str = None,
     iter_n: int = -1,
 ) -> Tuple[gym.Env, D4RLDataset]:
@@ -152,7 +158,14 @@ def make_env_and_dataset(
             iter_n = f"iter_{FLAGS.iter_n}"
         else:
             iter_n = FLAGS.iter_n
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
+        dataset = FurnitureDataset(
+            data_path,
+            use_encoder=use_encoder,
+            red_reward=red_reward,
+            viper_reward=viper_reward,
+            drs_reward=drs_reward,
+            iter_n=iter_n,
+        )
     else:
         dataset = D4RLDataset(env)
 
@@ -187,6 +200,8 @@ def main(_):
         FLAGS.use_encoder,
         FLAGS.encoder_type,
         FLAGS.red_reward,
+        FLAGS.viper_reward,
+        FLAGS.drs_reward,
         FLAGS.normalization,
         FLAGS.iter_n,
     )
@@ -212,6 +227,7 @@ def main(_):
         use_encoder=FLAGS.use_encoder,
         use_layer_norm=FLAGS.use_layer_norm,
         opt_decay_schedule=FLAGS.opt_decay_schedule,
+        policy_ddpg_bc=FLAGS.policy_ddpg_bc,
     )
     print(agent)
 
@@ -231,7 +247,7 @@ def main(_):
         if i > FLAGS.min_eval_step and i % FLAGS.eval_interval == 0:
             # eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
             log_video = "WithImage" in FLAGS.env_name
-            eval_stats, log_videos = evaluate(agent, env, FLAGS.eval_episodes, log_video=log_video)
+            eval_stats, log_videos, _ = evaluate(agent, env, FLAGS.eval_episodes, log_video=log_video)
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)

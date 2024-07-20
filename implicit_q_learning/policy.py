@@ -81,9 +81,23 @@ def _sample_actions(
     observations: np.ndarray,
     temperature: float = 1.0,
 ) -> Tuple[PRNGKey, jnp.ndarray]:
-    dist = actor_def.apply({"params": actor_params}, observations, temperature)
+    # dist = actor_def.apply({"params": actor_params}, observations, temperature)
+    # rng, key = jax.random.split(rng)
+    # return rng, dist.sample(seed=key)
     rng, key = jax.random.split(rng)
+    dist = _dist_actions(actor_def, actor_params, observations, temperature)
     return rng, dist.sample(seed=key)
+
+
+@functools.partial(jax.jit, static_argnames=("actor_def", "distribution"))
+def _dist_actions(
+    actor_def: nn.Module,
+    actor_params: Params,
+    observations: np.ndarray,
+    temperature: float = 1.0,
+) -> jnp.ndarray:
+    dist = actor_def.apply({"params": actor_params}, observations, temperature)
+    return dist
 
 
 def sample_actions(
@@ -94,3 +108,24 @@ def sample_actions(
     temperature: float = 1.0,
 ) -> Tuple[PRNGKey, jnp.ndarray]:
     return _sample_actions(rng, actor_def, actor_params, observations, temperature)
+
+
+def dist_actions(
+    actor_def: nn.Module,
+    actor_params: Params,
+    observations: np.ndarray,
+    temperature: float = 1.0,
+) -> jnp.ndarray:
+    return _dist_actions(actor_def, actor_params, observations, temperature)
+
+
+def logprob(
+    actor_def: nn.Module,
+    actor_params: Params,
+    observations: np.ndarray,
+    actions: np.ndarray,
+    temperature: float = 1.0,
+) -> jnp.ndarray:
+    """Compute the log probability of the actions under the current policy."""
+    dist = actor_def.apply({"params": actor_params}, observations, temperature)
+    return dist.log_prob(actions)

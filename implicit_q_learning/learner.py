@@ -11,6 +11,7 @@ import optax
 import policy
 import value_net
 from actor import update as awr_update_actor
+from actor import ddpg_bc_update
 from common import Batch, InfoDict, Model, PRNGKey
 from critic import update_value_critic
 
@@ -21,7 +22,7 @@ def target_update(critic: Model, target_critic: Model, tau: float) -> Model:
     return target_critic.replace(params=new_target_params)
 
 
-@partial(jax.jit, static_argnames=("utd_ratio", "num_qs", "num_min_qs"))
+@partial(jax.jit, static_argnames=("utd_ratio", "num_qs", "num_min_qs", "policy_ddpg_bc"))
 def _update_jit(
     rng: PRNGKey,
     actor: Model,
@@ -36,6 +37,7 @@ def _update_jit(
     utd_ratio: int,
     num_qs: int,
     num_min_qs: int,
+    policy_ddpg_bc: bool
 ) -> Tuple[PRNGKey, Model, Model, Model, Model, Model, InfoDict]:
 
     new_actor = actor
@@ -59,7 +61,10 @@ def _update_jit(
         new_target_critic = target_update(new_critic, new_target_critic, tau)
         if utd_ratio == 1 or (utd_ratio > 1 and (i + 1) % 5 == 0):
             key, rng = jax.random.split(rng)
-            new_actor, actor_info = awr_update_actor(key, actor, new_target_critic, new_value, mini_batch, temperature)
+            if policy_ddpg_bc:
+                new_actor, actor_info = ddpg_bc_update(key, actor, new_target_critic, mini_batch, temperature)
+            else:
+                new_actor, actor_info = awr_update_actor(key, actor, new_target_critic, new_value, mini_batch, temperature)
         else:
             new_actor, actor_info = actor, {}
 
@@ -94,6 +99,7 @@ class Learner(object):
         use_layer_norm: bool = False,
         num_qs: int = 2,
         num_min_qs: int = 2,
+        policy_ddpg_bc: bool = False,
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -103,6 +109,7 @@ class Learner(object):
         self.tau = tau
         self.discount = discount
         self.temperature = temperature
+        self.policy_ddpg_bc = policy_ddpg_bc
 
         rng = jax.random.PRNGKey(seed)
         rng, actor_key, critic_key, value_key = jax.random.split(rng, 4)
@@ -166,7 +173,24 @@ class Learner(object):
         self.num_qs = num_qs
         self.num_min_qs = num_min_qs
 
+    def logprob(self, observations: np.ndarray, actions: np.ndarray) -> jnp.ndarray:
+        """Compute the log probability of the actions under the current policy."""
+        return policy.logprob(self.actor.apply_fn, self.actor.params, observations, actions)
+
+    def q_value(self, observations: np.ndarray, actions: np.ndarray) -> jnp.ndarray:
+        """Compute the Q value of the actions under the current policy."""
+        # return self.critic.apply_fn(self.critic.params, observations, actions)
+        from critic import subsample_ensemble
+        key, _ = jax.random.split(self.rng)
+        target_params = subsample_ensemble(key, self.target_critic.params, self.num_min_qs, self.num_qs)
+        qs = self.target_critic.apply({"params": target_params}, observations, actions)
+        q = jnp.min(qs, axis=0)
+        return q
+
     def sample_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+        if 'parts_poses' in observations:
+            del observations['parts_poses']
+
         rng, actions = policy.sample_actions(
             self.rng, self.actor.apply_fn, self.actor.params, observations, temperature
         )
@@ -174,6 +198,11 @@ class Learner(object):
 
         actions = np.asarray(actions)
         return np.clip(actions, -1, 1)
+
+    def dist_actions(self, observations: np.ndarray, temperature: float = 1.0) -> jnp.ndarray:
+        """Get the disctribution of actions."""
+        dists = policy.dist_actions(self.actor.apply_fn, self.actor.params, observations, temperature) 
+        return dists
 
     def update(self, batch: Batch, utd_ratio: int = 1) -> InfoDict:
         (
@@ -197,6 +226,7 @@ class Learner(object):
             utd_ratio,
             self.num_qs,
             self.num_min_qs,
+            self.policy_ddpg_bc
         )
 
         self.rng = new_rng
