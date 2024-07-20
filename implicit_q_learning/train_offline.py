@@ -31,6 +31,9 @@ flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("max_steps", int(1e6), "Number of training steps.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("red_reward", False, "Use learned reward")
+flags.DEFINE_boolean("viper_reward", False, "Use learned reward")
+flags.DEFINE_boolean("drs_reward", False, "Use learned reward")
+flags.DEFINE_enum("reward_type", "REDS", ["REDS", "DrS", "VIPER"], "Type of reward model.")
 # flags.DEFINE_string("data_path", '', "Path to data.")
 flags.DEFINE_multi_string("data_path", "", "Path to data.")
 config_flags.DEFINE_config_file(
@@ -45,7 +48,7 @@ flags.DEFINE_boolean("wandb", False, "Use wandb")
 flags.DEFINE_string("wandb_project", "", "wandb project")
 flags.DEFINE_string("wandb_entity", "", "wandb entity")
 flags.DEFINE_string("normalization", "", "")
-flags.DEFINE_integer("iter_n", -1, "Reward relabeling iteration")
+flags.DEFINE_string("iter_n", "-1", "Reward relabeling iteration")
 flags.DEFINE_boolean("use_layer_norm", False, "Use layer normalization")
 flags.DEFINE_boolean("phase_reward", False, "Use phase reward.")
 flags.DEFINE_boolean("fixed_init", None, "Use fixed initialization for removing randomness.")
@@ -105,6 +108,8 @@ def make_env_and_dataset(
     use_encoder: bool,
     encoder_type: str,
     red_reward: bool = False,
+    viper_reward: bool = False,
+    drs_reward: bool = False,
     normalization: str = None,
     iter_n: int = -1,
 ) -> Tuple[gym.Env, D4RLDataset]:
@@ -148,7 +153,18 @@ def make_env_and_dataset(
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
+        if FLAGS.iter_n.isdigit():
+            iter_n = f"iter_{FLAGS.iter_n}"
+        else:
+            iter_n = FLAGS.iter_n
+        dataset = FurnitureDataset(
+            data_path,
+            use_encoder=use_encoder,
+            red_reward=red_reward,
+            viper_reward=viper_reward,
+            drs_reward=drs_reward,
+            iter_n=iter_n,
+        )
     else:
         dataset = D4RLDataset(env)
 
@@ -183,6 +199,8 @@ def main(_):
         FLAGS.use_encoder,
         FLAGS.encoder_type,
         FLAGS.red_reward,
+        FLAGS.viper_reward,
+        FLAGS.drs_reward,
         FLAGS.normalization,
         FLAGS.iter_n,
     )

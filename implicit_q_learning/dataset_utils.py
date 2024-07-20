@@ -1,6 +1,7 @@
 import collections
 import pickle
 from typing import Optional, Dict
+from PIL import Image
 
 # import d4rl
 import gym
@@ -8,9 +9,7 @@ import numpy as np
 import jax.numpy as jnp
 from tqdm import tqdm
 
-Batch = collections.namedtuple("Batch",
-                               ["observations", "actions", "rewards", "masks", "next_observations"])
-
+Batch = collections.namedtuple("Batch", ["observations", "actions", "rewards", "masks", "next_observations"])
 
 
 def max_normalize(rewards, max_rew):
@@ -20,35 +19,40 @@ def max_normalize(rewards, max_rew):
     return normalized_data
 
 
-
 def min_max_normalize(dataset):
     max_val = np.max(dataset.rewards)
     min_val = np.min(dataset.rewards)
 
-    normalized_data = np.array(
-        [(x - min_val) / (max_val - min_val) for x in dataset.rewards]
-    )
+    normalized_data = np.array([(x - min_val) / (max_val - min_val) for x in dataset.rewards])
     normalized_data -= 1  # (0, 1) -> (-1, 0)
 
     dataset.rewards = normalized_data
 
 
-def replay_chunk_to_seq(trajectories, window_size):
-    """From: BPref-v2/bpref_v2/utils/reds_extract_reward.py"""
+def replay_chunk_to_seq(trajectories, window_size, skip_frame, reward_type):
     seq = []
+    if reward_type == "DrS":
+        semi_sparse_rewards = trajectories["rewards"]
 
-    for i in range(window_size - 1):
+    for i in range(window_size * skip_frame - 1):
         elem = {}
         elem["is_first"] = i == 0
         for key in ["observations", "rewards"]:
             if key == "observations":
                 for _key, _val in trajectories[key][0].items():
-                    elem[_key] = _val
+                    if _key == "color_image2" and reward_type == "VIPER":
+                        image = _val
+                        image = np.array(
+                            Image.fromarray(image.astype(np.uint8)).resize((64, 64), Image.Resampling.NEAREST)
+                        )
+                        elem[_key] = image
+                    else:
+                        elem[_key] = _val
             elif key == "rewards":
                 try:
                     elem["reward"] = trajectories[key][0].squeeze()
                 except:
-                    elem['reward'] = trajectories[key][0]
+                    elem["reward"] = trajectories[key][0]
             elif isinstance(trajectories[key], np.ndarray):
                 elem[key] = trajectories[key][0]
         seq.append(elem)
@@ -58,13 +62,26 @@ def replay_chunk_to_seq(trajectories, window_size):
         elem["is_first"] = i == -1
         for key in ["observations", "rewards"]:
             if key == "observations":
-                for _key, _val in trajectories[key][i].items():
-                    elem[_key] = _val
+                for _key, _val in trajectories[key][0].items():
+                    if _key == "color_image2" and reward_type == "VIPER":
+                        image = _val
+                        image = np.array(
+                            Image.fromarray(image.astype(np.uint8)).resize((128, 128), Image.Resampling.NEAREST)
+                        )
+                        elem[_key] = image
+                    else:
+                        elem[_key] = _val
             elif key == "rewards":
                 try:
-                    elem["reward"] = trajectories[key][i].squeeze()
+                    if reward_type == "DrS":
+                        elem["reward"] = semi_sparse_rewards[i].squeeze()
+                    else:
+                        elem["reward"] = trajectories[key][i].squeeze()
                 except:
-                    elem['reward'] = trajectories[key][i]
+                    if reward_type == "DrS":
+                        elem["reward"] = semi_sparse_rewards[i]
+                    else:
+                        elem["reward"] = trajectories[key][i]
             elif isinstance(trajectories[key], np.ndarray):
                 elem[key] = trajectories[key][i]
         seq.append(elem)
@@ -76,14 +93,16 @@ def split_into_trajectories(observations, actions, rewards, masks, dones_float, 
     trajs = [[]]
 
     for i in tqdm(range(len(observations))):
-        trajs[-1].append((
-            observations[i],
-            actions[i],
-            rewards[i],
-            masks[i],
-            dones_float[i],
-            next_observations[i],
-        ))
+        trajs[-1].append(
+            (
+                observations[i],
+                actions[i],
+                rewards[i],
+                masks[i],
+                dones_float[i],
+                next_observations[i],
+            )
+        )
         if dones_float[i] == 1.0 and i + 1 < len(observations):
             trajs.append([])
 
@@ -99,7 +118,7 @@ def merge_trajectories(trajs):
     next_observations = []
 
     for traj in trajs:
-        for (obs, act, rew, mask, done, next_obs) in traj:
+        for obs, act, rew, mask, done, next_obs in traj:
             observations.append(obs)
             actions.append(act)
             rewards.append(rew)
@@ -119,15 +138,17 @@ def merge_trajectories(trajs):
 
 class Dataset(object):
 
-    def __init__(self,
-                 observations: Dict[str, np.ndarray],
-                 actions: np.ndarray,
-                 rewards: np.ndarray,
-                 masks: np.ndarray,
-                 dones_float: np.ndarray,
-                 next_observations: np.ndarray,
-                 size: int,
-                 use_encoder: bool = False):
+    def __init__(
+        self,
+        observations: Dict[str, np.ndarray],
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        masks: np.ndarray,
+        dones_float: np.ndarray,
+        next_observations: np.ndarray,
+        size: int,
+        use_encoder: bool = False,
+    ):
         self.observations = observations
         self.actions = actions
         self.rewards = rewards
@@ -136,7 +157,7 @@ class Dataset(object):
         self.next_observations = next_observations
         self.size = size
         self.use_encoder = use_encoder
-    
+
     def add_trajectory(self, observations, actions, rewards, masks, dones_float, next_observations):
         if self.observations is None:
             self.observations = observations
@@ -166,7 +187,7 @@ class Dataset(object):
         if self.use_encoder:
             # Preprocess the image.
             for i in indx:
-                obs_img1 = obs_img1.at[i].set(jnp.array(self.observations[i]['image1'] / 255.0))
+                obs_img1 = obs_img1.at[i].set(jnp.array(self.observations[i]["image1"] / 255.0))
                 obs_img1 = obs_img1.at[i, :, :, 0].add(-0.485)
                 obs_img1 = obs_img1.at[i, :, :, 1].add(-0.456)
                 obs_img1 = obs_img1.at[i, :, :, 2].add(-0.406)
@@ -174,7 +195,7 @@ class Dataset(object):
                 obs_img1 = obs_img1.at[i, :, :, 1].divide(0.224)
                 obs_img1 = obs_img1.at[i, :, :, 2].divide(0.225)
 
-                obs_img2 = obs_img2.at[i].set(jnp.array(self.observations[i]['image2'] / 255.0))
+                obs_img2 = obs_img2.at[i].set(jnp.array(self.observations[i]["image2"] / 255.0))
                 obs_img2 = obs_img2.at[i, :, :, 0].add(-0.485)
                 obs_img2 = obs_img2.at[i, :, :, 1].add(-0.456)
                 obs_img2 = obs_img2.at[i, :, :, 2].add(-0.406)
@@ -182,7 +203,7 @@ class Dataset(object):
                 obs_img2 = obs_img2.at[i, :, :, 1].divide(0.224)
                 obs_img2 = obs_img2.at[i, :, :, 2].divide(0.225)
 
-                next_obs_img1 = next_obs_img1.at[i].set(jnp.array(self.next_observations[i]['image1'] / 255.0))
+                next_obs_img1 = next_obs_img1.at[i].set(jnp.array(self.next_observations[i]["image1"] / 255.0))
                 next_obs_img1 = next_obs_img1.at[i, :, :, 0].add(-0.485)
                 next_obs_img1 = next_obs_img1.at[i, :, :, 1].add(-0.456)
                 next_obs_img1 = next_obs_img1.at[i, :, :, 2].add(-0.406)
@@ -190,7 +211,7 @@ class Dataset(object):
                 next_obs_img1 = next_obs_img1.at[i, :, :, 1].divide(0.224)
                 next_obs_img1 = next_obs_img1.at[i, :, :, 2].divide(0.225)
 
-                next_obs_img2 = next_obs_img2.at[i].set(jnp.array(self.next_observations[i]['image2'] / 255.0))
+                next_obs_img2 = next_obs_img2.at[i].set(jnp.array(self.next_observations[i]["image2"] / 255.0))
                 next_obs_img2 = next_obs_img2.at[i, :, :, 0].add(-0.485)
                 next_obs_img2 = next_obs_img2.at[i, :, :, 1].add(-0.456)
                 next_obs_img2 = next_obs_img2.at[i, :, :, 2].add(-0.406)
@@ -205,47 +226,34 @@ class Dataset(object):
         if self.use_encoder:
             return Batch(
                 observations={
-                    'image1':
-                    obs_img1,
-                    'image2':
-                    obs_img2,
-                    'robot_state':
-                    jnp.array([self.observations[i]['robot_state'] for i in indx],
-                              dtype=jnp.float32)
+                    "image1": obs_img1,
+                    "image2": obs_img2,
+                    "robot_state": jnp.array([self.observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
                 },
                 actions=self.actions[indx],
                 rewards=self.rewards[indx],
                 masks=self.masks[indx],
                 next_observations={
-                    'image1':
-                    next_obs_img1,
-                    'image2':
-                    next_obs_img2,
-                    'robot_state':
-                    jnp.array([self.next_observations[i]['robot_state'] for i in indx],
-                              dtype=jnp.float32)
+                    "image1": next_obs_img1,
+                    "image2": next_obs_img2,
+                    "robot_state": jnp.array(
+                        [self.next_observations[i]["robot_state"] for i in indx], dtype=jnp.float32
+                    ),
                 },
             )
         return Batch(
             observations={
-                'image1':
-                jnp.array([self.observations[i]['image1'] for i in indx], dtype=jnp.float32),
-                'image2':
-                jnp.array([self.observations[i]['image2'] for i in indx], dtype=jnp.float32),
-                'robot_state':
-                jnp.array([self.observations[i]['robot_state'] for i in indx], dtype=jnp.float32)
+                "image1": jnp.array([self.observations[i]["image1"] for i in indx], dtype=jnp.float32),
+                "image2": jnp.array([self.observations[i]["image2"] for i in indx], dtype=jnp.float32),
+                "robot_state": jnp.array([self.observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
             },
             actions=self.actions[indx],
             rewards=self.rewards[indx],
             masks=self.masks[indx],
             next_observations={
-                'image1':
-                jnp.array([self.next_observations[i]['image1'] for i in indx], dtype=jnp.float32),
-                'image2':
-                jnp.array([self.next_observations[i]['image2'] for i in indx], dtype=jnp.float32),
-                'robot_state':
-                jnp.array([self.next_observations[i]['robot_state'] for i in indx],
-                          dtype=jnp.float32)
+                "image1": jnp.array([self.next_observations[i]["image1"] for i in indx], dtype=jnp.float32),
+                "image2": jnp.array([self.next_observations[i]["image2"] for i in indx], dtype=jnp.float32),
+                "robot_state": jnp.array([self.next_observations[i]["robot_state"] for i in indx], dtype=jnp.float32),
             },
         )
 
@@ -262,8 +270,10 @@ class D4RLDataset(Dataset):
         dones_float = np.zeros_like(dataset["rewards"])
 
         for i in range(len(dones_float) - 1):
-            if (np.linalg.norm(dataset["observations"][i + 1] - dataset["next_observations"][i]) >
-                    1e-6 or dataset["terminals"][i] == 1.0):
+            if (
+                np.linalg.norm(dataset["observations"][i + 1] - dataset["next_observations"][i]) > 1e-6
+                or dataset["terminals"][i] == 1.0
+            ):
                 dones_float[i] = 1
             else:
                 dones_float[i] = 0
@@ -283,24 +293,28 @@ class D4RLDataset(Dataset):
 
 class FurnitureDataset(Dataset):
 
-    def __init__(self,
-                 data_path,
-                 clip_to_eps: bool = True,
-                 eps: float = 1e-5,
-                 use_encoder: bool = False,
-                 red_reward: bool = False,
-                 iter_n: int = -1):
+    def __init__(
+        self,
+        data_path,
+        clip_to_eps: bool = True,
+        eps: float = 1e-5,
+        use_encoder: bool = False,
+        red_reward: bool = False,
+        viper_reward: bool = False,
+        drs_reward: bool = False,
+        iter_n: str = "-1",
+    ):
         if isinstance(data_path, list):
             datasets = []
             for path in data_path:
-                with open(path, 'rb') as f:
+                with open(path, "rb") as f:
                     datasets.append(pickle.load(f))
             # Merge the dataset.
             dataset = {}
             # Find the joint keys.
             joint_keys = []
             for dataset in datasets:
-                keys = set(dataset.keys())                
+                keys = set(dataset.keys())
                 joint_keys.append(keys)
             joint_keys = set.intersection(*joint_keys)
 
@@ -335,30 +349,43 @@ class FurnitureDataset(Dataset):
                 dataset['observations'][i]['robot_state'] = filter_and_concat_robot_state(dataset['observations'][i]['robot_state'])
                 dataset['next_observations'][i]['robot_state'] = filter_and_concat_robot_state(dataset['next_observations'][i]['robot_state'])
         for i in range(len(dones_float) - 1):
-            if (np.linalg.norm(dataset["observations"][i + 1]['robot_state'] -
-                               dataset["next_observations"][i]['robot_state']) > 1e-6
-                    or dataset["terminals"][i] == 1.0):
+            if (
+                np.linalg.norm(
+                    dataset["observations"][i + 1]["robot_state"] - dataset["next_observations"][i]["robot_state"]
+                )
+                > 1e-6
+                or dataset["terminals"][i] == 1.0
+            ):
                 dones_float[i] = 1
             else:
                 dones_float[i] = 0
 
         dones_float[-1] = 1
-        
+
+        assert np.sum(red_reward + viper_reward + drs_reward) <= 1, "Only one reward type can be selected."
         if red_reward:
             assert iter_n != -1, "Need to specify the relabeling iteration for red_reward."
             # rewards = dataset[f'reds_rewards_iter_{iter_n}']
             rewards = dataset[f'reds_rewards_{iter_n}']
+        if viper_reward:
+            assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
+            rewards = dataset[f"viper_rewards_{iter_n}"]
+        if drs_reward:
+            assert iter_n != "-1", "Need to specify the relabeling iteration for red_reward."
+            rewards = dataset[f"drs_rewards_{iter_n}"]
         else:
-            rewards = dataset['rewards']
+            rewards = dataset["rewards"]
 
-        super().__init__(dataset["observations"],
-                         actions=dataset["actions"],
-                         rewards=rewards,
-                         masks=1.0 - dataset["terminals"],
-                         dones_float=dones_float,
-                         next_observations=dataset["next_observations"],
-                         size=len(dataset["observations"]),
-                         use_encoder=use_encoder)
+        super().__init__(
+            dataset["observations"],
+            actions=dataset["actions"],
+            rewards=rewards,
+            masks=1.0 - dataset["terminals"],
+            dones_float=dones_float,
+            next_observations=dataset["next_observations"],
+            size=len(dataset["observations"]),
+            use_encoder=use_encoder,
+        )
 
 
 class ReplayBuffer(Dataset):
@@ -367,11 +394,10 @@ class ReplayBuffer(Dataset):
 
         observations = np.empty((capacity, *observation_space.shape), dtype=observation_space.dtype)
         actions = np.empty((capacity, action_dim), dtype=np.float32)
-        rewards = np.empty((capacity, ), dtype=np.float32)
-        masks = np.empty((capacity, ), dtype=np.float32)
-        dones_float = np.empty((capacity, ), dtype=np.float32)
-        next_observations = np.empty((capacity, *observation_space.shape),
-                                     dtype=observation_space.dtype)
+        rewards = np.empty((capacity,), dtype=np.float32)
+        masks = np.empty((capacity,), dtype=np.float32)
+        dones_float = np.empty((capacity,), dtype=np.float32)
+        next_observations = np.empty((capacity, *observation_space.shape), dtype=observation_space.dtype)
         super().__init__(
             observations=observations,
             actions=actions,
@@ -388,7 +414,7 @@ class ReplayBuffer(Dataset):
         self.capacity = capacity
 
     def initialize_with_dataset(self, dataset: Dataset, num_samples: Optional[int]):
-        assert (self.insert_index == 0), "Can insert a batch online in an empty replay buffer."
+        assert self.insert_index == 0, "Can insert a batch online in an empty replay buffer."
 
         dataset_size = len(dataset.observations)
 
@@ -396,8 +422,7 @@ class ReplayBuffer(Dataset):
             num_samples = dataset_size
         else:
             num_samples = min(dataset_size, num_samples)
-        assert (self.capacity >=
-                num_samples), "Dataset cannot be larger than the replay buffer capacity."
+        assert self.capacity >= num_samples, "Dataset cannot be larger than the replay buffer capacity."
 
         if num_samples < dataset_size:
             perm = np.random.permutation(dataset_size)

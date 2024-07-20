@@ -44,7 +44,7 @@ config_flags.DEFINE_config_file(
 
 flags.DEFINE_multi_string("data_path", "", "Path to data.")
 flags.DEFINE_string("normalization", "", "")
-flags.DEFINE_integer("iter_n", -1, "Reward relabeling iteration")
+flags.DEFINE_string("iter_n", "-1", "Reward relabeling iteration")
 
 flags.DEFINE_boolean("use_layer_norm", None, "Use layer normalization.")
 flags.DEFINE_boolean("fixed_init", None, "Use separate online buffer.")
@@ -150,6 +150,10 @@ def make_env_and_dataset(
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
+        if FLAGS.iter_n.isdigit():
+            iter_n = f"iter_{FLAGS.iter_n}"
+        else:
+            iter_n = FLAGS.iter_n
         dataset = FurnitureDataset(data_path, use_encoder=False, red_reward=red_reward, iter_n=iter_n)
     else:
         dataset = D4RLDataset(env)
@@ -171,7 +175,9 @@ def main(_):
 
     ckpt_step = FLAGS.ckpt_step
     root_logdir = os.path.join(
-        FLAGS.save_dir, "eval", f"{FLAGS.run_name}.{FLAGS.seed}.step{FLAGS.ckpt_step}.{FLAGS.trial}"
+        FLAGS.save_dir,
+        "eval",
+        f"{FLAGS.run_name}.{FLAGS.seed}.step{FLAGS.ckpt_step}.noise{FLAGS.temperature}.trial{FLAGS.trial}",
     )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
 
@@ -262,6 +268,7 @@ def main(_):
             log_video=log_video,
             reward_model=reward_model,
             normalization=FLAGS.normalization,
+            temperature=FLAGS.temperature,
             max_rew=max_rew,
             window_size=FLAGS.window_size,
         )

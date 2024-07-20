@@ -33,6 +33,10 @@ from learner import Learner
 
 from furniture_bench.data.collect_enum import CollectEnum
 
+
+import matplotlib.pyplot as plt
+import imageio
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string("env_name", "halfcheetah-expert-v2", "Environment name.")
@@ -52,6 +56,9 @@ flags.DEFINE_integer("replay_buffer_size", 2000000, "Replay buffer size (=max_st
 flags.DEFINE_integer("init_dataset_size", None, "Offline data size (uses all data if unspecified).")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("red_reward", False, "Use learned reward")
+flags.DEFINE_boolean("viper_reward", False, "Use learned reward")
+flags.DEFINE_boolean("drs_reward", False, "Use learned reward")
+flags.DEFINE_enum("reward_type", "REDS", ["REDS", "DrS", "VIPER"], "Type of reward model.")
 flags.DEFINE_boolean("use_encoder", False, "Use ResNet18 for the image encoder.")
 flags.DEFINE_string("encoder_type", "", "vip or r3m")
 flags.DEFINE_boolean("wandb", True, "Use wandb")
@@ -66,7 +73,7 @@ config_flags.DEFINE_config_file(
 
 flags.DEFINE_multi_string("data_path", "", "Path to data.")
 flags.DEFINE_string("normalization", "", "")
-flags.DEFINE_integer("iter_n", -1, "Reward relabeling iteration")
+flags.DEFINE_string("iter_n", "-1", "Reward relabeling iteration")
 
 
 # REDS
@@ -93,6 +100,7 @@ flags.DEFINE_integer("prefill_episodes", 0, "Pre-fill episodes.")
 
 # DEVICE
 flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
+flags.DEFINE_boolean("save_gif", True, "Save reward and observation in gif")
 
 
 def normalize(dataset):
@@ -118,6 +126,40 @@ def normalize(dataset):
     dataset.rewards *= 1000.0
 
 
+def gif_maker(gif_dir, observations, rewards, phases, file_index):
+    filenames = []
+
+    if not os.path.exists("gif_test"):
+        os.makedirs("gif_test")
+
+    for i in tqdm.tqdm(range(len(observations))):
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+
+        image = observations[i]["color_image2"].astype(np.uint8)
+
+        ax[0].imshow(image)
+        ax[0].axis("off")
+
+        ax2 = ax[1].twinx()
+        ax[1].plot(rewards[: i + 1])
+        ax2.plot(phases[: i + 1], color="pink", linestyle="dashed")
+        ax[1].set_xlim(0, i)
+        ax[1].set_ylim(np.min(rewards[: i + 1]), np.max(rewards[: i + 1]) + 0.05 * np.abs(np.max(rewards[: i + 1])))
+
+        filename = f"{gif_dir}/frame_{i:03d}.png"
+        filenames.append(filename)
+        plt.savefig(filename)
+        plt.close(fig)
+
+    with imageio.get_writer(f"{gif_dir}/{file_index}.gif", mode="I", duration=5) as writer:
+        for filename in filenames:
+            image = imageio.imread(filename)
+            writer.append_data(image)
+
+    for filename in filenames:
+        os.remove(filename)
+
+
 def combine(one_dict, other_dict):
     combined = {}
     if isinstance(one_dict, Batch):
@@ -141,6 +183,8 @@ def make_env_and_dataset(
     use_encoder: bool,
     encoder_type: str,
     red_reward: bool = False,
+    viper_reward: bool = False,
+    drs_reward: bool = False,
     iter_n: int = -1,
 ) -> Tuple[gym.Env, D4RLDataset]:
     if "Furniture" in env_name:
@@ -156,7 +200,8 @@ def make_env_and_dataset(
             env_id,
             furniture=furniture_name,
             # max_env_steps=600,
-            headless=True,
+            # headless=True,
+            headless=False,
             num_envs=1,  # Only support 1 for now.
             manual_done=False,
             # resize_img=True,
@@ -186,7 +231,18 @@ def make_env_and_dataset(
     print("Action space", env.action_space)
 
     if "Furniture" in env_name:
-        dataset = FurnitureDataset(data_path, use_encoder=use_encoder, red_reward=red_reward, iter_n=iter_n)
+        if FLAGS.iter_n.isdigit():
+            iter_n = f"iter_{FLAGS.iter_n}"
+        else:
+            iter_n = FLAGS.iter_n
+        dataset = FurnitureDataset(
+            data_path,
+            use_encoder=use_encoder,
+            red_reward=red_reward,
+            viper_reward=viper_reward,
+            drs_reward=drs_reward,
+            iter_n=iter_n,
+        )
     else:
         dataset = D4RLDataset(env)
 
@@ -220,6 +276,8 @@ def main(_):
         FLAGS.use_encoder,
         FLAGS.encoder_type,
         FLAGS.red_reward,
+        FLAGS.viper_reward,
+        FLAGS.drs_reward,
         FLAGS.iter_n,
     )
     offline_traj_for_log = []
@@ -294,6 +352,42 @@ def main(_):
             skip_frame=FLAGS.skip_frame,
             reward_model_device=0,
             encoding_minibatch_size=16,
+            use_task_reward=False,
+            use_scale=False,
+        )
+
+    if FLAGS.viper_reward:
+        # load reward model
+
+        import sys
+
+        sys.path.append("/home/changyeon/NeurIPS2024/workspace/viper_rl")
+        from viper_rl.videogpt.reward_models.videogpt_reward_model import VideoGPTRewardModel
+
+        domain, task = FLAGS.task_name.split("_", 1)
+        reward_model = VideoGPTRewardModel(
+            task=FLAGS.task_name,
+            vqgan_path=os.path.join(FLAGS.ckpt_path, f"{domain}_vqgan"),
+            videogpt_path=os.path.join(FLAGS.ckpt_path, f"{domain}_videogpt_l4_s4"),
+            camera_key=FLAGS.image_keys.split("|")[0],
+            reward_scale=None,
+            minibatch_size=16,
+            encoding_minibatch_size=16,
+        )
+
+    if FLAGS.drs_reward:
+        from bpref_v2.reward_model.drs_reward_model import DrsRewardModel
+
+        reward_model = DrsRewardModel(
+            task=FLAGS.task_name,
+            model_name="DRS",
+            rm_path=FLAGS.ckpt_path,
+            camera_keys=FLAGS.image_keys.split("|"),
+            reward_scale=None,
+            window_size=FLAGS.window_size,
+            skip_frame=FLAGS.skip_frame,
+            reward_model_device=0,
+            encoding_minibatch_size=FLAGS.batch_size,
             use_task_reward=False,
             use_scale=False,
         )
@@ -381,6 +475,7 @@ def main(_):
         observations = []
         actions = []
         rewards = []
+        phases = []
         done_floats = []
         masks = []
         next_observations = []
@@ -417,6 +512,7 @@ def main(_):
             done_floats.append(float(done))
             masks.append(mask)
             next_observations.append(next_observation)
+            phases.append(phase)
 
             observation = next_observation
         if device_interface and collect_enum == CollectEnum.FAIL:
@@ -426,19 +522,26 @@ def main(_):
         assert len_curr_traj == len(actions) == len(rewards) == len(masks) == len(next_observations)
         assert done_floats[-1] == 1.0
 
-        if FLAGS.red_reward:
+        if FLAGS.red_reward or FLAGS.viper_reward or FLAGS.drs_reward:
             # compute reds reward
             x = {
                 "observations": observations,
                 "actions": actions,
-                "rewards": rewards,
+                "rewards": phases,
             }
-            seq = reward_model(replay_chunk_to_seq(x, FLAGS.window_size))
+            seq = reward_model(replay_chunk_to_seq(x, FLAGS.window_size, FLAGS.skip_frame, FLAGS.reward_type))
             rewards = np.asarray([elem[reward_model.PUBLIC_LIKELIHOOD_KEY] for elem in seq])
             if FLAGS.normalization == "min_max":
                 min_max_normalize(rewards)
             if FLAGS.normalization == "max":
                 rewards = max_normalize(rewards, max_rew)
+
+        if FLAGS.save_gif:
+            gif_dir = os.path.join(finetune_ckpt_dir, "gifs")
+            if not os.path.exists(gif_dir):
+                os.makedirs(gif_dir)
+            gif_maker(gif_dir, observations, rewards, done_floats, i)
+            print(f"Saved gif at {gif_dir}")
 
         if FLAGS.save_data:
             if not os.path.exists(online_data_dir):
@@ -461,6 +564,17 @@ def main(_):
 
             if FLAGS.data_collection:
                 continue
+
+        if i % FLAGS.log_interval == 0:
+            train_log_videos = np.asarray(
+                [obs["color_image2"].transpose(2, 0, 1) for obs in observations], dtype=np.uint8
+            )
+            name = "train_video"
+            fps = 20
+            if FLAGS.wandb:
+                log_dict = {name: wandb.Video(train_log_videos, fps=fps, format="mp4")}
+                # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
+                wandb.log(log_dict, step=i)
 
         # Remove RGB from the observations.
         observations = [
@@ -522,6 +636,7 @@ def main(_):
         summary_writer.add_scalar("online/average_return", np.mean(log_online_avg_return), i)
         summary_writer.add_scalar("online/average_std", np.mean(online_stds), i)
         summary_writer.add_scalar("train_phases", np.mean(log_phases), i)
+        summary_writer.add_scalar("episode_phase", phase, i)
         summary_writer.flush()
 
         log_online_avg_reward = []
@@ -531,7 +646,8 @@ def main(_):
             agent.save(finetune_ckpt_dir, i - FLAGS.prefill_episodes + 1)
 
         if (
-            i > FLAGS.prefill_episodes - 1
+            False
+            and i > FLAGS.prefill_episodes - 1
             and (i - FLAGS.prefill_episodes) % FLAGS.eval_interval == 0
             and ("Bench" not in FLAGS.env_name)
             and not (i == 0 and FLAGS.from_scratch)
@@ -540,7 +656,7 @@ def main(_):
                 log_video = True
             else:
                 log_video = False
-            if not FLAGS.red_reward:
+            if not FLAGS.red_reward and not FLAGS.viper_reward and not FLAGS.drs_reward:
                 reward_model = None
 
             if FLAGS.red_reward:
