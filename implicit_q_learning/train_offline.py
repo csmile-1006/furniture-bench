@@ -247,7 +247,7 @@ def main(_):
         if i > FLAGS.min_eval_step and i % FLAGS.eval_interval == 0:
             # eval_stats = evaluate(agent, env, FLAGS.eval_episodes)
             log_video = "WithImage" in FLAGS.env_name
-            eval_stats, log_videos = evaluate(agent, env, FLAGS.eval_episodes, log_video=log_video)
+            eval_stats, log_videos, _ = evaluate(agent, env, FLAGS.eval_episodes, log_video=log_video)
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
