@@ -320,7 +320,8 @@ def main(_):
             + "-"
             + str(FLAGS.run_name)
             + "-finetune"
-            + f"-actnoise{FLAGS.temperature}",
+            + f"-actnoise{FLAGS.temperature}"
+            + f"-utd{FLAGS.utd_ratio}",
             # + ("-phase-reward" if FLAGS.phase_reward else ""),
             config=kwargs,
             sync_tensorboard=True,
