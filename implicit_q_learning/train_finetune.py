@@ -33,8 +33,7 @@ from evaluation import evaluate
 from learner import Learner
 
 from furniture_bench.data.collect_enum import CollectEnum
-import furniture_bench.utils.transform as T
-
+from scipy.spatial.transform import Rotation
 
 import matplotlib.pyplot as plt
 import imageio
@@ -555,9 +554,12 @@ def main(_):
                 pos_action_noise = np.random.normal(loc=0, scale=FLAGS.pos_std, size=(3,))
                 action[:3] += pos_action_noise
                 # Convert the quaternion to euler.
-                euler_angle_noised = T.quat2euler(action[3:7]) + np.radians(np.random.normal(loc=0, scale=FLAGS.rot_std, size=(3,)))
+                rot = Rotation.from_quat(action[3:7])
+                rot_euler = rot.as_euler('xyz', degrees=True)
+                rot_euler_noised = rot_euler + np.random.normal(loc=0, scale=FLAGS.rot_std, size=(3,))
+                rot_quat = Rotation.from_euler('xyz', rot_euler_noised, degrees=True).as_quat()
                 # To original quaternion
-                action[3:7] = T.euler2quat(euler_angle_noised)
+                action[3:7] = rot_quat
                 grip_action_noise = np.random.normal(loc=0, scale=FLAGS.grip_std, size=(1,))
                 action[-1:] += grip_action_noise
             # Get std for logging.
