@@ -460,7 +460,7 @@ def main(_):
     finetune_ckpt_dir = os.path.join(
         FLAGS.save_dir,
         "ckpt",
-        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}.{FLAGS.seed}",
+        f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}-utd{FLAGS.utd_ratio}.{FLAGS.seed}",
     )
 
     # Load the online data.
