@@ -100,6 +100,7 @@ class Learner(object):
         num_qs: int = 2,
         num_min_qs: int = 2,
         policy_ddpg_bc: bool = False,
+        det_policy: bool= False
     ):
         """
         An implementation of the version of Soft-Actor-Critic described in https://arxiv.org/abs/1801.01290
@@ -125,9 +126,9 @@ class Learner(object):
             hidden_dims,
             action_dim,
             log_std_scale=1e-3,
-            log_std_min=-5.0,
             dropout_rate=dropout_rate,
             state_dependent_std=False,
+            det_policy=det_policy,
             tanh_squash_distribution=False,
             use_encoder=use_encoder,
             use_layer_norm=False,

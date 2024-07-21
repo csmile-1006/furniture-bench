@@ -33,6 +33,7 @@ from evaluation import evaluate
 from learner import Learner
 
 from furniture_bench.data.collect_enum import CollectEnum
+import furniture_bench.utils.transform as T
 
 
 import matplotlib.pyplot as plt
@@ -98,6 +99,10 @@ flags.DEFINE_boolean("online_buffer", None, "Use separate online buffer.")
 flags.DEFINE_boolean("fixed_init", None, "Use separate online buffer.")
 flags.DEFINE_boolean("data_collection", None, "Skip the agent update.")
 flags.DEFINE_float("temperature", 0.2, "Action sample temperature.")
+flags.DEFINE_boolean("det_policy", None, "Deterministic actor. The exploration epsilon is directly handled by training code.")
+flags.DEFINE_float("pos_std", None, "Constant positional std for epsilon exploration")
+flags.DEFINE_float("rot_std", None, "Constant rotational std (degree) for epsilon exploration")
+flags.DEFINE_float("grip_std", None, "Constant gripper std for epsilon exploration")
 flags.DEFINE_boolean("load_finetune_ckpt", None, "Load the fine-tune checkpoint.")
 flags.DEFINE_boolean("from_scratch", False, "Train from scratch.")
 flags.DEFINE_integer("utd_ratio", 1, "Update to data ratio.")
@@ -311,17 +316,23 @@ def main(_):
         import wandb
 
         wandb.tensorboard.patch(root_logdir=root_logdir)
-        wandb.init(
-            project=FLAGS.wandb_project,
-            entity=FLAGS.wandb_entity,
-            name=FLAGS.env_name
+        name = (FLAGS.env_name
             + "-"
             + str(FLAGS.seed)
             + "-"
             + str(FLAGS.run_name)
             + "-finetune"
             + f"-actnoise{FLAGS.temperature}"
-            + f"-utd{FLAGS.utd_ratio}",
+            + f"-utd{FLAGS.utd_ratio}")
+        if FLAGS.det_policy is not None:
+            name += f"-pos{FLAGS.pos_std}"
+            name += f"-rot{FLAGS.rot_std}"
+            name += f"-grip{FLAGS.grip_std}"
+
+        wandb.init(
+            project=FLAGS.wandb_project,
+            entity=FLAGS.wandb_entity,
+            name=name,
             # + ("-phase-reward" if FLAGS.phase_reward else ""),
             config=kwargs,
             sync_tensorboard=True,
@@ -348,6 +359,7 @@ def main(_):
         opt_decay_schedule=None,
         use_layer_norm=FLAGS.use_layer_norm,
         policy_ddpg_bc=FLAGS.policy_ddpg_bc,
+        det_policy=FLAGS.det_policy
     )
 
     if FLAGS.use_learned_reward:
@@ -534,6 +546,20 @@ def main(_):
         while not done:
             obs_without_rgb = {k: v for k, v in observation.items() if k != "color_image1" and k != "color_image2"}
             action = agent.sample_actions(obs_without_rgb, temperature=FLAGS.temperature)
+            # Add exploration noise.
+            if FLAGS.det_policy:
+                assert FLAGS.pos_std is not None
+                assert FLAGS.rot_std is not None
+                assert FLAGS.grip_std is not None
+                assert len(action) == 3 + 4 + 1
+                pos_action_noise = np.random.normal(loc=0, scale=FLAGS.pos_std, size=(3,))
+                action[:3] += pos_action_noise
+                # Convert the quaternion to euler.
+                euler_angle_noised = T.quat2euler(action[3:7]) + np.radians(np.random.normal(loc=0, scale=FLAGS.rot_std, size=(3,)))
+                # To original quaternion
+                action[3:7] = T.euler2quat(euler_angle_noised)
+                grip_action_noise = np.random.normal(loc=0, scale=FLAGS.grip_std, size=(1,))
+                action[-1:] += grip_action_noise
             # Get std for logging.
             dists = agent.dist_actions(obs_without_rgb)
             std = dists.stddev()
