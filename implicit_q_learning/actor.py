@@ -5,6 +5,7 @@ import jax.numpy as jnp
 from flax.core.frozen_dict import FrozenDict
 
 import policy
+from critic import subsample_ensemble
 from common import Batch, InfoDict, Model, Params, PRNGKey
 
 
@@ -33,14 +34,21 @@ def update(
 def ddpg_bc_update(
     key: PRNGKey,
     actor: Model,
-    critic: Model,
+    target_critic: Model,
     batch: Batch,
-    alpha: float
+    alpha: float,
+    num_min_qs: int,
+    num_qs: int
 ) -> Tuple[Model, InfoDict]:
     # Compute the critic value for the current policy action
     key, policy_actions = policy.sample_actions(key, actor.apply_fn, actor.params, batch.observations)
-    qs = critic(batch.observations, policy_actions)
-    q = qs.min(axis=0)
+ 
+    target_params = subsample_ensemble(key, target_critic.params, num_min_qs, num_qs)
+    qs = target_critic.apply({"params": target_params}, batch.observations, policy_actions)
+    q = jnp.min(qs, axis=0)
+
+    # qs = critic(batch.observations, policy_actions)
+    # q = qs.min(axis=0)
 
     def actor_loss_fn(actor_params: FrozenDict) -> Tuple[jnp.ndarray, InfoDict]:
         dist = actor.apply({"params": actor_params}, batch.observations, training=True, rngs={"dropout": key})

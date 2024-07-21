@@ -62,7 +62,7 @@ def _update_jit(
         if utd_ratio == 1 or (utd_ratio > 1 and (i + 1) % 5 == 0):
             key, rng = jax.random.split(rng)
             if policy_ddpg_bc:
-                new_actor, actor_info = ddpg_bc_update(key, actor, new_target_critic, mini_batch, temperature)
+                new_actor, actor_info = ddpg_bc_update(key, actor, new_target_critic, mini_batch, temperature, num_min_qs, num_qs)
             else:
                 new_actor, actor_info = awr_update_actor(key, actor, new_target_critic, new_value, mini_batch, temperature)
         else:
@@ -176,7 +176,7 @@ class Learner(object):
     def logprob(self, observations: np.ndarray, actions: np.ndarray) -> jnp.ndarray:
         """Compute the log probability of the actions under the current policy."""
         return policy.logprob(self.actor.apply_fn, self.actor.params, observations, actions)
-
+    
     def q_value(self, observations: np.ndarray, actions: np.ndarray) -> jnp.ndarray:
         """Compute the Q value of the actions under the current policy."""
         # return self.critic.apply_fn(self.critic.params, observations, actions)

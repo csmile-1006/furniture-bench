@@ -13,6 +13,7 @@ import tqdm
 from absl import app, flags
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
+from matplotlib.ticker import ScalarFormatter
 
 import jax.numpy as jnp
 from einops import rearrange
@@ -76,7 +77,7 @@ flags.DEFINE_string("normalization", "", "")
 flags.DEFINE_string("iter_n", "-1", "Reward relabeling iteration")
 flags.DEFINE_boolean("use_learned_reward", False, "Use learned reward")
 flags.DEFINE_string("reward_suffix", "-1", "Reward suffix")
-flags.DEFINE_string("reward_type", "REDS", "Reward type")
+# flags.DEFINE_string("reward_type", "REDS", "Reward type")
 
 
 # REDS
@@ -240,7 +241,7 @@ def make_env_and_dataset(
         #     iter_n = f"iter_{FLAGS.iter_n}"
         # else:
         #     iter_n = FLAGS.iter_n
-        if use_learned_reward:
+        if FLAGS.use_learned_reward:
             reward_name = f"{reward_suffix}"
         else:
             iter_n = FLAGS.iter_n
@@ -562,7 +563,7 @@ def main(_):
 
             observation = next_observation
             
-        env.robot.reset('low')
+        # env.robot.reset('low')
         
         if device_interface and collect_enum == CollectEnum.FAIL:
             # Skip the data saving, agent update, and evaluation.
@@ -652,17 +653,6 @@ def main(_):
             if FLAGS.data_collection:
                 continue
 
-        if i % FLAGS.log_interval == 0:
-            train_log_videos = np.asarray(
-                [obs["color_image2"].transpose(2, 0, 1) for obs in observations], dtype=np.uint8
-            )
-            name = "train_video"
-            fps = 20
-            if FLAGS.wandb:
-                log_dict = {name: wandb.Video(train_log_videos, fps=fps, format="mp4")}
-                # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
-                wandb.log(log_dict, step=i)
-
         # Remove RGB from the observations.
         observations = [
             {k: v for k, v in obs.items() if k != "color_image1" and k != "color_image2"} for obs in observations
@@ -705,19 +695,23 @@ def main(_):
                     summary_writer.add_histogram(f"training/{k}", v, i)
 
         # Compute the average logprob for the offline and online data.
-        offline_logprob, offline_q_value = compute_logprob_q_value(agent, offline_traj_for_log)
-        online_logprob, online_q_value = compute_logprob_q_value(agent, online_traj_for_log)
+        offline_logprob, offline_q_value, offline_std = compute_logprob_q_value_std(agent, offline_traj_for_log)
+        online_logprob, online_q_value, online_std  = compute_logprob_q_value_std(agent, online_traj_for_log)
 
         # Flatten and compute the average.
         avg_offline_logprob = np.mean(np.concatenate(offline_logprob))
         avg_online_logprob = np.mean(np.concatenate(online_logprob))
         avg_offline_q_value = np.mean(np.concatenate(offline_q_value))
         avg_online_q_value = np.mean(np.concatenate(online_q_value))
+        avg_offline_std = np.mean(np.concatenate(offline_std))
+        avg_online_std = np.mean(np.concatenate(online_std))
 
         summary_writer.add_scalar("offline/average_logprob", avg_offline_logprob, i)
         summary_writer.add_scalar("online/average_logprob", avg_online_logprob, i)
         summary_writer.add_scalar("offline/average_q_value", avg_offline_q_value, i)
         summary_writer.add_scalar("online/average_q_value", avg_online_q_value, i)
+        summary_writer.add_scalar("offline/average_std", avg_offline_std, i)
+        summary_writer.add_scalar("online/average_std", avg_online_std, i)
  
         summary_writer.add_scalar("online/average_reward", np.mean(log_online_avg_reward), i)
         summary_writer.add_scalar("online/average_return", np.mean(log_online_avg_return), i)
@@ -763,9 +757,10 @@ def main(_):
                     FLAGS.eval_episodes,
                     log_video=log_video,
                 )
-            eval_logprob, eval_q_value = compute_logprob_q_value(agent, eval_traj_for_logging)
+            eval_logprob, eval_q_value, eval_std = compute_logprob_q_value_std(agent, eval_traj_for_logging)
             summary_writer.add_scalar("evaluation/average_logprob", np.mean(np.concatenate(eval_logprob)), i)
             summary_writer.add_scalar("evaluation/average_q_value", np.mean(np.concatenate(eval_q_value)), i)
+            summary_writer.add_scalar("evaluation/average_std", np.mean(np.concatenate(eval_std)), i)
 
             for k, v in eval_stats.items():
                 summary_writer.add_scalar(f"evaluation/average_{k}s", v, i)
@@ -784,10 +779,25 @@ def main(_):
 
                 name = "rollout_video"
                 fps = 20
-                vids = rearrange(padded_vids, "b t c h w -> (b t) c h w")
+                vids = rearrange(padded_vids, "b t c h w -> t b c h w")
+                # Get dimensions
+                num_frames, batch_size, channels, height, width = vids.shape
+                # Create a video with graphs for each batch
+                new_vids = []
+                for b in range(batch_size):
+                    batch_vids = []
+                    for t in range(num_frames):
+                        video_frame = vids[t, b].transpose(1, 2, 0)  # Select the current batch and rearrange for (H, W, C)
+                        logprob_frame, q_value_frame, std_frame = create_individual_graph(eval_logprob[b], eval_q_value[b], eval_std[b], t, height, width)
+                        combined_frame = np.concatenate((video_frame, logprob_frame, q_value_frame, std_frame), axis=1)
+                        batch_vids.append(combined_frame)
+                    batch_vids = np.stack(batch_vids, axis=0)
+                    new_vids.append(batch_vids)
+                new_vids = np.concatenate(new_vids, axis=0)
+                new_vids = rearrange(new_vids, "t h w c -> t c h w")  # Rearrange for wandb (T, C, H, W)
+
                 if FLAGS.wandb:
-                    log_dict = {name: wandb.Video(vids, fps=fps, format="mp4")}
-                    # log_dict = {name: [wandb.Video(vid, fps=fps, format="mp4") for vid in vids]}
+                    log_dict = {name: wandb.Video(new_vids, fps=fps, format="mp4")}
                     wandb.log(log_dict, step=i)
 
             # eval_returns.append((i, eval_stats['return']))
@@ -811,9 +821,10 @@ def main(_):
         wandb.finish()
 
 
-def compute_logprob_q_value(agent, traj_for_log):
+def compute_logprob_q_value_std(agent, traj_for_log):
     log_probs = []
     q_values = []
+    stds = []
 
     # Randomly sample 50 from traj_for_log for speed.
     sample_n = min(50, len(traj_for_log))
@@ -843,7 +854,59 @@ def compute_logprob_q_value(agent, traj_for_log):
         q_value = agent.q_value(obs, act)
         q_values.append(q_value)
 
-    return log_probs, q_values
+        std = agent.dist_actions(obs).stddev()
+        stds.append(std.mean(axis=1)) # along with action space.
+
+    return log_probs, q_values, stds
+
+
+def create_individual_graph(logprob, q_value, std, t, height, width):
+    # Create log probability plot
+    fig_logprob, ax_logprob = plt.subplots(figsize=(width / 100, height / 100), dpi=100)
+    ax_logprob.plot(logprob[:t+1])
+    ax_logprob.set_title('Log Probability')
+    ax_logprob.set_xlabel('Time Step')
+    ax_logprob.set_ylabel('Log Prob')
+    ax_logprob.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    ax_logprob.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+    fig_logprob.subplots_adjust(left=0.3, right=0.95, top=0.9, bottom=0.1)  # Adjust margins
+
+    fig_logprob.canvas.draw()
+    img_logprob = np.frombuffer(fig_logprob.canvas.tostring_rgb(), dtype=np.uint8)
+    img_logprob = img_logprob.reshape(fig_logprob.canvas.get_width_height()[::-1] + (3,))
+    plt.close(fig_logprob)
+
+    # Create Q value plot
+    fig_q_value, ax_q_value = plt.subplots(figsize=(width / 100, height / 100), dpi=100)
+    ax_q_value.plot(q_value[:t+1])
+    ax_q_value.set_title('Q Value')
+    ax_q_value.set_xlabel('Time Step')
+    ax_q_value.set_ylabel('Q Value')
+    ax_q_value.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    ax_q_value.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+    fig_q_value.subplots_adjust(left=0.3, right=0.95, top=0.9, bottom=0.1)  # Adjust margins
+
+    fig_q_value.canvas.draw()
+    img_q_value = np.frombuffer(fig_q_value.canvas.tostring_rgb(), dtype=np.uint8)
+    img_q_value = img_q_value.reshape(fig_q_value.canvas.get_width_height()[::-1] + (3,))
+    plt.close(fig_q_value)
+
+    # Create std plot
+    fig_std, ax_std = plt.subplots(figsize=(width / 100, height / 100), dpi=100)
+    ax_std.plot(std[:t+1])
+    ax_std.set_title('Standard Deviation')
+    ax_std.set_xlabel('Time Step')
+    ax_std.set_ylabel('Std')
+    ax_std.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    ax_std.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+    fig_std.subplots_adjust(left=0.3, right=0.95, top=0.9, bottom=0.1)  # Adjust margins
+
+    fig_std.canvas.draw()
+    img_std = np.frombuffer(fig_std.canvas.tostring_rgb(), dtype=np.uint8)
+    img_std = img_std.reshape(fig_std.canvas.get_width_height()[::-1] + (3,))
+    plt.close(fig_std)
+
+    return img_logprob, img_q_value, img_std
 
 
 if __name__ == "__main__":
