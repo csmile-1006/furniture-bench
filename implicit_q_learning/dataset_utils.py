@@ -301,7 +301,11 @@ class FurnitureDataset(Dataset):
         viper_reward: bool = False,
         drs_reward: bool = False,
         iter_n: str = "-1",
+        abs_action: bool = False,
+        act_rot_repr: str = "quat",
     ):
+        self.abs_action = abs_action
+        self.act_rot_repr = act_rot_repr
         if isinstance(data_path, list):
             datasets = []
             for path in data_path:
@@ -374,6 +378,9 @@ class FurnitureDataset(Dataset):
         else:
             rewards = dataset["rewards"]
 
+        action_key = self.get_action_key()
+        dataset['actions'] = dataset[action_key]
+
         super().__init__(
             dataset["observations"],
             actions=dataset["actions"],
@@ -384,6 +391,24 @@ class FurnitureDataset(Dataset):
             size=len(dataset["observations"]),
             use_encoder=use_encoder,
         )
+    
+    def get_action_key(self):
+        # Handle the absolute and 6D rotational representation.
+        if self.abs_action:
+            if self.act_rot_repr == "rot_6d":
+                # dataset["actions"] = dataset["absolute_actions_6d"]
+                return "absolute_actions_6d"
+            assert self.act_rot_repr == "quat"
+            # dataset["actions"] = dataset["absolute_actions"]
+            return "absolute_actions"
+        else:
+            if self.act_rot_repr == "rot_6d":
+                # dataset["actions"] = dataset["actions_6d"]
+                return "actions_6d"
+            # else:
+            assert self.act_rot_repr == "quat"
+            # dataset["actions"] = dataset["actions"]
+            return "actions"
 
 
 class ReplayBuffer(Dataset):

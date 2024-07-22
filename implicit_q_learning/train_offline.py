@@ -59,6 +59,9 @@ flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
 flags.DEFINE_string("opt_decay_schedule", "cosine", "")
 flags.DEFINE_boolean("policy_ddpg_bc", None, "Use DDPG-BC for policy extraction")
 
+# Action space for the environment.
+flags.DEFINE_boolean("abs_action", False, "Use absolute action space")
+flags.DEFINE_enum("act_rot_repr", "quat", ["quat", "rot_6d"], "Type of action rotation representation")
 
 def normalize(dataset):
     trajs = split_into_trajectories(
@@ -140,6 +143,8 @@ def make_env_and_dataset(
             encoder_type="r3m",
             phase_reward=FLAGS.phase_reward,
             fixed_init=FLAGS.fixed_init,
+            abs_action=FLAGS.abs_action,
+            act_rot_repr=FLAGS.act_rot_repr,
         )
     else:
         env = gym.make(env_name)
@@ -165,6 +170,8 @@ def make_env_and_dataset(
             viper_reward=viper_reward,
             drs_reward=drs_reward,
             iter_n=iter_n,
+            abs_action=FLAGS.abs_action,
+            act_rot_repr=FLAGS.act_rot_repr,
         )
     else:
         dataset = D4RLDataset(env)
