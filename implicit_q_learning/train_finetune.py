@@ -112,6 +112,9 @@ flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
 flags.DEFINE_boolean("save_gif", None, "Save reward and observation in gif")
 flags.DEFINE_boolean("policy_ddpg_bc", None, "Use DDPG-BC for policy extraction")
 
+# Action space for the environment.
+flags.DEFINE_boolean("abs_action", False, "Use absolute action space")
+flags.DEFINE_enum("act_rot_repr", "quat", ["quat", "rot_6d"], "Type of action rotation representation")
 
 def normalize(dataset):
     trajs = split_into_trajectories(
@@ -226,7 +229,9 @@ def make_env_and_dataset(
             phase_reward=FLAGS.phase_reward,
             fixed_init=FLAGS.fixed_init,
             from_skill=0,
-            gpu=FLAGS.device_id
+            gpu=FLAGS.device_id,
+            abs_action=FLAGS.abs_action,
+            act_rot_repr=FLAGS.act_rot_repr,
         )
     else:
         env = gym.make(env_name)
@@ -256,6 +261,8 @@ def make_env_and_dataset(
             viper_reward=viper_reward,
             drs_reward=drs_reward,
             iter_n=iter_n,
+            abs_action=FLAGS.abs_action,
+            act_rot_repr=FLAGS.act_rot_repr,
         )
     else:
         dataset = D4RLDataset(env)
@@ -298,9 +305,10 @@ def main(_):
     with open(FLAGS.data_path[0], 'rb') as f:
         offline_data = pickle.load(f)
         terminal_idxs =  np.where(offline_data['terminals'] == 1)[0]
-        offline_traj_for_log.append((offline_data['observations'][:terminal_idxs[0]], offline_data['actions'][:terminal_idxs[0]]))
+        action_key = dataset.get_action_key()
+        offline_traj_for_log.append((offline_data['observations'][:terminal_idxs[0]], offline_data[action_key][:terminal_idxs[0]]))
         for i in range(len(terminal_idxs) - 1):
-            offline_traj_for_log.append((offline_data['observations'][terminal_idxs[i]:terminal_idxs[i+1]], offline_data['actions'][terminal_idxs[i]:terminal_idxs[i+1]]))
+            offline_traj_for_log.append((offline_data['observations'][terminal_idxs[i]:terminal_idxs[i+1]], offline_data[action_key][terminal_idxs[i]:terminal_idxs[i+1]]))
 
     if FLAGS.normalization == "min_max":
         min_max_normalize(dataset)
