@@ -58,6 +58,7 @@ flags.DEFINE_integer("device_id", -1, "Device ID for using multiple GPU")
 
 flags.DEFINE_string("opt_decay_schedule", "cosine", "")
 flags.DEFINE_boolean("policy_ddpg_bc", None, "Use DDPG-BC for policy extraction")
+flags.DEFINE_boolean("det_policy", None, "Deterministic actor. The exploration epsilon is directly handled by training code.")
 
 
 def normalize(dataset):
@@ -208,10 +209,13 @@ def main(_):
 
     kwargs = dict(FLAGS.config)
     if FLAGS.wandb:
+        name = FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.run_name)
+        if FLAGS.det_policy:
+            name += f"-det"
         wandb.init(
             project=FLAGS.wandb_project,
             entity=FLAGS.wandb_entity,
-            name=FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.run_name),
+            name=name,
             config=kwargs,
             sync_tensorboard=True,
         )
@@ -228,6 +232,7 @@ def main(_):
         use_layer_norm=FLAGS.use_layer_norm,
         opt_decay_schedule=FLAGS.opt_decay_schedule,
         policy_ddpg_bc=FLAGS.policy_ddpg_bc,
+        det_policy=FLAGS.det_policy
     )
     print(agent)
 
