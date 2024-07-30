@@ -115,6 +115,7 @@ flags.DEFINE_boolean("policy_ddpg_bc", None, "Use DDPG-BC for policy extraction"
 # Action space for the environment.
 flags.DEFINE_boolean("abs_action", False, "Use absolute action space")
 flags.DEFINE_enum("act_rot_repr", "quat", ["quat", "rot_6d"], "Type of action rotation representation")
+flags.DEFINE_boolean("state_dependent_std", False, "State dependent std for policy")
 
 def normalize(dataset):
     trajs = split_into_trajectories(
@@ -366,7 +367,8 @@ def main(_):
         opt_decay_schedule=None,
         use_layer_norm=FLAGS.use_layer_norm,
         policy_ddpg_bc=FLAGS.policy_ddpg_bc,
-        det_policy=FLAGS.det_policy
+        det_policy=FLAGS.det_policy,
+        state_dependent_std=FLAGS.state_dependent_std,
     )
 
     if FLAGS.use_learned_reward:
