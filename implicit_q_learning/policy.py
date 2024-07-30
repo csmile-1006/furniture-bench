@@ -15,8 +15,10 @@ from common import Params
 from common import PRNGKey
 from common import default_init
 
-LOG_STD_MIN = -5.0
-LOG_STD_MAX = 2.0
+# LOG_STD_MIN = -5.0
+# LOG_STD_MAX = 2.0
+LOG_STD_MIN = np.log(0.001) # 1 mm
+LOG_STD_MAX = np.log(0.01) # 1 cm
 
 
 class NormalTanhPolicy(nn.Module):
@@ -71,11 +73,14 @@ class NormalTanhPolicy(nn.Module):
                                                    scale_diag=jnp.exp(log_stds) * temperature)
         else:
             # Convert quaternion to euler angle.
+            # if not self.tanh_squash_distribution:
+            #     means = nn.tanh(means)
+            # std = jnp.ones((self.action_dim,)) * 0.0001 # Small value to prevent NaN.
+            # base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=std)
             if not self.tanh_squash_distribution:
-                means = nn.tanh(means)
-            std = jnp.ones((self.action_dim,)) * 0.0001 # Small value to prevent NaN.
-
-            base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=std)
+                means = jnp.tanh(means)
+            # base_dist = DeterministicDistribution(loc=means)
+            base_dist = tfd.Deterministic(loc=means)
             
         if self.tanh_squash_distribution:
             return tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh())
