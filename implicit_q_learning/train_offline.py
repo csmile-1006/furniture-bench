@@ -63,6 +63,7 @@ flags.DEFINE_boolean("det_policy", None, "Deterministic actor. The exploration e
 # Action space for the environment.
 flags.DEFINE_boolean("abs_action", False, "Use absolute action space")
 flags.DEFINE_enum("act_rot_repr", "quat", ["quat", "rot_6d"], "Type of action rotation representation")
+flags.DEFINE_boolean("state_dependent_std", False, "State dependent std for policy")
 
 def normalize(dataset):
     trajs = split_into_trajectories(
@@ -219,6 +220,8 @@ def main(_):
         name = FLAGS.env_name + "-" + str(FLAGS.seed) + "-" + str(FLAGS.run_name)
         if FLAGS.det_policy:
             name += f"-det"
+        if FLAGS.state_dependent_std:
+            name += f"-sds"
         wandb.init(
             project=FLAGS.wandb_project,
             entity=FLAGS.wandb_entity,
@@ -239,7 +242,8 @@ def main(_):
         use_layer_norm=FLAGS.use_layer_norm,
         opt_decay_schedule=FLAGS.opt_decay_schedule,
         policy_ddpg_bc=FLAGS.policy_ddpg_bc,
-        det_policy=FLAGS.det_policy
+        det_policy=FLAGS.det_policy,
+        state_dependent_std=FLAGS.state_dependent_std,
     )
     print(agent)
 
