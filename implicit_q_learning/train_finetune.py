@@ -290,6 +290,16 @@ def main(_):
         f"{FLAGS.run_name}-{ckpt_step}-finetune-tmp-{FLAGS.temperature}-bs{FLAGS.batch_size}-std-min0.001-max0.01.{FLAGS.seed}",
     )
     os.makedirs(FLAGS.save_dir, exist_ok=True)
+    
+    # Set seed for torch and numpy
+    import torch
+
+    torch.manual_seed(FLAGS.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(FLAGS.seed)
+    torch.backends.cudnn.deterministic = True
+    np.random.seed(FLAGS.seed)
+    random.seed(FLAGS.seed)
 
     env, dataset = make_env_and_dataset(
         FLAGS.env_name,
