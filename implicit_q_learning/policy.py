@@ -15,10 +15,10 @@ from common import Params
 from common import PRNGKey
 from common import default_init
 
-# LOG_STD_MIN = -5.0
-# LOG_STD_MAX = 2.0
-LOG_STD_MIN = np.log(0.001) # 1 mm
-LOG_STD_MAX = np.log(0.01) # 1 cm
+LOG_STD_MIN = -5.0
+LOG_STD_MAX = 2.0
+# LOG_STD_MIN = np.log(0.001) # 1 mm
+# LOG_STD_MAX = np.log(0.01) # 1 cm
 
 
 class NormalTanhPolicy(nn.Module):
